@@ -70,6 +70,42 @@ def make_chunk(text, intent, source, entity=None):
 
 
 # %%
+import re
+
+def extract_service_details_from_text(rules_text, source):
+    chunks = []
+
+    lines = [l.strip() for l in rules_text.splitlines() if l.strip()]
+
+    for i, line in enumerate(lines):
+        if "service charge" in line.lower():
+            value = None
+
+            # Try same line first
+            match = re.search(r"\b(\d+)\b", line)
+            if match:
+                value = match.group(1)
+
+            # Otherwise check next line
+            elif i + 1 < len(lines):
+                next_line = lines[i + 1]
+                match = re.search(r"\b(\d+)\b", next_line)
+                if match:
+                    value = match.group(1)
+
+            if value:
+                chunks.append(
+                    make_chunk(
+                        f"Service Charge (INR): {value}",
+                        intent="service_fee",
+                        source=source
+                    )
+                )
+
+    return chunks
+
+
+# %%
 #Semantic chunking for PDF 1
 
 rule_chunks = []
@@ -82,22 +118,80 @@ rule_chunks.append(
     make_chunk(service_info, "service_info", pdf_files["rules"])
 )
 
+# --- Service Details (from text, not table) ---
+service_detail_chunks = extract_service_details_from_text(
+    rules_text,
+    pdf_files["rules"]
+)
+rule_chunks.extend(service_detail_chunks)
+
 # --- Mandatory Documents ---
 mandatory_section = rules_text.split("Mandatory Documents")[1].split("Category-wise")[0]
 rule_chunks.append(
     make_chunk(mandatory_section, "rules_mandatory", pdf_files["rules"])
 )
 
-# --- Category-wise Sections ---
-citizen_section = rules_text.split("General Citizens")[1].split("Government employees")[0]
-rule_chunks.append(
-    make_chunk(citizen_section, "rules_category_citizen", pdf_files["rules"])
+
+# %%
+# --- Government Employees Documents (ROBUST FIX) ---
+import re
+
+def extract_government_documents(rules_text, source):
+    pattern = re.compile(
+        r"government\s+employees(.*?)(?:\n\n|\Z)",
+        re.IGNORECASE | re.DOTALL
+    )
+
+    match = pattern.search(rules_text)
+    if not match:
+        return []
+
+    text = match.group(1).strip()
+
+    return [
+        make_chunk(
+            text,
+            intent="rules_category_govt",
+            source=source
+        )
+    ]
+
+rule_chunks.extend(
+    extract_government_documents(rules_text, pdf_files["rules"])
 )
 
-govt_section = rules_text.split("Government employees")[1]
-rule_chunks.append(
-    make_chunk(govt_section, "rules_category_govt", pdf_files["rules"])
-)
+
+# %%
+def extract_service_details_from_text(rules_text, source):
+    """
+    Extracts service metadata like Service Charge, Service Name, etc.
+    from flattened PDF text.
+    """
+    service_keys = [
+        "Service ID",
+        "Department",
+        "Service Name",
+        "Access Type",
+        "Online Availability",
+        "Service Charge"
+    ]
+
+    chunks = []
+
+    for key in service_keys:
+        for line in rules_text.splitlines():
+            if key.lower() in line.lower():
+                cleaned = " ".join(line.split())
+                chunks.append(
+                    make_chunk(
+                        cleaned,
+                        intent="service_fee" if "charge" in key.lower() else "service_metadata",
+                        source=source
+                    )
+                )
+                break  # stop after first match
+
+    return chunks
 
 
 # %%
@@ -315,22 +409,20 @@ def embed_query(text: str):
 
 
 # %%
-# %%
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-def search_mandatory_documents(question: str, limit=5):
+def search_documents(question: str, intent: str, limit=5):
     query_vector = embed_query(question)
 
     results = qdrant_client.query_points(
         collection_name=COLLECTION_NAME,
-        prefetch=[],
         query=query_vector,
         limit=limit,
         query_filter=Filter(
             must=[
                 FieldCondition(
                     key="intent",
-                    match=MatchValue(value="rules_mandatory")
+                    match=MatchValue(value=intent)
                 )
             ]
         )
@@ -341,9 +433,11 @@ def search_mandatory_documents(question: str, limit=5):
 
 # %%
 # %%
-results = search_mandatory_documents(
-    "What are the documents to be certified by Government employees ?"
+results = search_documents(
+    "What are the documents to be certified by Government employees ?",
+    intent="rules_category_govt"
 )
+
 
 for hit in results:
     print("Score:", hit.score)
@@ -379,25 +473,35 @@ def generate_answer(question: str, context: str):
     response = client_embed_reasoning.chat.completions.create(
         model="meta/llama-3.1-8b-instruct",
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a government service assistant. "
-                    "Answer ONLY using the provided context. "
-                    "If the answer is not present in the context, say "
-                    "'The information is not available in the provided documents.'"
-                )
-            },
-            {
-                "role": "user",
-                "content": f"""
+    {
+    "role": "system",
+    "content": (
+        "You are a government service assistant. "
+        "You MUST answer strictly using the provided context. "
+        "DO NOT infer, estimate, or modify any numbers. "
+        "If a numeric value appears in the context, reproduce it exactly without modification. "
+        "If the value refers to a service charge, fee, or amount, present it explicitly in Indian Rupees (₹). "
+        "If the context contains a list of documents, summarise the list clearly in the answer. "
+        "If the answer cannot be answered using the context, say "
+        "'The information is not available in the provided documents.'"
+    )
+    },
+    {
+        "role": "user",
+        "content": f"""
+Use ONLY the information in the Context section.
+
 Context:
 {context}
 
 Question:
 {question}
+
+Answer format:
+- Give a single, direct answer.
+- Do not add extra explanation.
 """
-            }
+    }
         ],
         temperature=0.2,
         max_tokens=512
@@ -407,22 +511,120 @@ Question:
 
 
 # %%
+def detect_intents(question: str):
+    q = question.lower()
+
+    if any(k in q for k in ["fee", "charge", "amount", "cost"]):
+        return ["service_fee"]
+
+    if "why" in q or "purpose" in q:
+        return ["service_explanation", "reasoning_global", "reasoning_document"]
+
+    if "government" in q or "employee" in q:
+        return ["rules_category_govt"]
+
+    return ["rules_mandatory"]
+
+
+# %%
+def retrieve_context(question: str, limit=5):
+    intents = detect_intents(question)
+    all_results = []
+
+    for intent in intents:
+        # 🔑 Rule-based intents → direct filter (no embeddings)
+        if intent in ["rules_category_govt", "rules_mandatory"]:
+            results = qdrant_client.query_points(
+                collection_name=COLLECTION_NAME,
+                limit=limit,
+                query_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="intent",
+                            match=MatchValue(value=intent)
+                        )
+                    ]
+                )
+            ).points
+        else:
+            # Semantic intents → vector search
+            results = search_documents(question, intent, limit)
+
+        all_results.extend(results)
+
+    # Deduplicate by point ID
+    seen = set()
+    unique = []
+    for r in all_results:
+        if r.id not in seen:
+            unique.append(r)
+            seen.add(r.id)
+
+    return unique
+
+
+# %%
+def detect_entity(question: str):
+    docs = [
+        "pension",
+        "passport",
+        "pan",
+        "driving licence",
+        "bank",
+        "smart card"
+    ]
+    for d in docs:
+        if d in question.lower():
+            return d.title()
+    return None
+
+
+# %%
 def answer_question(user_query: str):
-    results = search_mandatory_documents(user_query)
+    intents = detect_intents(user_query)
+    results = retrieve_context(user_query)
+
+    # 🔑 RULE-BASED ANSWERS → NO LLM
+    if "rules_category_govt" in intents or "rules_mandatory" in intents:
+        if not results:
+            return "The information is not available in the provided documents."
+
+        # Combine rule chunks directly
+        lines = []
+        for r in results:
+            lines.append(r.payload["text"])
+
+        return "\n".join(lines)
+
+    # 🔑 EVERYTHING ELSE → LLM
     context = build_context(results)
-    answer = generate_answer(user_query, context)
-    return answer
+    return generate_answer(user_query, context)
 
 
 # %%
 response = answer_question(
-    "What are the certificates i have to submit to apply for residence certificate if i am a government employee?"
+    "what documents i have to submit if i am a government employee?"
 )
 
 print(response)
 
 
 # %%
+results = qdrant_client.query_points(
+    collection_name=COLLECTION_NAME,
+    limit=5,
+    query_filter=Filter(
+        must=[
+            FieldCondition(
+                key="intent",
+                match=MatchValue(value="rules_category_govt")
+            )
+        ]
+    )
+)
+
+for p in results.points:
+    print(p.payload["text"][:300])
 
 
 # %%
