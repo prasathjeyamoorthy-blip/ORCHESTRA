@@ -162,6 +162,7 @@ load_dotenv()  # 👈 this reads .env into environment variables
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+NVIDIA_LLM_API_KEY = os.getenv("NVIDIA_LLM_API_KEY")   
 
 if not NVIDIA_API_KEY:
     raise ValueError("NVIDIA_API_KEY not found")
@@ -233,7 +234,192 @@ qdrant_client.recreate_collection(
 
 
 # %%
-qdrant_client.get_collections()
+# %%
+from qdrant_client.models import PayloadSchemaType
+
+qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="intent",
+    field_schema=PayloadSchemaType.KEYWORD
+)
+
+print("Index created for 'intent'")
+
+
+# %%
+# %%
+qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="entity",
+    field_schema=PayloadSchemaType.KEYWORD
+)
+
+print("Index created for 'entity'")
+
+
+# %%
+# %%
+qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="service",
+    field_schema=PayloadSchemaType.KEYWORD
+)
+
+print("Index created for 'service'")
+
+
+# %%
+# %%
+from qdrant_client.models import PointStruct
+import uuid
+
+points = []
+
+for chunk, embedding in zip(all_chunks, chunk_embeddings):
+    points.append(
+        PointStruct(
+            id=str(uuid.uuid4()),
+            vector=embedding,
+            payload={
+                "text": chunk.page_content,
+                **chunk.metadata
+            }
+        )
+    )
+
+qdrant_client.upsert(
+    collection_name=COLLECTION_NAME,
+    points=points
+)
+
+print(f"Inserted {len(points)} chunks into Qdrant")
+
+
+# %%
+# %%
+info = qdrant_client.get_collection(COLLECTION_NAME)
+print(info)
+
+
+# %%
+# %%
+def embed_query(text: str):
+    response = client_embed.embeddings.create(
+        model="nvidia/nv-embedqa-e5-v5",
+        input=text,
+        extra_body={
+            "input_type": "query"   # 🔑 REQUIRED for queries
+        }
+    )
+    return response.data[0].embedding
+
+
+# %%
+# %%
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+def search_mandatory_documents(question: str, limit=5):
+    query_vector = embed_query(question)
+
+    results = qdrant_client.query_points(
+        collection_name=COLLECTION_NAME,
+        prefetch=[],
+        query=query_vector,
+        limit=limit,
+        query_filter=Filter(
+            must=[
+                FieldCondition(
+                    key="intent",
+                    match=MatchValue(value="rules_mandatory")
+                )
+            ]
+        )
+    )
+
+    return results.points
+
+
+# %%
+# %%
+results = search_mandatory_documents(
+    "What are the documents to be certified by Government employees ?"
+)
+
+for hit in results:
+    print("Score:", hit.score)
+    print(hit.payload["text"][:300])
+    print("-" * 50)
+
+
+# %%
+def build_context(results):
+    """
+    results: list of Qdrant points
+    returns: single context string for LLM
+    """
+    context_blocks = []
+    for hit in results:
+        context_blocks.append(hit.payload["text"])
+
+    return "\n\n".join(context_blocks)
+
+
+# %%
+from openai import OpenAI
+
+
+client_embed_reasoning = OpenAI(
+    api_key=NVIDIA_LLM_API_KEY,
+    base_url="https://integrate.api.nvidia.com/v1"
+)
+
+
+# %%
+def generate_answer(question: str, context: str):
+    response = client_embed_reasoning.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a government service assistant. "
+                    "Answer ONLY using the provided context. "
+                    "If the answer is not present in the context, say "
+                    "'The information is not available in the provided documents.'"
+                )
+            },
+            {
+                "role": "user",
+                "content": f"""
+Context:
+{context}
+
+Question:
+{question}
+"""
+            }
+        ],
+        temperature=0.2,
+        max_tokens=512
+    )
+
+    return response.choices[0].message.content
+
+
+# %%
+def answer_question(user_query: str):
+    results = search_mandatory_documents(user_query)
+    context = build_context(results)
+    answer = generate_answer(user_query, context)
+    return answer
+
+
+# %%
+response = answer_question(
+    "What are the certificates i have to submit to apply for residence certificate if i am a government employee?"
+)
+
+print(response)
 
 
 # %%
