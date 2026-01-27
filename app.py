@@ -12,6 +12,16 @@ from openai import OpenAI
 
 
 # %%
+from typing import TypedDict, Optional, List
+
+class RAGState(TypedDict):
+    question: str
+    context: Optional[str]
+    answer: Optional[str]
+    route: Optional[str]  # "rag" or "direct"
+
+
+# %%
 # Load .env file into environment
 load_dotenv()
 
@@ -223,6 +233,82 @@ print(client_llm.models.list())
 
 
 # %%
+def route_question(state: RAGState) -> RAGState:
+    question = state["question"]
+
+    router_prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You are a classifier.\n"
+                "Decide whether the user's question requires looking up "
+                "government residence certificate documents.\n\n"
+                "If the question is about documents, eligibility, fees, "
+                "process, categories, or rules → respond with RAG.\n"
+                "If the question is general, conversational, or unrelated "
+                "→ respond with DIRECT.\n\n"
+                "Respond with ONLY one word: RAG or DIRECT."
+            )
+        },
+        {
+            "role": "user",
+            "content": question
+        }
+    ]
+
+    response = client_llm.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",
+        messages=router_prompt,
+        temperature=0
+    )
+
+    decision = response.choices[0].message.content.strip().upper()
+
+    state["route"] = "rag" if decision == "RAG" else "direct"
+    return state
+
+
+# %%
+def rag_node(state: RAGState) -> RAGState:
+    question = state["question"]
+    contexts = retrieve_chunks(question, top_k=6)
+    context_text = "\n\n".join(contexts)
+
+    answer = rag_answer(question, context_text)
+
+    state["context"] = context_text
+    state["answer"] = answer
+    return state
+
+
+# %%
+def direct_llm_node(state: RAGState) -> RAGState:
+    question = state["question"]
+
+    response = client_llm.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a government service assistant. "
+                    "You provide general guidance related to public services "
+                    "and official processes. Answer clearly and concisely."
+                )
+            },
+            {
+                "role": "user",
+                "content": question
+            }
+        ],
+        temperature=0.4
+    )
+
+    state["answer"] = response.choices[0].message.content
+    return state
+
+
+# %%
 def rag_answer(question: str, context: str):
     response = client_llm.chat.completions.create(
         model="meta/llama-3.1-8b-instruct",
@@ -264,14 +350,50 @@ Answer format:
 
 
 # %%
-def answer_question(question: str):
-    contexts = retrieve_chunks(question, top_k=6)
-    context_text = "\n\n".join(contexts)
-    return rag_answer(question, context_text)
+from langgraph.graph import StateGraph, END
+
+graph = StateGraph(RAGState)
+
+# Nodes
+graph.add_node("router", route_question)
+graph.add_node("rag", rag_node)
+graph.add_node("direct", direct_llm_node)
+
+# Entry point
+graph.set_entry_point("router")
+
+# Conditional routing
+graph.add_conditional_edges(
+    "router",
+    lambda state: state["route"],
+    {
+        "rag": "rag",
+        "direct": "direct"
+    }
+)
+
+# End nodes
+graph.add_edge("rag", END)
+graph.add_edge("direct", END)
+
+agentic_rag = graph.compile()
 
 
 # %%
-print(answer_question("what are all the documents i have to submit if i am a government employee"))
+def answer_question(question: str):
+    result = agentic_rag.invoke(
+        {
+            "question": question,
+            "context": None,
+            "answer": None,
+            "route": None
+        }
+    )
+    return result["answer"]
+
+
+# %%
+print(answer_question("What are the documents apart from the mandatory documents are  required for a residence certificate?"))
 
 
 # %%
