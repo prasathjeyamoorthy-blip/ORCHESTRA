@@ -4,3 +4,4 @@ pymupdf
 pypdf
 qdrant_client
 openai
+langgraph
