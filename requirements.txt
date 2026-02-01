@@ -5,3 +5,7 @@ pypdf
 qdrant_client
 openai
 langgraph
+fastapi 
+uvicorn 
+streamlit 
+requests
