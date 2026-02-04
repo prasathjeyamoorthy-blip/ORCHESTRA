@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Dict
 
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
+
 # Import agent + deterministic nodes
 from agent import (
     agentic_rag,
@@ -10,6 +15,14 @@ from agent import (
 )
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --------------------------------
 # In-memory session store

@@ -54,6 +54,13 @@ class RAGState(TypedDict):
     stage: Optional[str]
 
 # ===============================
+# 🔹 GREETING DETECTOR (NEW)
+# ===============================
+def is_greeting(text: str) -> bool:
+    greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
+    return text.lower().strip() in greetings
+
+# ===============================
 # VECTOR RETRIEVAL
 # ===============================
 def retrieve_chunks(query: str, top_k: int = 4) -> List[str]:
@@ -72,10 +79,15 @@ def retrieve_chunks(query: str, top_k: int = 4) -> List[str]:
     return [p.payload.get("text", "") for p in results.points]
 
 # ===============================
-# INTENT DETECTOR
+# INTENT DETECTOR (MINIMALLY EXTENDED)
 # ===============================
 def detect_intent(state: RAGState) -> RAGState:
     if state.get("stage") == "ASK_CATEGORY":
+        return state
+
+    # 🔹 Greeting short-circuit (NEW)
+    if is_greeting(state["question"]):
+        state["intent"] = {"primary": "GREETING", "document": None}
         return state
 
     prompt = [
@@ -98,7 +110,7 @@ def detect_intent(state: RAGState) -> RAGState:
 
     try:
         res = llm_client.chat.completions.create(
-            model="meta/llama-3.1-8b-instruct",
+            model="meta/llama-3.3-70b-instruct",
             messages=prompt,
             temperature=0
         )
@@ -109,11 +121,29 @@ def detect_intent(state: RAGState) -> RAGState:
     return state
 
 # ===============================
-# ASK PROFESSION REMAINS
+# 🔹 GREETING NODE (NEW)
+# ===============================
+def greeting_node(state: RAGState) -> RAGState:
+    res = llm_client.chat.completions.create(
+        model="meta/llama-3.3-70b-instruct",
+        messages=[
+            {"role": "system", "content": WORKFLOW_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Greet the user politely and ask how you can help with the Residence Certificate service."
+            }
+        ],
+        temperature=0.3
+    )
+    state["answer"] = res.choices[0].message.content
+    return state
+
+# ===============================
+# ASK CATEGORY
 # ===============================
 def ask_category_node(state: RAGState) -> RAGState:
     res = llm_client.chat.completions.create(
-        model="meta/llama-3.1-8b-instruct",
+        model="meta/llama-3.3-70b-instruct",
         messages=[
             {"role": "system", "content": WORKFLOW_SYSTEM_PROMPT},
             {"role": "user", "content": "Please tell me your profession to continue the application."}
@@ -140,7 +170,7 @@ def extract_category(state: RAGState) -> RAGState:
     ]
 
     res = llm_client.chat.completions.create(
-        model="meta/llama-3.1-8b-instruct",
+        model="meta/llama-3.3-70b-instruct",
         messages=prompt,
         temperature=0
     )
@@ -150,14 +180,14 @@ def extract_category(state: RAGState) -> RAGState:
     return state
 
 # ===============================
-# DOCUMENTS FROM RAG
+# DOCUMENTS NODE
 # ===============================
 def documents_node(state: RAGState) -> RAGState:
     query = f"{state['applicant_category']} residence certificate documents"
     context = "\n\n".join(retrieve_chunks(query))
 
     res = llm_client.chat.completions.create(
-        model="meta/llama-3.1-8b-instruct",
+        model="meta/llama-3.3-70b-instruct",
         messages=[
             {"role": "system", "content": WORKFLOW_SYSTEM_PROMPT},
             {"role": "user", "content": f"Context:\n{context}\n\nWhat documents are required?"}
@@ -170,28 +200,20 @@ def documents_node(state: RAGState) -> RAGState:
     return state
 
 # ===============================
-# RAG-FIRST FACTUAL ANSWER
+# RAG FIRST ANSWER (UNCHANGED)
 # ===============================
 def rag_first_answer_node(state: RAGState) -> RAGState:
     retrieved = retrieve_chunks(state["question"])
 
-    # ✅ If DB has relevant info → use it
     if retrieved:
         context = "\n\n".join(retrieved)
-        system_msg = (
-            WORKFLOW_SYSTEM_PROMPT +
-            "\nAnswer strictly from the provided context."
-        )
+        system_msg = WORKFLOW_SYSTEM_PROMPT + "\nAnswer strictly from the provided context."
     else:
-        # ⚠️ DB empty → allow LLM to answer normally
         context = ""
-        system_msg = (
-            WORKFLOW_SYSTEM_PROMPT +
-            "\nNo official context available. Answer using general knowledge."
-        )
+        system_msg = WORKFLOW_SYSTEM_PROMPT + "\nNo official context available. Answer using general knowledge."
 
     res = llm_client.chat.completions.create(
-        model="meta/llama-3.1-8b-instruct",
+        model="meta/llama-3.3-70b-instruct",
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{state['question']}"}
@@ -207,17 +229,18 @@ def rag_first_answer_node(state: RAGState) -> RAGState:
 # FEES
 # ===============================
 def fee_node(state: RAGState) -> RAGState:
-    query = "Residence Certificate service charge fee"
-    state["question"] = query
+    state["question"] = "Residence Certificate service charge fee"
     return rag_first_answer_node(state)
 
 # ===============================
-# ROUTER (AGENT PRESERVED)
+# ROUTER (MINIMALLY EXTENDED)
 # ===============================
 def dialog_manager(state: RAGState) -> RAGState:
     intent = state["intent"]["primary"]
 
-    if intent == "APPLY":
+    if intent == "GREETING":
+        state["stage"] = "GREETING"
+    elif intent == "APPLY":
         state["stage"] = "ASK_CATEGORY" if not state.get("applicant_category") else "SHOW_DOCUMENTS"
     elif intent == "FEES":
         state["stage"] = "FEES"
@@ -233,6 +256,7 @@ graph = StateGraph(RAGState)
 
 graph.add_node("intent", detect_intent)
 graph.add_node("dialog", dialog_manager)
+graph.add_node("greeting", greeting_node)
 graph.add_node("ask_category", ask_category_node)
 graph.add_node("extract_category", extract_category)
 graph.add_node("documents", documents_node)
@@ -246,6 +270,7 @@ graph.add_conditional_edges(
     "dialog",
     lambda s: s["stage"],
     {
+        "GREETING": "greeting",
         "ASK_CATEGORY": "ask_category",
         "SHOW_DOCUMENTS": "documents",
         "RAG_FIRST": "rag_first",
@@ -253,6 +278,7 @@ graph.add_conditional_edges(
     }
 )
 
+graph.add_edge("greeting", END)
 graph.add_edge("ask_category", END)
 graph.add_edge("documents", END)
 graph.add_edge("rag_first", END)
