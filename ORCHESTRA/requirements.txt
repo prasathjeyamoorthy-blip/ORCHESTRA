@@ -3,6 +3,10 @@ langgraph==1.0.10
 openai==2.24.0
 pydantic==2.12.5
 python-dotenv==1.2.2
-qdrant_client==1.17.0
-Requests==2.32.5
+requests==2.32.5
 streamlit==1.54.0
+faiss-cpu==1.8.0
+numpy==1.26.4
+pypdf==5.1.0
+uvicorn==0.41.0
+python-multipart==0.0.22

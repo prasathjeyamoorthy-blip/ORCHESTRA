@@ -1,11 +1,9 @@
-
-
-
 import os, json
+import faiss
+import numpy as np
 from typing import TypedDict, Optional, Dict, List
 from dotenv import load_dotenv
 from openai import OpenAI
-from qdrant_client import QdrantClient
 from langgraph.graph import StateGraph, END
 
 load_dotenv()
@@ -23,12 +21,16 @@ llm_client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1"
 )
 
-qdrant = QdrantClient(
-    url=os.getenv("QDRANT_URL"),
-    api_key=os.getenv("QDRANT_API_KEY")
-)
+# ===============================
+# FAISS VECTOR STORE
+# ===============================
+FAISS_INDEX_FILE = "faiss_index.bin"
+FAISS_TEXT_FILE = "faiss_texts.json"
 
-COLLECTION = "residence_certificate"
+index = faiss.read_index(FAISS_INDEX_FILE)
+
+with open(FAISS_TEXT_FILE, "r") as f:
+    stored_texts = json.load(f)
 
 # ===============================
 # SYSTEM PROMPT (GLOBAL)
@@ -58,38 +60,42 @@ class RAGState(TypedDict):
     stage: Optional[str]
 
 # ===============================
-# 🔹 GREETING DETECTOR (NEW)
+# GREETING DETECTOR
 # ===============================
 def is_greeting(text: str) -> bool:
     greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
     return text.lower().strip() in greetings
 
 # ===============================
-# VECTOR RETRIEVAL
+# VECTOR RETRIEVAL (FAISS)
 # ===============================
-def retrieve_chunks(query: str, top_k: int = 4) -> List[str]:
+def retrieve_chunks(query: str, top_k: int = 8) -> List[str]:
+
     embedding = embed_client.embeddings.create(
         model="nvidia/nv-embedqa-e5-v5",
         input=query,
         extra_body={"input_type": "query"}
     ).data[0].embedding
 
-    results = qdrant.query_points(
-        collection_name=COLLECTION,
-        query=embedding,
-        limit=top_k
-    )
+    query_vector = np.array([embedding]).astype("float32")
 
-    return [p.payload.get("text", "") for p in results.points]
+    distances, indices = index.search(query_vector, top_k)
+
+    results = []
+
+    for i in indices[0]:
+        if i < len(stored_texts):
+            results.append(stored_texts[i])
+
+    return results
 
 # ===============================
-# INTENT DETECTOR (MINIMALLY EXTENDED)
+# INTENT DETECTOR
 # ===============================
 def detect_intent(state: RAGState) -> RAGState:
     if state.get("stage") == "ASK_CATEGORY":
         return state
 
-    # 🔹 Greeting short-circuit (NEW)
     if is_greeting(state["question"]):
         state["intent"] = {"primary": "GREETING", "document": None}
         return state
@@ -125,7 +131,7 @@ def detect_intent(state: RAGState) -> RAGState:
     return state
 
 # ===============================
-# 🔹 GREETING NODE (NEW)
+# GREETING NODE
 # ===============================
 def greeting_node(state: RAGState) -> RAGState:
     res = llm_client.chat.completions.create(
@@ -204,7 +210,7 @@ def documents_node(state: RAGState) -> RAGState:
     return state
 
 # ===============================
-# RAG FIRST ANSWER (UNCHANGED)
+# RAG FIRST ANSWER
 # ===============================
 def rag_first_answer_node(state: RAGState) -> RAGState:
     retrieved = retrieve_chunks(state["question"])
@@ -237,7 +243,7 @@ def fee_node(state: RAGState) -> RAGState:
     return rag_first_answer_node(state)
 
 # ===============================
-# ROUTER (MINIMALLY EXTENDED)
+# ROUTER
 # ===============================
 def dialog_manager(state: RAGState) -> RAGState:
     intent = state["intent"]["primary"]

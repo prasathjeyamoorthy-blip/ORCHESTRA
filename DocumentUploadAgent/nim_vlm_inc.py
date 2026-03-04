@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+POPPLER_PATH = r"E:\poppler\poppler-25.12.0\Library\bin"
 
 from io import BytesIO
 
@@ -21,6 +21,7 @@ def extract_from_pdf(pdf_path):
     pages = convert_from_path(
         pdf_path,
         dpi=300,
+        poppler_path=POPPLER_PATH
     )
 
     outputs = []
@@ -52,29 +53,28 @@ def run_vlm_from_pil(image):
                     {
                         "type": "text",
                         "text": (
-                            "You are an OCR + document understanding system.\n"
-                            "Extract text and return ONLY valid JSON in this schema:\n"
-                            "{\n"
-                            "  \"certificate_type\": string,\n"
-                            "  \"parent_name\": string,\n"
-                            "  \"name\": string,\n"
-                            "  \"address\": full address as string,\n"
-                            "  \ door no\": door no as string,\n"
-                            "  \"Street Name\": street name as string,\n"
-                            "  \ Area\": area as string,\n"
-                            "  \"date of issue\": string,\n"
-                            "  \"issuing_authority\": string\n"
-                            "  \"issuing_authority_name\": string\n"
-                            "  \"Religion\": string\n"
-                            "  \"Income\": int\n"
-                            "  \"State\": string\n"
-                            "  \"Taluk\": string\n"
-                            "  \"Revenue Village\": string\n"
-                            "  \"District\": string\n"
-                            #"  \"Pincode\": int\n"
-                            "}\n"
-                            "If a field is missing, use null."
-                        )
+    "You are an OCR + document understanding system.\n"
+    "Extract text and return ONLY valid JSON in this schema:\n"
+    "{\n"
+    "  \"certificate_type\": string,\n"
+    "  \"parent_name\": string,\n"
+    "  \"name\": string,\n"
+    "  \"address\": string,\n"
+    "  \"door_no\": string,\n"
+    "  \"street_name\": string,\n"
+    "  \"area\": string,\n"
+    "  \"date_of_issue\": string,\n"
+    "  \"issuing_authority\": string,\n"
+    "  \"issuing_authority_name\": string,\n"
+    "  \"religion\": string,\n"
+    "  \"income\": integer,\n"
+    "  \"state\": string,\n"
+    "  \"taluk\": string,\n"
+    "  \"revenue_village\": string,\n"
+    "  \"district\": string\n"
+    "}\n"
+    "If a field is missing, return null."
+)
                     },
                     {
                         "type": "image_url",
@@ -88,6 +88,8 @@ def run_vlm_from_pil(image):
     }
 
     response = requests.post(invoke_url, headers=headers, json=payload)
+    print("STATUS:", response.status_code)
+    print(response.text)
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 

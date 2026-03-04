@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import agent + deterministic nodes
 # --------------------------------
 from agent import (
-    agentic_rag,
-    extract_category,  
+    agentic_rag, 
+    extract_category,
     documents_node
 )
 
