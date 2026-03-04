@@ -11,9 +11,9 @@ export default function DocumentUpload({ onFileSelect }) {
     // send file to RAG agent backend
     const formData = new FormData();
     formData.append("file", file);
-
+  
     try {
-      const response = await fetch("http://localhost:8001/upload", {
+      const response = await fetch("http://localhost:8000/upload", {
         method: "POST",
         body: formData
       });

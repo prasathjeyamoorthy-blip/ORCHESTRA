@@ -7,25 +7,27 @@ import "./index.css";
 
 export default function App() {
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
-  window.scrollTo(0, 0);
+    window.scrollTo(0, 0);
 
-  setMessages([
-    {
-      sender: "agent",
-      text:
-        "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
-    },
-  ]);
-}, []);
-
+    setMessages([
+      {
+        sender: "agent",
+        text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
+      },
+    ]);
+  }, []);
 
   const handleSend = async (text) => {
+    if (!text.trim()) return;
+
+    // Add user message
     setMessages((prev) => [...prev, { sender: "user", text }]);
-    setLoading(true);
+
+    setIsGenerating(true);
 
     try {
       const response = await sendMessage(sessionId, text);
@@ -37,18 +39,24 @@ export default function App() {
           text: response.answer || "Please provide more details.",
         },
       ]);
-    } catch {
+    } catch (error) {
       setMessages((prev) => [
         ...prev,
         {
           sender: "agent",
-          text:
-            "The service is temporarily unavailable. Please try again later.",
+          text: "The service is temporarily unavailable. Please try again later.",
         },
       ]);
     } finally {
-      setLoading(false);
+      setIsGenerating(false); // 🔥 This controls pause button correctly
     }
+  };
+
+  const handleStop = () => {
+    if (window.stopAgent) {
+      window.stopAgent();
+    }
+    setIsGenerating(false);
   };
 
   return (
@@ -61,14 +69,10 @@ export default function App() {
 
       <main className="chat-container">
         {messages.map((msg, idx) => (
-          <ChatBubble
-            key={idx}
-            sender={msg.sender}
-            message={msg.text}
-          />
+          <ChatBubble key={idx} sender={msg.sender} message={msg.text} />
         ))}
 
-        {loading && (
+        {isGenerating && (
           <div className="typing-indicator">
             <span></span>
             <span></span>
@@ -77,7 +81,11 @@ export default function App() {
         )}
       </main>
 
-      <ChatInput onSend={handleSend} disabled={loading} />
+      <ChatInput
+        onSend={handleSend}
+        disabled={isGenerating}
+        onStop={handleStop}
+      />
     </div>
   );
 }

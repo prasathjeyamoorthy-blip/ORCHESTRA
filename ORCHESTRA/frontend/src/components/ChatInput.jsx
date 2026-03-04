@@ -1,25 +1,22 @@
 import { useState } from "react";
 import DocumentUpload from "./DocumentUpload";
 
-export default function ChatInput({ onSend, disabled }) {
+export default function ChatInput({ onSend, disabled, onStop }) {
   const [input, setInput] = useState("");
   const [fileName, setFileName] = useState(null);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const handleSend = () => {
-    // ⏸ Stop while generating
-    if (isGenerating) {
-      if (window.stopAgent) {
-        window.stopAgent();
+    // ⏸ If generating → stop
+    if (disabled) {
+      if (onStop) {
+        onStop();
       }
-      setIsGenerating(false);
       return;
     }
 
     // ▶ Normal send
-    if (!input.trim() || disabled) return;
+    if (!input.trim()) return;
 
-    setIsGenerating(true);
     onSend(input);
     setInput("");
   };
@@ -34,19 +31,17 @@ export default function ChatInput({ onSend, disabled }) {
       <div className="chat-input-container">
         <DocumentUpload onFileSelect={handleFileSelect} />
 
-        {/* Disable INPUT while generating */}
         <input
           type="text"
           placeholder="Ask about residence certificate..."
           value={input}
-          disabled={disabled || isGenerating}
+          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
         />
 
-        {/* ❗ Button MUST stay clickable */}
         <button onClick={handleSend}>
-          {isGenerating ? "⏸" : "Send"}
+          {disabled ? "⏸" : "Send"}
         </button>
       </div>
 

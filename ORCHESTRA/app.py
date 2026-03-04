@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # --------------------------------
 from agent import (
     agentic_rag,
-    extract_category,
+    extract_category,  
     documents_node
 )
 
