@@ -1,18 +1,20 @@
 import { useState } from "react";
 import DocumentUpload from "./DocumentUpload";
 
-export default function ChatInput({ onSend, disabled, onStop }) {
+export default function ChatInput({ onSend, disabled, isGenerating, onStop }) {
   const [input, setInput] = useState("");
   const [fileName, setFileName] = useState(null);
 
   const handleSend = () => {
     // ⏸ If generating → stop
-    if (disabled) {
+    if (isGenerating) {
       if (onStop) {
         onStop();
       }
       return;
     }
+
+    if (disabled) return;
 
     // ▶ Normal send
     if (!input.trim()) return;
@@ -40,16 +42,12 @@ export default function ChatInput({ onSend, disabled, onStop }) {
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
         />
 
-        <button onClick={handleSend}>
-          {disabled ? "⏸" : "Send"}
+        <button onClick={handleSend} disabled={disabled && !isGenerating}>
+          {isGenerating ? "⏸" : "Send"}
         </button>
       </div>
 
-      {fileName && (
-        <div className="file-preview">
-          📄 {fileName}
-        </div>
-      )}
+      {fileName && <div className="file-preview">📄 {fileName}</div>}
     </div>
   );
 }

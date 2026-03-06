@@ -15,6 +15,7 @@ from agent import (
     extract_category,
     documents_node
 )
+from face_validator import verify_human_photograph_local
 
 app = FastAPI()
 
@@ -111,4 +112,26 @@ async def upload_document(file: UploadFile = File(...)):
     return {
         "status": "success",
         "extracted_data": extracted_json
+    }
+
+
+# ================================
+# PHOTO VERIFICATION ENDPOINT (NEW)
+# ================================
+@app.post("/verify/photo")
+async def verify_photo_document(file: UploadFile = File(...)):
+    temp_path = os.path.join(TEMP_UPLOAD_DIR, file.filename)
+
+    # Save temporarily
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    print(f"\n🔍 [FACE VERIFICATION] Checking image: {file.filename}")
+    
+    # Run OpenCV logic
+    is_human = verify_human_photograph_local(temp_path)
+    
+    return {
+        "is_human_photo": is_human,
+        "filename": file.filename
     }
