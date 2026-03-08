@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict
 import requests
@@ -15,7 +16,6 @@ from agent import (
     extract_category,
     documents_node
 )
-from face_validator import verify_human_photograph_local
 
 app = FastAPI()
 
@@ -31,10 +31,6 @@ app.add_middleware(
 # In-memory session store
 # --------------------------------
 SESSIONS: Dict[str, dict] = {}
-
-UPLOAD_AGENT_URL = "http://localhost:8002/extract"
-TEMP_UPLOAD_DIR = "temp_uploads"
-os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 
 
 # ================================
@@ -79,59 +75,76 @@ def chat(req: ChatRequest):
 
 
 # ================================
-# DOCUMENT UPLOAD ENDPOINT (NEW)
+# PLAYWRIGHT INTEGRATION
 # ================================
-@app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
-    temp_path = os.path.join(TEMP_UPLOAD_DIR, file.filename)
+import sys
+from fastapi import BackgroundTasks
 
-    # Save temporarily
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+# Add Playwright folder to Python path
+playwright_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Playwright"))
+if playwright_dir not in sys.path:
+    sys.path.append(playwright_dir)
 
-    print(f"\n📥 [RAG AGENT] File received: {file.filename}")
+# Global WebSocket Manager for Automation Events
+class ConnectionManager:
+    def __init__(self):
+        self.active_connection: WebSocket = None
+        self.latest_response: dict = None
 
-    # Forward to Document Upload Agent
-    with open(temp_path, "rb") as f:
-        files = {
-            "file": (file.filename, f, file.content_type)
-        }
-        response = requests.post(UPLOAD_AGENT_URL, files=files)
-        response.raise_for_status()
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connection = websocket
+        print("[WebSocket] Automation Frontend Connected")
 
-    extracted_json = response.json()
+    def disconnect(self):
+        self.active_connection = None
+        print("[WebSocket] Automation Frontend Disconnected")
 
-    print("\n📦 --- EXTRACTED JSON RECEIVED IN RAG AGENT ---\n")
-    print(extracted_json)
+    async def send_event(self, event_data: dict):
+        if self.active_connection:
+            try:
+                await self.active_connection.send_json(event_data)
+            except Exception as e:
+                print(f"[WebSocket WARNING] Error sending event: {e}")
+        else:
+            print("[WebSocket WARNING] Tried to emit event but frontend is disconnected:", event_data)
 
-    # 🔜 OPTIONAL (future):
-    # - store in session
-    # - embed & push to vector DB
-    # - connect to documents_node
+manager = ConnectionManager()
 
-    return {
-        "status": "success",
-        "extracted_data": extracted_json
-    }
+@app.websocket("/ws/automation")
+async def websocket_automation(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            print(f"[WebSocket] Received from frontend: {data}")
+            # Store the latest valid answer emitted by React
+            manager.latest_response = data
+    except WebSocketDisconnect:
+        manager.disconnect()
 
+@app.get("/automation/captcha")
+def get_captcha():
+    # Serve the captcha saved by playwright
+    captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
+    if os.path.exists(captcha_path):
+        return FileResponse(captcha_path)
+    return {"error": "Captcha not found"}
 
-# ================================
-# PHOTO VERIFICATION ENDPOINT (NEW)
-# ================================
-@app.post("/verify/photo")
-async def verify_photo_document(file: UploadFile = File(...)):
-    temp_path = os.path.join(TEMP_UPLOAD_DIR, file.filename)
+def run_playwright_agent(payload: dict, loop=None):
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(playwright_dir)
+        from rescert import TNeSevaiBackendAgent
+        # Pass the global manager reference to the agent
+        agent = TNeSevaiBackendAgent(payload, ws_manager=manager, loop=loop)
+        agent.run()
+    finally:
+        os.chdir(original_cwd)
 
-    # Save temporarily
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    print(f"\n🔍 [FACE VERIFICATION] Checking image: {file.filename}")
-    
-    # Run OpenCV logic
-    is_human = verify_human_photograph_local(temp_path)
-    
-    return {
-        "is_human_photo": is_human,
-        "filename": file.filename
-    }
+@app.post("/submit-application")
+async def submit_application(payload: dict, background_tasks: BackgroundTasks):
+    import asyncio
+    loop = asyncio.get_running_loop()
+    background_tasks.add_task(run_playwright_agent, payload, loop)
+    return {"status": "success", "message": "Playwright task started"}

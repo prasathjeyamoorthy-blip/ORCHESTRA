@@ -3,6 +3,7 @@ import AgentStatus from "./components/AgentStatus";
 import ChatBubble from "./components/ChatBubble";
 import ChatInput from "./components/ChatInput";
 import DocumentChecklist from "./components/DocumentChecklist";
+import AutomationModal from "./components/AutomationModal";
 import { sendMessage } from "./api/chatApi";
 import "./index.css";
 
@@ -107,10 +108,10 @@ export default function App() {
 
     const lowerText = text.toLowerCase();
 
-    // Check if user explicitly wants to submit/view submitted documents
-    // Broadening the match: if "submit" and "document" appear anywhere in the logic.
-    const wantsToSubmit =
-      lowerText.includes("submit") && lowerText.includes("document");
+    // Check if user explicitly wants to submit/upload documents
+    const hasIntent = lowerText.includes("submit") || lowerText.includes("upload") || lowerText.includes("attach");
+    const hasContext = lowerText.includes("document") || lowerText.includes("certificate") || lowerText.includes("file");
+    const wantsToSubmit = hasIntent && hasContext;
 
     // Add user message
     setMessages((prev) => [...prev, { sender: "user", text }]);
@@ -154,6 +155,45 @@ export default function App() {
       window.stopAgent();
     }
     setIsGenerating(false);
+  };
+
+  // ------------------------------------
+  // WebSocket Automation Interactivity
+  // ------------------------------------
+  const [ws, setWs] = useState(null);
+  const [automationEvent, setAutomationEvent] = useState(null);
+
+  // When checklist proceeds, open WebSocket connection
+  useEffect(() => {
+    if (isChecklistProceeding && !ws) {
+      const socket = new WebSocket("ws://localhost:8000/ws/automation");
+      
+      socket.onopen = () => console.log("Automation WebSocket Connected");
+      
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log("WebSocket event from Playwright:", data);
+        setAutomationEvent(data);
+      };
+      
+      socket.onclose = () => {
+        console.log("Automation WebSocket Disconnected");
+        setWs(null);
+        setAutomationEvent(null);
+      };
+
+      setWs(socket);
+    }
+  }, [isChecklistProceeding, ws]);
+
+  const handleAutomationSubmit = (inputValue) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "USER_ANSWER",
+        data: inputValue
+      }));
+      setAutomationEvent(null); // Hide modal while Playwright works
+    }
   };
 
   return (
@@ -208,6 +248,12 @@ export default function App() {
         disabled={isGenerating || showChecklist}
         isGenerating={isGenerating}
         onStop={handleStop}
+      />
+
+      <AutomationModal 
+        isOpen={!!automationEvent} 
+        eventData={automationEvent} 
+        onSubmit={handleAutomationSubmit} 
       />
     </div>
   );

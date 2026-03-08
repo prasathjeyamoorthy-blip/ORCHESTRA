@@ -37,9 +37,8 @@ export default function ChatInput({ onSend, disabled, isGenerating, onStop }) {
           type="text"
           placeholder="Ask about residence certificate..."
           value={input}
-          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          onKeyDown={(e) => e.key === "Enter" && !disabled && handleSend()}
         />
 
         <button onClick={handleSend} disabled={disabled && !isGenerating}>
