@@ -82,11 +82,18 @@ export default function AutomationModal({ isOpen, eventData, onSubmit }) {
                 type="text" 
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder={eventData.type === 'REQUEST_CAPTCHA' ? "Enter Captcha" : "Enter OTP"}
+                placeholder={
+                  eventData.type === 'REQUEST_CAPTCHA' ? "Enter Captcha" :
+                  eventData.type === 'REQUEST_OTP'     ? "Enter OTP" :
+                  eventData.type === 'REQUEST_RESUME'  ? "Type anything to continue..." :
+                  "Enter value"
+                }
                 style={inputStyle}
                 autoFocus
               />
-              <button type="submit" style={btnStyle}>Submit</button>
+              <button type="submit" style={btnStyle}>
+                {eventData.type === 'REQUEST_RESUME' ? "Continue" : "Submit"}
+              </button>
             </form>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import AgentStatus from "./components/AgentStatus";
 import ChatBubble from "./components/ChatBubble";
 import ChatInput from "./components/ChatInput";
@@ -160,39 +160,46 @@ export default function App() {
   // ------------------------------------
   // WebSocket Automation Interactivity
   // ------------------------------------
-  const [ws, setWs] = useState(null);
+  const wsRef = useRef(null);
   const [automationEvent, setAutomationEvent] = useState(null);
 
-  // When checklist proceeds, open WebSocket connection
-  useEffect(() => {
-    if (isChecklistProceeding && !ws) {
-      const socket = new WebSocket("ws://localhost:8000/ws/automation");
-      
-      socket.onopen = () => console.log("Automation WebSocket Connected");
-      
-      socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log("WebSocket event from Playwright:", data);
-        setAutomationEvent(data);
-      };
-      
-      socket.onclose = () => {
-        console.log("Automation WebSocket Disconnected");
-        setWs(null);
-        setAutomationEvent(null);
-      };
-
-      setWs(socket);
+  /**
+   * Opens the WebSocket connection to the backend.
+   * Called BEFORE the /submit-application fetch so the socket is ready
+   * by the time Playwright sends its first event (e.g. REQUEST_CAPTCHA).
+   */
+  const openAutomationSocket = () => {
+    // Close any stale connection first
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.close();
     }
-  }, [isChecklistProceeding, ws]);
+
+    const socket = new WebSocket("ws://localhost:8000/ws/automation");
+
+    socket.onopen = () => console.log("[WS] Automation WebSocket Connected");
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("[WS] Event from Playwright:", data);
+      setAutomationEvent(data);
+    };
+
+    socket.onclose = () => {
+      console.log("[WS] Automation WebSocket Disconnected");
+      setAutomationEvent(null);
+    };
+
+    wsRef.current = socket;
+  };
 
   const handleAutomationSubmit = (inputValue) => {
+    const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: "USER_ANSWER",
         data: inputValue
       }));
-      setAutomationEvent(null); // Hide modal while Playwright works
+      setAutomationEvent(null); // Hide modal while Playwright processes
     }
   };
 
@@ -231,6 +238,7 @@ export default function App() {
             onProceed={handleChecklistProceed}
             onExit={handleChecklistExit}
             isProceeding={isChecklistProceeding}
+            onOpenSocket={openAutomationSocket}
           />
         )}
 

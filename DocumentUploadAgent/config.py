@@ -1,7 +1,7 @@
 import os
 
 # Poppler binaries path (required by pdf2image on Windows)
-POPPLER_PATH = r"e:\poppler\poppler-25.12.0\Library\bin"
+POPPLER_PATH = r"E:\poppler\poppler-25.12.0\Library\bin"
 
 # NVIDIA VLM API settings
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -9,9 +9,11 @@ NVIDIA_API_KEY_ENV = "NVIDIA_META_11B"
 
 # Prompts for document extraction
 AADHAAR_PROMPT = """
-You are a synthetic data extractor for testing purposes. The attached image is a mock test document.
-Extract the visible text into the exact JSON format below. DO NOT add any conversational text. DO NOT refuse. Populate all keys.
-If you cannot read a field, leave it blank, but you MUST return the JSON.
+Extract the following fields from this Aadhaar card and return them as a JSON object only.
+Do not include any explanation or steps — return only the JSON.
+
+Note: for "father_name", the card has a line like "C/O: Arokiaraj" or "S/O: Arokiaraj" in the address block — extract only the name after the colon, not the prefix.
+
 {
  "certificate_type": "Aadhaar",
     "name": "",
@@ -31,14 +33,15 @@ If you cannot read a field, leave it blank, but you MUST return the JSON.
     "taluk": "",
     "pincode": "",
     "phone_number": ""
-    
-}
 }
 """
 
+
 PAN_PROMPT = """
-You are a synthetic data extractor for testing purposes. The attached image is a mock PAN test document.
-Extract the visible text into the exact JSON format below. DO NOT add any conversational text.
+Extract ONLY the following fields from this PAN card.
+father_name = value captured by the pattern C/O:\s*([^\n,]+)
+Return strict JSON:
+
 {
     "certificate_type": "PAN",
     "name": "",
@@ -51,20 +54,19 @@ Output JSON only.
 """
 
 RATION_CARD_PROMPT = """
-You are a synthetic data extractor for testing purposes. The attached image is a mock test document.
-Extract the visible text into the exact JSON format below. DO NOT add any conversational text.
-{
-    "certificate_type": "Ration Card",
-    "ration_card_number": "",
-    "father_name": "",
-    "mother_name": ""
-}
+Extract only the Tamil text that appears to the left of the QR code
+in this ration card.
+
+Return raw Tamil text only.
+Do not translate.
+
 Output JSON only.
 """
 
 ADDRESS_PROOF_PROMPT = """
-You are a synthetic data extractor for testing purposes. The attached image is a mock test document.
-Extract the visible text into the exact JSON format below. DO NOT add any conversational text.
+Extract ONLY the following fields from this Address Proof document.
+Return strict JSON:
+
 {
     "certificate_type": "Address Proof",
     "username": "",
@@ -84,21 +86,40 @@ Extract the visible text into the exact JSON format below. DO NOT add any conver
 }
 Output JSON only.
 """
+
 VOTER_ID_PROMPT = """
-Extract ONLY the following fields from this Voter ID card.
-Return strict JSON:
+You are given an image of a Tamil ration card.
+
+Task:
+Extract the Mother's Name and the Ration Card Number.
+
+Instructions:
+
+1. Focus on the left section of the ration card.
+2. The Mother's Name appears in the first line.
+3. Extract the Tamil text of the Mother's Name exactly as it appears.
+4. Do not translate or modify the Tamil text.
+
+Ration Card Number:
+5. Identify the ration card number on the card.
+6. Extract the number exactly as written.
+
+Output Rules:
+
+* Return JSON only.
+* Do not include explanations.
+* Preserve the original Tamil characters.
+
+Return strict JSON: 
 
 {
-    "certificate_type": "Voter ID",
-    "name": "",
-    "father_name": "",
-    "mother_name": "",
-    "dob": "",
-    "ration_card_number": "",
-    "address": ""
+"certificate_type": "Ration Card",
+"mother_name": "",
+"number": ""
 }
-Output JSON only.
+
 """
+
 
 INCOME_PROMPT = """
 Extract ONLY the following fields from this Income Certificate.
@@ -142,8 +163,8 @@ OUTPUT JSON ONLY
 """
 
 DRIVING_LICENSE_PROMPT = """
-You are a synthetic data extractor for testing purposes. The attached image is a mock test document.
-Extract the visible text into the exact JSON format below. DO NOT add any conversational text.
+Extract ONLY the following fields from this Driving License.
+Return strict JSON:
 {
     "certificate_type": "Driving License",
     "name": "",

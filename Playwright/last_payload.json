@@ -1,0 +1,26 @@
+{
+  "credentials": {
+    "username": "lohithg",
+    "password": "Lohith@2007"
+  },
+  "applicant_details": {
+    "can_number": "13318016498757",
+    "aadhar_number": "607126530111",
+    "dob": "23-02-2007",
+    "ration_card_no": "33347751306"
+  },
+  "address_details": {
+    "village": "Puducherry",
+    "building_no": "7A,FF-1AND SF-1",
+    "street_name": "Thalavaveenasamy Street",
+    "pincode": "607002",
+    "from_date": "26/07/2023",
+    "to_date": "10/03/2026"
+  },
+  "documents": {
+    "photo_path": "uploads\\lohit_photo.jpeg",
+    "self_decl_path": "",
+    "address_proof_path": "uploads\\daniel_aadhar.pdf",
+    "address_doc_no": "607126530111"
+  }
+}

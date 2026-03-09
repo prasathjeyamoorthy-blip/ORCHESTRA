@@ -1,56 +1,70 @@
 import os
 import time
 import json
-import re
+import asyncio
+import urllib.request
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-import asyncio
-import concurrent.futures
 
 class TNeSevaiBackendAgent:
     def __init__(self, json_payload, ws_manager=None, loop=None):
         self.data = json_payload
-        self.ws = ws_manager
+        self.ws_manager = ws_manager
         self.loop = loop
-        
+
         # Parse JSON into easily accessible variables
         self.creds = self.data.get("credentials", {})
         self.applicant = self.data.get("applicant_details", {})
         self.address = self.data.get("address_details", {})
         self.docs = self.data.get("documents", {})
 
-    def _emit_and_wait(self, event_type: str, payload: dict = None, page=None):
-        if not self.ws or not self.loop:
-            self.log(f"No WebSocket connection. Falling back to CLI for {event_type}")
-            return input(f"AGENT PROMPT -> {event_type}: ")
-
-        # Clear old response
-        self.ws.latest_response = None
-        
-        event = {"type": event_type}
-        if payload: event.update(payload)
-            
-        self.log(f"Emitting {event_type} to frontend...")
-        asyncio.run_coroutine_threadsafe(self.ws.send_event(event), self.loop)
-        
-        self.log("Waiting for user response from frontend...")
-        # Since this Playwright execution runs in a Starlette ThreadPool, we MUST wait synchronously
-        # to block execution cleanly without tangling event loops.
-        while self.ws.latest_response is None:
-            if page:
-                page.wait_for_timeout(1000)
-            else:
-                time.sleep(1)
-            
-        ans = self.ws.latest_response.get("data")
-        self.ws.latest_response = None
-        return ans
-
     def log(self, message):
         """Prints status updates to the terminal for the backend agent to read."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [STATUS] {message}")
+
+    def _ws_prompt(self, event_dict, timeout=300):
+        """
+        Send an event to the frontend via WebSocket and wait for the user's answer.
+        Falls back to terminal input() if no ws_manager is connected (e.g. standalone run).
+        
+        Args:
+            event_dict: dict with at minimum {"type": "...", "message": "..."}
+            timeout: seconds to wait for user response before raising TimeoutError
+        Returns:
+            The string answer the user submitted from the UI.
+        """
+        if not self.ws_manager or not self.loop:
+            # Fallback: running standalone without WebSocket
+            return input(f"AGENT PROMPT -> {event_dict.get('message', 'Enter value')}: ")
+
+        # Clear any stale previous response
+        self.ws_manager.latest_response = None
+
+        # Push the event to the React UI
+        future = asyncio.run_coroutine_threadsafe(
+            self.ws_manager.send_event(event_dict),
+            self.loop
+        )
+        future.result(timeout=10)  # Wait up to 10s for the send to complete
+        self.log(f"Sent WS event to UI: {event_dict.get('type')}")
+
+        # Spin-poll until user responds or timeout
+        elapsed = 0
+        while elapsed < timeout:
+            response = self.ws_manager.latest_response
+            if response is not None:
+                # Response from React: {"type": "USER_ANSWER", "data": "..."}
+                data = response.get("data", "")
+                if isinstance(data, dict):
+                    # For multi-field responses, join values
+                    return " ".join(str(v) for v in data.values())
+                return str(data)
+            time.sleep(1)
+            elapsed += 1
+
+        raise TimeoutError(f"No user response received within {timeout}s for event: {event_dict.get('type')}")
 
     def format_date_for_injection(self, date_str):
         try:
@@ -60,29 +74,58 @@ class TNeSevaiBackendAgent:
             return date_str 
         except: return date_str
 
+    PORTAL_URL = "https://www.tnesevai.tn.gov.in/"
+    NAV_TIMEOUT = 90_000  # 90 seconds – government portals are slow
+    MAX_GOTO_RETRIES = 3
+
+    def _check_connectivity(self):
+        """Quick pre-flight check before launching the browser."""
+        try:
+            urllib.request.urlopen(self.PORTAL_URL, timeout=15)
+            return True
+        except Exception:
+            return False
+
+    def _goto_with_retry(self, page, url):
+        """Navigate with automatic retries on timeout/network errors."""
+        for attempt in range(1, self.MAX_GOTO_RETRIES + 1):
+            try:
+                self.log(f"Navigating to {url} (attempt {attempt}/{self.MAX_GOTO_RETRIES})...")
+                page.goto(url, timeout=self.NAV_TIMEOUT, wait_until="domcontentloaded")
+                return  # success
+            except Exception as e:
+                self.log(f"Navigation attempt {attempt} failed: {e}")
+                if attempt == self.MAX_GOTO_RETRIES:
+                    raise RuntimeError(
+                        f"Could not reach {url} after {self.MAX_GOTO_RETRIES} attempts. "
+                        "Please check your internet connection or try again later."
+                    ) from e
+                time.sleep(5)  # brief pause before retry
+
     def run(self):
         try:
+            # --- Pre-flight connectivity check ---
+            self.log("Checking portal connectivity...")
+            if not self._check_connectivity():
+                msg = ("Cannot reach the TNeSevai portal. "
+                       "Please verify your internet connection and try again.")
+                self.log(f"CONNECTIVITY ERROR: {msg}")
+                if self.ws_manager and self.loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.ws_manager.send_event({"type": "CONNECTIVITY_ERROR", "message": msg}),
+                        self.loop
+                    ).result(timeout=10)
+                return
+
             with sync_playwright() as playwright:
-                self.log("Launching Browser in HEADLESS mode...")
-                # Headless is True. Slow_mo kept for stability against anti-bot measures
+                self.log("Launching Browser...")
                 browser = playwright.chromium.launch(headless=False, slow_mo=200)
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
 
                 # --- Login ---
-                self.log("Navigating to TNeSevai Portal...")
-                # The TNeSevai server is notoriously slow or blocks fast connections.
-                # Use a larger timeout and wait for domcontentloaded instead of 'load'
-                try:
-                    page.goto("https://www.tnesevai.tn.gov.in/", timeout=90000, wait_until="domcontentloaded")
-                except Exception as e:
-                    self.log(f"Initial load errored ({str(e)}). Retrying in 5 seconds...")
-                    time.sleep(5)
-                    page.goto("https://www.tnesevai.tn.gov.in/", timeout=120000, wait_until="domcontentloaded")
-                
-                time.sleep(2)
+                self._goto_with_retry(page, self.PORTAL_URL)
                 page.get_by_role("link", name="English Version").click()
-                time.sleep(1)
                 page.get_by_role("button", name="Citizen Login").click()
                 
                 self.log("Entering Credentials...")
@@ -90,47 +133,24 @@ class TNeSevaiBackendAgent:
                 page.get_by_role("textbox", name="Password").fill(self.creds.get("password"))
 
                 # --- Captcha Handling (Agent Pause 1) ---
-                while True:
-                    self.log("Extracting Captcha...")
-                    # ensure image is loaded/refreshed
-                    time.sleep(1)
-                    captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
-                    captcha_path = "backend_captcha.png"
-                    captcha_img.screenshot(path=captcha_path)
-                    
-                    self.log(f"Captcha saved to {os.path.abspath(captcha_path)}")
-                    
-                    # Request Captcha through WebSocket
-                    user_captcha = self._emit_and_wait(
-                        "REQUEST_CAPTCHA", 
-                        {"message": "Please enter the captcha code seen in the image."},
-                        page=page
-                    )
-                    
-                    page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
+                self.log("Extracting Captcha...")
+                captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
+                captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
+                captcha_img.screenshot(path=captcha_path)
+                
+                self.log(f"Captcha saved to {os.path.abspath(captcha_path)}")
 
-                    # Click login and wait to see what happens
+                # Prompt user via WebSocket UI
+                user_captcha = self._ws_prompt({
+                    "type": "REQUEST_CAPTCHA",
+                    "message": "Please look at the captcha image and enter the code shown below."
+                })
+                
+                page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
+
+                with page.expect_navigation(timeout=60000):
                     self.log("Clicking Login...")
                     page.get_by_role("button", name="Login").click()
-                    
-                    # Wait for either the successful dashboard or an error message
-                    # Using a short timeout loop to check for the error text "Invalid Captcha" or similar
-                    try:
-                        # Wait for the next page or an error span to appear
-                        page.wait_for_load_state("networkidle", timeout=10000)
-                    except:
-                        pass
-                        
-                    # Check for common failure messages on the same page
-                    if page.locator("text=Invalid Captcha").is_visible() or page.locator("text=Invalid Username or password").is_visible() or page.locator("text=Please Enter Valid Captcha").is_visible():
-                        self.log("Login failed (Invalid user/password or Captcha). Let's try again...")
-                        # Clear old input and let loop repeat
-                        page.get_by_role("textbox", name="Enter Captcha Code").fill("")
-                        continue
-                    else:
-                        # Success, we moved to the next page
-                        self.log("Login Successful!")
-                        break
 
                 # --- Nav to Certificate ---
                 self.log("Navigating to Residence Certificate...")
@@ -147,139 +167,49 @@ class TNeSevaiBackendAgent:
                 time.sleep(4)
                 
                 # --- CAN Search & Aadhaar ---
-                current_can = self.applicant.get('can_number', "")
-                if not current_can or current_can.strip() == "":
-                    self.log("Missing CAN Number. Requesting from user...")
-                    user_provided_data = self._emit_and_wait(
-                        "REQUEST_MISSING_DETAILS",
-                        {
-                            "message": "CAN Number is missing or was static. Please provide it:",
-                            "missing_fields": ["CAN Number"]
-                        },
-                        page=page
-                    )
-                    if isinstance(user_provided_data, dict) and "CAN Number" in user_provided_data:
-                        self.applicant["can_number"] = user_provided_data["CAN Number"]
-
                 self.log(f"Searching CAN: {self.applicant.get('can_number')}...")
                 page_form.locator('[id="statusform:aadhar"]').fill(self.applicant.get("can_number")) 
-                
-                self.log("Clicking Search...")
-                search_btn = page_form.locator('input[value="Search"], button:has-text("Search")').first
-                search_btn.click(force=True)
+                page_form.get_by_role("button", name="Search").click()
                 time.sleep(8) 
                 
-                self.log("Selecting CAN record...")
-                try: 
-                    # Use a stable selector for the radio button in the search results table
-                    radio_btn = page_form.locator('input[name="statusform:j_idt220"]').first
-                    if radio_btn.count() == 0:
-                        radio_btn = page_form.locator('input[type="radio"]').first
-                    radio_btn.click()
-                    time.sleep(3) # Wait for any AJAX updates triggered by selection
-                except Exception as e:
-                    self.log(f"Warning: Could not click CAN radio button. Proceeding anyway. {str(e)}")
-                
-                # --- Missing Details Check (Fallback 4) ---
-                current_aadhar = self.applicant.get("aadhar_number", "")
-                current_dob = self.applicant.get("dob", "")
-                missing_fields = []
-                
-                if not current_aadhar or current_aadhar.strip() == "":
-                    missing_fields.append("Aadhaar Number")
-                if not current_dob or current_dob.strip() == "":
-                    missing_fields.append("Date of Birth (DD/MM/YYYY)")
-                    
-                if missing_fields:
-                    missing_str = " and ".join(missing_fields)
-                    self.log(f"Missing {missing_str}. Requesting from user...")
-                    
-                    user_provided_data = self._emit_and_wait(
-                        "REQUEST_MISSING_DETAILS",
-                        {
-                            "message": f"Could not extract {missing_str} from documents. Please provide them below:",
-                            "missing_fields": missing_fields
-                        },
-                        page=page
-                    )
-                    
-                    # user_provided_data should be a dict returned from the frontend
-                    # e.g. {"Aadhaar Number": "1234", "Date of Birth (DD/MM/YYYY)": "01/01/2000"}
-                    if isinstance(user_provided_data, dict):
-                        if "Aadhaar Number" in user_provided_data:
-                            self.applicant["aadhar_number"] = user_provided_data["Aadhaar Number"]
-                        if "Date of Birth (DD/MM/YYYY)" in user_provided_data:
-                            self.applicant["dob"] = user_provided_data["Date of Birth (DD/MM/YYYY)"]
+                try: page_form.get_by_label("").check() 
+                except: pass 
                 
                 self.log("Typing Aadhaar Number securely...")
-                # Fallback list of possible IDs for the Aadhaar input
-                aadhar_locators = [
-                    '[id="statusform:uid"]',
-                    '[id="statusform:citAadharNo"]',
-                    '[id="statusform:aadharNo"]',
-                    '[id="statusform:txtAadharNo"]'
-                ]
+                aadhar_input = page_form.locator('[id="statusform:citAadharNo"]')
+                aadhar_input.click()
                 
-                aadhar_input = None
-                for loc in aadhar_locators:
-                    try:
-                        if page_form.locator(loc).count() > 0 and page_form.locator(loc).first.is_visible():
-                            aadhar_input = page_form.locator(loc).first
-                            break
-                    except Exception:
-                        pass
-                        
-                if not aadhar_input:
-                    # Final fallback to original ID in case it is somehow hidden or loading slow
-                    self.log("Warning: Specific Aadhaar ID not found. Using default locator...")
-                    aadhar_input = page_form.locator('[id="statusform:citAadharNo"]')
-
                 try:
-                    aadhar_input.click()
-                    try:
-                        aadhar_input.press_sequentially(self.applicant.get("aadhar_number"), delay=150)
-                    except AttributeError:
-                        aadhar_input.type(self.applicant.get("aadhar_number"), delay=150)
-                    aadhar_input.press("Tab")
-                except Exception as e:
-                    self.log(f"Failed to fill Aadhaar: {str(e)}")
+                    aadhar_input.press_sequentially(self.applicant.get("aadhar_number"), delay=150)
+                except AttributeError:
+                    aadhar_input.type(self.applicant.get("aadhar_number"), delay=150)
                 
+                aadhar_input.press("Tab")
                 time.sleep(5)
                 
                 # --- DOB Injection ---
                 self.log("Injecting Date of Birth...")
                 fmt_dob = self.format_date_for_injection(self.applicant.get("dob"))
                 page_form.evaluate(f"""
-                    var dobField = document.getElementById('statusform:citAapDOBInputDate')
-                                || document.querySelector('input[id$="DOBInputDate"]')
-                                || document.querySelector('input[id*="dobInputDate"]')
-                                || document.querySelector('input[id*="DOBInput"]');
+                    var dobField = document.getElementById('statusform:citAapDOBInputDate');
                     if (dobField) {{
                         dobField.value = '{fmt_dob}';
                         dobField.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         dobField.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-                    }} else {{
-                        console.error('DOB field not found!');
                     }}
                 """)
                 time.sleep(4)
                 
                 # --- OTP Flow (Agent Pause 2) ---
                 self.log("Requesting OTP from Server...")
-                # Ensure previously filled fields have triggered their onchange events
-                page_form.keyboard.press("Tab")
-                time.sleep(1)
+                page_form.get_by_role("button", name="Generate OTP").click()
+                time.sleep(3) 
                 
-                otp_btn = page_form.locator('input[value="Generate OTP"], button:has-text("Generate OTP")').first
-                otp_btn.click(force=True)
-                time.sleep(4)
-                
-                # Request OTP through WebSocket
-                user_otp = self._emit_and_wait(
-                    "REQUEST_OTP",
-                    {"message": "OTP sent to registered mobile. Enter OTP:"},
-                    page=page
-                )
+                # Prompt user via WebSocket UI
+                user_otp = self._ws_prompt({
+                    "type": "REQUEST_OTP",
+                    "message": "An OTP has been sent to your registered mobile number. Please enter the OTP below."
+                })
                 
                 page_form.locator('[id="statusform:otp_id"]').fill(user_otp)
                 page_form.get_by_role("button", name="Confirm OTP").click()
@@ -290,85 +220,38 @@ class TNeSevaiBackendAgent:
                 time.sleep(5)
 
                 # --- Fill Address Details ---
-                self.log("Validating Address Details...")
-                missing_addr_fields = []
-                if not self.applicant.get("ration_card_no"): missing_addr_fields.append("Ration Card Number")
-                if not self.address.get("building_no"): missing_addr_fields.append("Building / Door No")
-                if not self.address.get("street_name"): missing_addr_fields.append("Street Name")
-                if not self.address.get("pincode"): missing_addr_fields.append("Pincode")
-
-                if missing_addr_fields:
-                    missing_str = ", ".join(missing_addr_fields)
-                    self.log(f"Missing {missing_str}. Requesting from user...")
-                    user_provided_data = self._emit_and_wait(
-                        "REQUEST_MISSING_DETAILS",
-                        {
-                            "message": f"Could not extract {missing_str} from documents. Please provide them below:",
-                            "missing_fields": missing_addr_fields
-                        },
-                        page=page
-                    )
-                    if isinstance(user_provided_data, dict):
-                        if "Ration Card Number" in user_provided_data: self.applicant["ration_card_no"] = user_provided_data["Ration Card Number"]
-                        if "Building / Door No" in user_provided_data: self.address["building_no"] = user_provided_data["Building / Door No"]
-                        if "Street Name" in user_provided_data: self.address["street_name"] = user_provided_data["Street Name"]
-                        if "Pincode" in user_provided_data: self.address["pincode"] = user_provided_data["Pincode"]
-
                 self.log("Filling Address and Form Details...")
+                if self.address.get("village"): page_form.locator('[id="residence:cRvillageListId"]').select_option(label=self.address.get("village"))
+                if self.address.get("building_no"): page_form.locator('[id="residence:buildForList"]').fill(self.address.get("building_no"))
+                if self.address.get("street_name"): page_form.locator('[id="residence:streetForList"]').fill(self.address.get("street_name"))
+                if self.address.get("pincode"): page_form.locator('[id="residence:pinForList"]').fill(self.address.get("pincode"))
+
+                fmt_from = self.format_date_for_injection(self.address.get("from_date"))
+                page_form.evaluate(f"document.getElementById('residence:fromDateListInputDate').value = '{fmt_from}';")
+                fmt_to = self.format_date_for_injection(self.address.get("to_date"))
+                page_form.evaluate(f"document.getElementById('residence:toDateListInputDate').value = '{fmt_to}';")
                 
-                try:
-                    if self.address.get("building_no"): 
-                        page_form.locator('[id="residence:buildForList"], input[id$="buildForList"]').first.fill(self.address.get("building_no"))
-                    if self.address.get("street_name"): 
-                        page_form.locator('[id="residence:streetForList"], input[id$="streetForList"]').first.fill(self.address.get("street_name"))
-                    if self.address.get("pincode"): 
-                        page_form.locator('[id="residence:pinForList"], input[id$="pinForList"]').first.fill(self.address.get("pincode"))
+                if self.applicant.get("ration_card_no"):
+                    page_form.locator('[id="residence:rationCardId"]').fill(self.applicant.get("ration_card_no"))
+                    time.sleep(4) 
 
-                    fmt_from = self.format_date_for_injection(self.address.get("from_date"))
-                    page_form.evaluate(f"var el = document.getElementById('residence:fromDateListInputDate') || document.querySelector('input[id$=\"fromDateListInputDate\"]'); if(el) el.value = '{fmt_from}';")
-                    fmt_to = self.format_date_for_injection(self.address.get("to_date"))
-                    page_form.evaluate(f"var el = document.getElementById('residence:toDateListInputDate') || document.querySelector('input[id$=\"toDateListInputDate\"]'); if(el) el.value = '{fmt_to}';")
-                    
-                    if self.applicant.get("ration_card_no"):
-                        page_form.locator('[id="residence:rationCardId"], input[id$="rationCardId"], input[id*="rationCard"], input[id$="rationCardNo"]').first.fill(self.applicant.get("ration_card_no"))
-                        page_form.keyboard.press("Tab")
-                        time.sleep(2) 
-                except Exception as e:
-                    self.log(f"Failed filling form details: {str(e)}")
+                self.log("Submitting Details Table...")
+                page_form.get_by_role("button", name="Add").click()
+                time.sleep(5)
 
-                self.log("Submitting Details Table by clicking Add...")
-                try:
-                    # Look for the specific Add button that is just below the address entry row
-                    # using exact name match or button properties
-                    add_btn = page_form.locator('input[value="Add"], button:has-text("Add")').first
-                    add_btn.click(force=True)
-                    self.log("Clicked Add. Waiting for table to update...")
-                    time.sleep(5)
-                except Exception as e:
-                    self.log(f"Warning: Failed to click Add button: {str(e)}")
-
-                # Dialog Handler for Submit confirmation prompts
+                # Dialog Handler
                 def safe_dialog_handler(dialog):
                     try: dialog.accept()
                     except Exception: pass 
                 page_form.on("dialog", safe_dialog_handler) 
 
-                self.log("Submitting the entire form...")
-                try:
-                    # Look for the specific Submit button
-                    submit_btn = page_form.get_by_role("button", name="Submit").first
-                    if not submit_btn.is_visible():
-                        submit_btn = page_form.locator('input[value="Submit"], button[type="submit"]:has-text("Submit")').first
-                    submit_btn.click(force=True)
-                    self.log("Clicked Submit. Waiting for network to settle...")
-                    page_form.wait_for_load_state("networkidle")
-                    time.sleep(6) 
-                except Exception as e:
-                    self.log(f"Warning: Failed to click Submit button: {str(e)}")
+                self.log("Submitting Form...")
+                page_form.get_by_role("button", name="Submit").click()
+                page_form.wait_for_load_state("networkidle")
+                time.sleep(6) 
 
                 # --- DOWNLOAD FORM ---
                 self.log("Downloading Self Declaration Form...")
-                self_decl_upload_path = self.docs.get("self_decl_path", "")
                 try:
                     with page_form.expect_download(timeout=15000) as download_info:
                         page_form.get_by_role("link", name="Download Self declaration form").click(force=True)
@@ -376,24 +259,22 @@ class TNeSevaiBackendAgent:
                     save_path = os.path.join(os.getcwd(), "Self_Declaration_Form_For_User.pdf")
                     download.save_as(save_path)
                     self.log(f"Form saved locally at: {save_path}")
-                    self_decl_upload_path = save_path
                 except Exception as e:
                     self.log("Download skipped or failed. Proceeding.")
-                    if not self_decl_upload_path or not os.path.exists(self_decl_upload_path):
-                        self_decl_upload_path = os.path.join(os.getcwd(), "Self_Declaration_Form_For_User.pdf")
 
                 # --- Document Upload Await (Agent Pause 3) ---
-                self.log("Waiting for user to confirm signed documents...")
-                self._emit_and_wait(
-                    "REQUEST_SIGNED_DOCS",
-                    {"message": "Ensure signed declaration is saved. Ready to resume upload?"},
-                    page=page
-                )
+                self.log("Waiting for user to confirm documents are ready for upload...")
+
+                # Notify the user via WebSocket UI to confirm upload
+                self._ws_prompt({
+                    "type": "REQUEST_RESUME",
+                    "message": "The Self-Declaration Form has been downloaded. Please ensure your photo, signed declaration, and address proof are ready. Click Submit to continue with document upload."
+                })
 
                 # --- DOCUMENT UPLOADS ---
                 def process_document_upload(doc_label, filepath, doc_no=None):
-                    if not os.path.exists(filepath):
-                        self.log(f"WARNING: File not found at {filepath}. Skipping {doc_label}...")
+                    if not filepath or not os.path.exists(filepath):
+                        self.log(f"WARNING: File not found at '{filepath}'. Skipping {doc_label}...")
                         return
 
                     self.log(f"Uploading {doc_label} from {filepath}...")
@@ -416,7 +297,7 @@ class TNeSevaiBackendAgent:
 
                 self.log("Commencing Document Processing...")
                 process_document_upload("Photo", self.docs.get("photo_path"))
-                process_document_upload("Self-Declaration of Applicant", self_decl_upload_path)
+                process_document_upload("Self-Declaration of Applicant", self.docs.get("self_decl_path"))
                 process_document_upload("Current Address Proof", self.docs.get("address_proof_path"), self.docs.get("address_doc_no"))
 
                 # --- FINAL STEP ---
@@ -432,37 +313,100 @@ class TNeSevaiBackendAgent:
 
         except Exception as e:
             self.log(f"CRITICAL ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 
 if __name__ == "__main__":
-    # Simulate the JSON payload received from your AI Agent
-    default_json_payload = {
+    import sys
+    import argparse
+
+    # ── Default values (used as fallback / prefill for interactive mode) ──────
+    _defaults = {
         "credentials": {
-            "username": "lohithg",
-            "password": "Lohith@2007"
+            "username":  "lohithg",
+            "password":  "Lohith@2007"
         },
         "applicant_details": {
-            "can_number": "13318016498757",
-            "aadhar_number": "607126530111",
-            "dob": "23-Feb-2007",
+            "can_number":     "13318016498757",
+            "aadhar_number":  "607126530111",
+            "dob":            "23-Feb-2007",
             "ration_card_no": "333477513066"
         },
         "address_details": {
-            "village": "Gundu Uppalavadi",
-            "building_no": "55",
-            "street_name": "World vision street thazhungda",
-            "pincode": "607002",
-            "from_date": "26/07/2023",
-            "to_date": "01/03/2026"
+            "village":      "Gundu Uppalavadi",
+            "building_no":  "55",
+            "street_name":  "World vision street thazhungda",
+            "pincode":      "607002",
+            "from_date":    "26/07/2023",
+            "to_date":      "01/03/2026"
         },
         "documents": {
-            "photo_path": "D:/Playwright/3rdAgent/REQPICS/LOHITHG.jpg",
-            "self_decl_path": "D:/Playwright/3rdAgent/REQPICS/SelfDeclarationForm_TN-1520260126407SIGNED (1).pdf",
+            "photo_path":         "D:/Playwright/3rdAgent/REQPICS/LOHITHG.jpg",
+            "self_decl_path":     "D:/Playwright/3rdAgent/REQPICS/SelfDeclarationForm_TN-1520260126407SIGNED (1).pdf",
             "address_proof_path": "D:/Playwright/3rdAgent/REQPICS/Screenshot 2026-01-26 200035.png",
-            "address_doc_no": "TN3120250006924"
+            "address_doc_no":     "TN3120250006924"
         }
     }
 
-    # Initialize and run the backend bot
-    bot = TNeSevaiBackendAgent(default_json_payload, ws_manager=None, loop=None)
+    parser = argparse.ArgumentParser(description="Run TNeSevai automation standalone")
+    parser.add_argument("--payload", metavar="FILE",
+                        help="Path to a JSON file containing the full payload "
+                             "(e.g. the one saved by the document extraction pipeline).")
+    parser.add_argument("--interactive", action="store_true",
+                        help="Prompt for each field interactively, pre-filled with defaults.")
+    args = parser.parse_args()
+
+    # ── Mode 1: Load from JSON file ───────────────────────────────────────────
+    if args.payload:
+        with open(args.payload, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        print(f"[INFO] Loaded payload from: {args.payload}")
+
+    # ── Mode 2: Interactive prompt (pre-filled with defaults/extracted data) ──
+    elif args.interactive:
+        def _prompt(label, default):
+            val = input(f"  {label} [{default}]: ").strip()
+            return val if val else default
+
+        print("\n── Credentials ──────────────────────────────────")
+        username  = _prompt("TNeSevai Username", _defaults["credentials"]["username"])
+        password  = _prompt("Password",          _defaults["credentials"]["password"])
+
+        print("\n── Applicant Details ────────────────────────────")
+        can       = _prompt("CAN Number",        _defaults["applicant_details"]["can_number"])
+        aadhar    = _prompt("Aadhaar Number",     _defaults["applicant_details"]["aadhar_number"])
+        dob       = _prompt("Date of Birth",      _defaults["applicant_details"]["dob"])
+        ration    = _prompt("Ration Card No",     _defaults["applicant_details"]["ration_card_no"])
+
+        print("\n── Address Details ──────────────────────────────")
+        village   = _prompt("Village/Taluk",      _defaults["address_details"]["village"])
+        bldg      = _prompt("Building No",        _defaults["address_details"]["building_no"])
+        street    = _prompt("Street Name",        _defaults["address_details"]["street_name"])
+        pincode   = _prompt("Pincode",            _defaults["address_details"]["pincode"])
+        from_dt   = _prompt("Residing From (DD/MM/YYYY)", _defaults["address_details"]["from_date"])
+        to_dt     = _prompt("Residing To   (DD/MM/YYYY)", _defaults["address_details"]["to_date"])
+
+        print("\n── Document Paths ───────────────────────────────")
+        photo     = _prompt("Photo path",         _defaults["documents"]["photo_path"])
+        self_decl = _prompt("Self-Decl PDF path", _defaults["documents"]["self_decl_path"])
+        addr_pf   = _prompt("Address Proof path", _defaults["documents"]["address_proof_path"])
+        addr_no   = _prompt("Address Doc No",     _defaults["documents"]["address_doc_no"])
+        print()
+
+        payload = {
+            "credentials":      {"username": username,  "password": password},
+            "applicant_details":{"can_number": can, "aadhar_number": aadhar, "dob": dob, "ration_card_no": ration},
+            "address_details":  {"village": village, "building_no": bldg, "street_name": street,
+                                 "pincode": pincode, "from_date": from_dt, "to_date": to_dt},
+            "documents":        {"photo_path": photo, "self_decl_path": self_decl,
+                                 "address_proof_path": addr_pf, "address_doc_no": addr_no}
+        }
+
+    # ── Mode 3: Use hardcoded defaults (original behaviour) ──────────────────
+    else:
+        payload = _defaults
+
+    # Run the agent (standalone mode — no WebSocket, uses input() fallback for CAPTCHA/OTP)
+    bot = TNeSevaiBackendAgent(payload)
     bot.run()

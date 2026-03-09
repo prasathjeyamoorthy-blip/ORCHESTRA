@@ -145,6 +145,17 @@ def run_playwright_agent(payload: dict, loop=None):
 @app.post("/submit-application")
 async def submit_application(payload: dict, background_tasks: BackgroundTasks):
     import asyncio
+    # Save payload for standalone testing: python rescert.py --payload last_payload.json
+    try:
+        import json as _json
+        payload_path = os.path.join(playwright_dir, "last_payload.json")
+        with open(payload_path, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, indent=2)
+        print(f"[INFO] Payload saved to {payload_path}")
+    except Exception as e:
+        print(f"[WARNING] Could not save payload: {e}")
+
     loop = asyncio.get_running_loop()
     background_tasks.add_task(run_playwright_agent, payload, loop)
     return {"status": "success", "message": "Playwright task started"}
+

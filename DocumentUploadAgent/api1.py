@@ -30,10 +30,11 @@ def validate():
     aadhaar_file = request.files.get("aadhaar")
     ration_file = request.files.get("ration")
     address_file = request.files.get("address")
+    caste_file = request.files.get("caste")
 
     # check types of provided files
     for label, f in [("aadhaar", aadhaar_file), ("ration", ration_file),
-                     ("address", address_file)]:
+                     ("address", address_file), ("caste", caste_file)]:
         if f and f.content_type != "application/pdf":
             abort(400, f"{label} file must be a PDF")
 
@@ -45,12 +46,15 @@ def validate():
         paths['ration'] = _save_temp(ration_file)
     if address_file:
         paths['address'] = _save_temp(address_file)
+    if caste_file:
+        paths['caste'] = _save_temp(caste_file)
 
     try:
         result = ppp_main.process_documents(
             paths.get('aadhaar'),
             paths.get('ration'),
-            paths.get('address')
+            paths.get('address'),
+            paths.get('caste')
         )
     except Exception as exc:
         abort(500, str(exc))
