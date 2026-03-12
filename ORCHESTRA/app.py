@@ -131,6 +131,45 @@ def get_captcha():
         return FileResponse(captcha_path)
     return {"error": "Captcha not found"}
 
+@app.get("/download-declaration")
+def download_declaration():
+    # Serve the self-declaration form for download
+    declaration_path = os.path.join(playwright_dir, "Self_Declaration_Form_To_Sign.pdf")
+    if os.path.exists(declaration_path):
+        return FileResponse(
+            declaration_path,
+            media_type="application/pdf",
+            filename="Self_Declaration_Form.pdf"
+        )
+    return {"error": "Declaration form not found"}
+
+@app.post("/upload-signed-declaration")
+async def upload_signed_declaration(file: UploadFile = File(...)):
+    """Save the signed self-declaration form uploaded by user"""
+    try:
+        # Save to Playwright uploaded_documents directory
+        uploaded_docs_dir = os.path.join(playwright_dir, "uploaded_documents")
+        os.makedirs(uploaded_docs_dir, exist_ok=True)
+        
+        save_path = os.path.join(uploaded_docs_dir, f"Signed_Self_Declaration_{file.filename}")
+        
+        with open(save_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        print(f"[INFO] Signed self-declaration saved: {save_path}")
+        
+        return {
+            "status": "success",
+            "message": "Signed declaration uploaded successfully",
+            "file_path": os.path.abspath(save_path)
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to save signed declaration: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 def run_playwright_agent(payload: dict, loop=None):
     original_cwd = os.getcwd()
     try:

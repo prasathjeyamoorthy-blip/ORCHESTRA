@@ -191,21 +191,39 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
             can_number:     credentials.can_number   || "",
             aadhar_number:  aadharNum,
             dob:            combined.dob             || "",
-            ration_card_no: combined.ration_card_number || ""
+            ration_card_no: combined.ration_card_number || "",
+            name:           combined.username        || "",
+            father_name:    combined.father_name     || "",
+            gender:         combined.gender          || "",
+            religion:       combined.religion        || "",
+            community:      combined.community       || "",
+            mobile_number:  combined.phone_number    || "",
+            email:          combined.email           || ""
           },
           address_details: {
-            village:      combined.taluk      || combined.district || "",
-            building_no:  combined.door_no   || "",
-            street_name:  combined.street_name || combined.area   || "",
-            pincode:      combined.pincode    || "",
+            state:        combined.state        || "Tamil Nadu",
+            district:     combined.district     || "",
+            village:      combined.taluk        || combined.district || "",
+            area:         combined.area         || "",
+            building_no:  combined.door_no      || "",
+            street_name:  combined.street_name  || combined.area   || "",
+            pincode:      combined.pincode      || "",
             from_date:    addressDetails.from_date,
-            to_date:      addressDetails.to_date
+            to_date:      addressDetails.to_date,
+            // Permanent address (same as current by default)
+            perm_state:        combined.state        || "Tamil Nadu",
+            perm_district:     combined.district     || "",
+            perm_village:      combined.taluk        || combined.district || "",
+            perm_building_no:  combined.door_no      || "",
+            perm_street_name:  combined.street_name  || combined.area   || "",
+            perm_pincode:      combined.pincode      || ""
           },
           documents: {
-            photo_path:         bulkData.saved_paths?.["Photo"]   || "",
-            self_decl_path:     "",
-            address_proof_path: bulkData.saved_paths?.["Aadhaar"] || "",
-            address_doc_no:     aadharNum
+            photo_path:            bulkData.saved_paths?.["Photo"]   || "",
+            self_decl_path:        "",
+            address_proof_path:    bulkData.saved_paths?.["Aadhaar"] || "",
+            driving_license_path:  bulkData.saved_paths?.["Driving License"] || "",
+            address_doc_no:        aadharNum
           }
         };
 
@@ -324,16 +342,26 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
             {/* ── Applicant Details ── */}
             <div style={sectionStyle}>
               <div style={headingStyle}>👤 Applicant Details</div>
-              <Row label="CAN Number"      value={p.applicant_details?.can_number}    src="input" />
-              <Row label="Aadhaar Number"  value={p.applicant_details?.aadhar_number} src="input" />
-              <Row label="Date of Birth"   value={p.applicant_details?.dob}           src="extracted" />
+              <Row label="Name"            value={p.applicant_details?.name}           src="extracted" />
+              <Row label="Father Name"     value={p.applicant_details?.father_name}    src="extracted" />
+              <Row label="Gender"          value={p.applicant_details?.gender}         src="extracted" />
+              <Row label="Religion"        value={p.applicant_details?.religion}       src="extracted" />
+              <Row label="Community"       value={p.applicant_details?.community}      src="extracted" />
+              <Row label="CAN Number"      value={p.applicant_details?.can_number}     src="input" />
+              <Row label="Aadhaar Number"  value={p.applicant_details?.aadhar_number}  src="input" />
+              <Row label="Date of Birth"   value={p.applicant_details?.dob}            src="extracted" />
               <Row label="Ration Card No"  value={p.applicant_details?.ration_card_no} src="extracted" />
+              <Row label="Mobile Number"   value={p.applicant_details?.mobile_number}  src="extracted" />
+              <Row label="Email"           value={p.applicant_details?.email}          src="extracted" />
             </div>
 
             {/* ── Address Details ── */}
             <div style={sectionStyle}>
-              <div style={headingStyle}>🏠 Address Details</div>
+              <div style={headingStyle}>🏠 Current Address Details</div>
+              <Row label="State"           value={p.address_details?.state}        src="extracted" />
+              <Row label="District"        value={p.address_details?.district}     src="extracted" />
               <Row label="Village / Taluk" value={p.address_details?.village}      src="extracted" />
+              <Row label="Area / Locality" value={p.address_details?.area}         src="extracted" />
               <Row label="Building No"     value={p.address_details?.building_no}  src="extracted" />
               <Row label="Street Name"     value={p.address_details?.street_name}  src="extracted" />
               <Row label="Pincode"         value={p.address_details?.pincode}      src="extracted" />

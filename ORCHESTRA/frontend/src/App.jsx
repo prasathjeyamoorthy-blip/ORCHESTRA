@@ -4,6 +4,8 @@ import ChatBubble from "./components/ChatBubble";
 import ChatInput from "./components/ChatInput";
 import DocumentChecklist from "./components/DocumentChecklist";
 import AutomationModal from "./components/AutomationModal";
+import SelfDeclarationModal from "./components/SelfDeclarationModal";
+import DocumentNumberModal from "./components/DocumentNumberModal";
 import { sendMessage } from "./api/chatApi";
 import "./index.css";
 
@@ -162,6 +164,9 @@ export default function App() {
   // ------------------------------------
   const wsRef = useRef(null);
   const [automationEvent, setAutomationEvent] = useState(null);
+  const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
+  const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
+  const [showDocumentNumber, setShowDocumentNumber] = useState(false);
 
   /**
    * Opens the WebSocket connection to the backend.
@@ -181,7 +186,19 @@ export default function App() {
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       console.log("[WS] Event from Playwright:", data);
-      setAutomationEvent(data);
+      
+      // Handle different event types
+      if (data.type === "SELF_DECLARATION_DOWNLOADED") {
+        setSelfDeclarationPath(data.file_path || data.download_path);
+        setShowSelfDeclaration(true);
+      } else if (data.type === "REQUEST_SIGNED_DECLARATION") {
+        setSelfDeclarationPath(data.download_path);
+        setShowSelfDeclaration(true);
+      } else if (data.type === "REQUEST_DOCUMENT_NUMBER") {
+        setShowDocumentNumber(true);
+      } else {
+        setAutomationEvent(data);
+      }
     };
 
     socket.onclose = () => {
@@ -200,6 +217,39 @@ export default function App() {
         data: inputValue
       }));
       setAutomationEvent(null); // Hide modal while Playwright processes
+    }
+  };
+
+  const handleSelfDeclarationSubmit = (filePath) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "USER_ANSWER",
+        data: filePath
+      }));
+      setShowSelfDeclaration(false);
+    }
+  };
+
+  const handleSelfDeclarationExit = () => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "USER_ANSWER",
+        data: "exit"
+      }));
+      setShowSelfDeclaration(false);
+    }
+  };
+
+  const handleDocumentNumberSubmit = (docNumber) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "USER_ANSWER",
+        data: docNumber
+      }));
+      setShowDocumentNumber(false);
     }
   };
 
@@ -262,6 +312,18 @@ export default function App() {
         isOpen={!!automationEvent} 
         eventData={automationEvent} 
         onSubmit={handleAutomationSubmit} 
+      />
+
+      <SelfDeclarationModal
+        isOpen={showSelfDeclaration}
+        downloadPath={selfDeclarationPath}
+        onSubmit={handleSelfDeclarationSubmit}
+        onExit={handleSelfDeclarationExit}
+      />
+
+      <DocumentNumberModal
+        isOpen={showDocumentNumber}
+        onSubmit={handleDocumentNumberSubmit}
       />
     </div>
   );

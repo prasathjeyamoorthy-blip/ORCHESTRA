@@ -53,6 +53,7 @@ Return strict JSON:
 Output JSON only.
 """
 
+
 RATION_CARD_PROMPT = """
 Extract only the Tamil text that appears to the left of the QR code
 in this ration card.

@@ -159,12 +159,14 @@ def process_documents(aadhaar_pdf: str, ration_pdf: str = None, address_pdf: str
             "aadhaar_number": get_aadhaar_field("aadhaar_number"),
             "dob": get_field_priority("dob"),
             "father_name": get_field_priority("father_name"),
+            "gender": get_field_priority("gender"),
             "religion": get_field_priority("religion"),
             "community": get_field_priority("community"),
             "state": get_field_priority("state"),
             "district": get_field_priority("district"),
             "taluk": get_field_priority("taluk"),
             "phone_number": get_aadhaar_field("phone_number"),
+            "email": get_field_priority("email"),
             "ration_card_number": get_ration_field("number"),
             "address": (
                 f"{get_aadhaar_field('door_no')}, {get_aadhaar_field('street')}, {get_aadhaar_field('area')}, {get_aadhaar_field('city')}, {get_aadhaar_field('state')} - {get_aadhaar_field('pincode')}"

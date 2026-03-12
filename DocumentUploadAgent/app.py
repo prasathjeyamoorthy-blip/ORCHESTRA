@@ -18,6 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Store files in Playwright directory for automation access
+PLAYWRIGHT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Playwright", "uploaded_documents"))
+os.makedirs(PLAYWRIGHT_DIR, exist_ok=True)
+
+# Keep local uploads folder for backward compatibility
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -72,26 +77,40 @@ async def process_all_documents(
     
     saved_paths = {"Aadhaar": None, "Ration Card": None, "Driving License": None, "Photo": None}
     
-    # helper to save file
+    # helper to save file to Playwright directory
     def _save_if_exists(file_obj, key):
         if file_obj:
-            file_path = os.path.join(UPLOAD_DIR, file_obj.filename)
-            with open(file_path, "wb") as buffer:
+            # Save to Playwright directory for automation access
+            playwright_path = os.path.join(PLAYWRIGHT_DIR, file_obj.filename)
+            with open(playwright_path, "wb") as buffer:
                 shutil.copyfileobj(file_obj.file, buffer)
-            saved_paths[key] = file_path
+            
+            # Also save to local uploads for extraction processing
+            local_path = os.path.join(UPLOAD_DIR, file_obj.filename)
+            file_obj.file.seek(0)  # Reset file pointer
+            with open(local_path, "wb") as buffer:
+                shutil.copyfileobj(file_obj.file, buffer)
+            
+            # Return absolute path to Playwright directory
+            saved_paths[key] = os.path.abspath(playwright_path)
+            print(f"✓ Saved {key} to: {saved_paths[key]}")
     
     _save_if_exists(aadhaar, "Aadhaar")
     _save_if_exists(ration, "Ration Card")
     _save_if_exists(driving, "Driving License")
     _save_if_exists(photo, "Photo")
     
-    # Process using main.py logic
+    # Process using main.py logic (uses local uploads folder for extraction)
     # Note: process_documents expects (aadhaar, ration, address)
     # the frontend uses driving license as an alternative address/dob proof
+    local_aadhaar = os.path.join(UPLOAD_DIR, aadhaar.filename) if aadhaar else None
+    local_ration = os.path.join(UPLOAD_DIR, ration.filename) if ration else None
+    local_driving = os.path.join(UPLOAD_DIR, driving.filename) if driving else None
+    
     result = process_documents(
-        aadhaar_pdf=saved_paths["Aadhaar"],
-        ration_pdf=saved_paths["Ration Card"],
-        address_pdf=saved_paths["Driving License"]  # treating driving license as the 3rd doc
+        aadhaar_pdf=local_aadhaar,
+        ration_pdf=local_ration,
+        address_pdf=local_driving  # treating driving license as the 3rd doc
     )
 
     is_human = False

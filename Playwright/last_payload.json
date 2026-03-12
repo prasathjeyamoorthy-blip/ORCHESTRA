@@ -7,20 +7,37 @@
     "can_number": "13318016498757",
     "aadhar_number": "607126530111",
     "dob": "23-02-2007",
-    "ration_card_no": "33347751306"
+    "ration_card_no": "33347751306",
+    "name": "Lohith",
+    "father_name": "Gopalakrishnan",
+    "gender": "MALE",
+    "religion": "HINDU",
+    "community": "GOUNDAR",
+    "mobile_number": "XXXX XXXX 0111",
+    "email": ""
   },
   "address_details": {
-    "village": "Puducherry",
-    "building_no": "7A,FF-1AND SF-1",
-    "street_name": "Thalavaveenasamy Street",
+    "state": "TAMIL NADU",
+    "district": "CUDDALORE",
+    "village": "CUDDALORE",
+    "area": "GUNDUUPPALAVADI",
+    "building_no": "55",
+    "street_name": "WORLD VISION NAGAR",
     "pincode": "607002",
     "from_date": "26/07/2023",
-    "to_date": "10/03/2026"
+    "to_date": "12/03/2026",
+    "perm_state": "TAMIL NADU",
+    "perm_district": "CUDDALORE",
+    "perm_village": "CUDDALORE",
+    "perm_building_no": "55",
+    "perm_street_name": "WORLD VISION NAGAR",
+    "perm_pincode": "607002"
   },
   "documents": {
-    "photo_path": "uploads\\lohit_photo.jpeg",
+    "photo_path": "E:\\DESKTOP\\ORCHESTRA_NEW\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_photo.jpeg",
     "self_decl_path": "",
-    "address_proof_path": "uploads\\daniel_aadhar.pdf",
+    "address_proof_path": "E:\\DESKTOP\\ORCHESTRA_NEW\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_pdf_aadhar.pdf",
+    "driving_license_path": "E:\\DESKTOP\\ORCHESTRA_NEW\\ORCHESTRA\\Playwright\\uploaded_documents\\lohith_driving_license.pdf",
     "address_doc_no": "607126530111"
   }
 }
