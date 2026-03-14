@@ -1,0 +1,43 @@
+{
+  "credentials": {
+    "username": "lohithg",
+    "password": "Lohith@2007"
+  },
+  "applicant_details": {
+    "can_number": "13318016498757",
+    "aadhar_number": "607126530111",
+    "dob": "23-02-2007",
+    "ration_card_no": "33347751306",
+    "name": "Lohith",
+    "father_name": "Gopalakrishnan",
+    "gender": "MALE",
+    "religion": "HINDU",
+    "community": "GOUNDAR",
+    "mobile_number": "XXXX XXXX 0111",
+    "email": ""
+  },
+  "address_details": {
+    "state": "TAMIL NADU",
+    "district": "CUDDALORE",
+    "village": "CUDDALORE",
+    "area": "GUNDUUPPALAVADI",
+    "building_no": "55",
+    "street_name": "WORLD VISION NAGAR",
+    "pincode": "607002",
+    "from_date": "09/08/2022",
+    "to_date": "15/03/2026",
+    "perm_state": "TAMIL NADU",
+    "perm_district": "CUDDALORE",
+    "perm_village": "CUDDALORE",
+    "perm_building_no": "55",
+    "perm_street_name": "WORLD VISION NAGAR",
+    "perm_pincode": "607002"
+  },
+  "documents": {
+    "photo_path": "D:\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\LOHITHG.jpg",
+    "self_decl_path": "",
+    "aadhaar_path": "D:\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\in.gov.uidai-ADHAR-2c881618229e6df55d45151b1029b82a.pdf",
+    "address_proof_path": "D:\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\Screenshot 2026-01-26 200035.png",
+    "address_doc_no": "TN31 20250006924"
+  }
+}

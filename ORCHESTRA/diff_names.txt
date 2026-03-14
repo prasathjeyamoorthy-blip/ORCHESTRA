@@ -1,0 +1,24 @@
+﻿DocumentUploadAgent/.env
+DocumentUploadAgent/__pycache__/app.cpython-38.pyc
+DocumentUploadAgent/__pycache__/nim_vlm_inc.cpython-38.pyc
+DocumentUploadAgent/app.py
+DocumentUploadAgent/docu/JAVID.pdf
+DocumentUploadAgent/docu/cohort 10 final.pdf
+DocumentUploadAgent/docu/d_income.pdf
+DocumentUploadAgent/docu/income_certificate .pdf
+DocumentUploadAgent/docu/m_income.pdf
+DocumentUploadAgent/docu/matlab.pdf
+DocumentUploadAgent/docu/pan.pdf
+DocumentUploadAgent/docu/panr.pdf
+DocumentUploadAgent/docu/scholar_profile (1).pdf
+DocumentUploadAgent/docu/vvv.pdf
+DocumentUploadAgent/main.py
+DocumentUploadAgent/nim_vlm_inc.py
+DocumentUploadAgent/requirements.txt
+ORCHESTRA/agent.py
+ORCHESTRA/app.py
+ORCHESTRA/faiss_texts.json
+ORCHESTRA/frontend/src/App.jsx
+ORCHESTRA/frontend/src/components/ChatInput.jsx
+ORCHESTRA/frontend/src/components/DocumentChecklist.jsx
+ORCHESTRA/playright_demo.py

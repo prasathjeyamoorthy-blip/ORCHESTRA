@@ -1,0 +1,45 @@
+﻿ M DocumentUploadAgent/.env
+ M DocumentUploadAgent/__pycache__/app.cpython-38.pyc
+ D DocumentUploadAgent/__pycache__/nim_vlm_inc.cpython-38.pyc
+ M DocumentUploadAgent/app.py
+ D DocumentUploadAgent/docu/JAVID.pdf
+ D "DocumentUploadAgent/docu/cohort 10 final.pdf"
+ D DocumentUploadAgent/docu/d_income.pdf
+ D "DocumentUploadAgent/docu/income_certificate .pdf"
+ D DocumentUploadAgent/docu/m_income.pdf
+ D DocumentUploadAgent/docu/matlab.pdf
+ D DocumentUploadAgent/docu/pan.pdf
+ D DocumentUploadAgent/docu/panr.pdf
+ D "DocumentUploadAgent/docu/scholar_profile (1).pdf"
+ D DocumentUploadAgent/docu/vvv.pdf
+ M DocumentUploadAgent/main.py
+ D DocumentUploadAgent/nim_vlm_inc.py
+ M DocumentUploadAgent/requirements.txt
+ M ORCHESTRA/agent.py
+ M ORCHESTRA/app.py
+ M ORCHESTRA/faiss_texts.json
+ M ORCHESTRA/frontend/src/App.jsx
+ M ORCHESTRA/frontend/src/components/ChatInput.jsx
+ M ORCHESTRA/frontend/src/components/DocumentChecklist.jsx
+ D ORCHESTRA/playright_demo.py
+?? DocumentUploadAgent/TODO.md
+?? DocumentUploadAgent/__pycache__/config.cpython-38.pyc
+?? DocumentUploadAgent/__pycache__/extractor.cpython-38.pyc
+?? DocumentUploadAgent/__pycache__/face_validator.cpython-38.pyc
+?? DocumentUploadAgent/api1.py
+?? DocumentUploadAgent/config.py
+?? DocumentUploadAgent/extractor.py
+?? DocumentUploadAgent/test_imports.py
+?? DocumentUploadAgent/uploads/lohit_aadhar.jpeg
+?? DocumentUploadAgent/uploads/lohit_photo.jpeg
+?? DocumentUploadAgent/uploads/lohit_ration_card.jpeg
+?? DocumentUploadAgent/uploads/lohith_driving_license.pdf
+?? DocumentUploadAgent/utils.py
+?? DocumentUploadAgent/validator.py
+?? ORCHESTRA/backend_captcha.png
+?? ORCHESTRA/frontend/src/components/AutomationModal.jsx
+?? Playwright/
+?? diff_names.txt
+?? diff_output.patch
+?? diff_output2.patch
+?? status.txt
