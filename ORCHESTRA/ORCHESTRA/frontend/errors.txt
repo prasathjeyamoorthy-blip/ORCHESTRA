@@ -1,0 +1,241 @@
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:34 [getter-return] Expected to return a value in method 'get'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:81 [no-unused-vars] 'e' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:137 [no-unused-vars] 'x' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:137 [no-empty] Empty block statement.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:149 [no-unused-vars] 'x' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:430 [no-unused-vars] '_err' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:443 [no-undef] 'AggregateError' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:485 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:495 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:495 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:533 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:576 [no-undef] 'process' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:577 [no-undef] 'process' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:994 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:994 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\chunk-G4V7ITBN.js:1002 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:60 [no-unreachable] Unreachable code.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:131 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:131 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:144 [no-undef] 'setImmediate' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:260 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:260 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:269 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:292 [no-unused-vars] 'e' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:325 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:325 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:387 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:516 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:516 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:525 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:526 [no-undef] 'checkDCE' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:797 [no-unused-vars] 'x' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:797 [no-empty] Empty block statement.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:894 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:894 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1120 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1185 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1255 [no-unreachable] Unreachable code.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1270 [no-unused-vars] 'e' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1302 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1592 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1596 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1608 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1760 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1816 [no-unused-vars] 'e' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:1901 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2039 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2045 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2064 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2075 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2088 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2091 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2094 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2103 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2115 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2186 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2228 [no-unused-vars] 'x' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2390 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2401 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2429 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2463 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2467 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2471 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2496 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2496 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2501 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2524 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2524 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2526 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2529 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2555 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2570 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2609 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2611 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2647 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2947 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2956 [valid-typeof] Invalid typeof comparison value.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2960 [valid-typeof] Invalid typeof comparison value.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:2970 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3139 [no-unused-vars] 'err' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3179 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3408 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3524 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3534 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:3856 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4269 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4270 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4945 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "updateTextNode" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4961 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "updateElement" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4971 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "updatePortal" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:4984 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "updateFragment" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5335 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "reconcileChildFibersImpl" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5354 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "reconcileChildFibersImpl" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5391 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "reconcileChildFibersImpl" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5475 [react-hooks/rules-of-hooks] React Hook "useFiber" is called in function "reconcileChildFibersImpl" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5684 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5726 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:5987 [react-hooks/rules-of-hooks] React Hook "useThenable" is called conditionally. React Hooks must be called in the exact same order in every component render.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6072 [react-hooks/rules-of-hooks] React Hook "useThenable" is called conditionally. React Hooks must be called in the exact same order in every component render. Did you accidentally call a React Hook after an early return?
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6299 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6351 [no-unused-vars] 'error' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6612 [react-hooks/rules-of-hooks] React Hook "useThenable" is called in function "updateActionStateImpl" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6702 [react-hooks/rules-of-hooks] React Hook "useEffectEventImpl" is called in function "updateEvent" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6725 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6981 [react-hooks/rules-of-hooks] React Hook "useThenable" is called in function "updateTransition" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:6988 [react-hooks/rules-of-hooks] React Hook "useThenable" is called in function "rerenderTransition" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use".
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:7079 [no-unused-vars] 'error' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:7079 [no-empty] Empty block statement.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:7209 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:7630 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:7991 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8029 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8127 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8376 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8444 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8719 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:8895 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:9097 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:9286 [no-useless-escape] Unnecessary escape character: \/.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:9834 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:10057 [no-unused-vars] 'e$2' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:10242 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:10413 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:10730 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11076 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11151 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11462 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11896 [no-undef] 'IS_REACT_ACT_ENVIRONMENT' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11967 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:11988 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12018 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12126 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12222 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12294 [no-unused-vars] 'error' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12666 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12743 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12796 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:12861 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:13115 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:13325 [getter-return] Expected to return a value in method 'get'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:13816 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14024 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14042 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14137 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14262 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14301 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14454 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14617 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14746 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14747 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14792 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14822 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14849 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14899 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14909 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14930 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14963 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:14998 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15010 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15024 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15036 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15054 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15062 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15063 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15076 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15136 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15142 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15143 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15153 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15163 [no-fallthrough] Expected a 'break' statement before 'default'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15181 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15181 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15191 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15214 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15214 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15230 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15262 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15262 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15271 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15294 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15294 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15303 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15315 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15315 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15317 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15347 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15482 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15485 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15563 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15564 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15654 [no-fallthrough] Expected a 'break' statement before 'case'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:15990 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:16238 [no-prototype-builtins] Do not access Object.prototype method 'hasOwnProperty' from target object.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:16489 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:16637 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:16642 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:17510 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:17510 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:17538 [no-misleading-character-class] Unexpected combined character in character class.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18317 [no-misleading-character-class] Unexpected combined character in character class.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18319 [no-misleading-character-class] Unexpected combined character in character class.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18321 [no-misleading-character-class] Unexpected combined character in character class.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18323 [no-misleading-character-class] Unexpected combined character in character class.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18324 [no-control-regex] Unexpected control character(s) in regular expression: \x00, \x1f.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18329 [getter-return] Expected to return a value in method 'get'.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18335 [no-unused-vars] 'e' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18554 [no-undef] 'process' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18555 [no-undef] 'process' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18576 [no-unused-vars] 'e$3' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:18852 [no-func-assign] 'warnForMissingKey' is a function.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20041 [no-control-regex] Unexpected control character(s) in regular expression: \x00.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20147 [no-cond-assign] Expected a conditional expression and instead saw an assignment.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20256 [no-func-assign] 'shouldErrorImpl' is a function.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20259 [no-func-assign] 'shouldSuspendImpl' is a function.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20428 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20428 [no-undef] '__REACT_DEVTOOLS_GLOBAL_HOOK__' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20436 [no-constant-condition] Unexpected constant condition.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-dom_client.js:20437 [no-undef] 'checkDCE' is not defined.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\.vite\deps\react-icons_md.js:49 [no-func-assign] '_extends' is a function.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\App.jsx:72 [no-unused-vars] 'error' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\App.jsx:133 [no-unused-vars] 'error' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\App.jsx:211 [no-unused-vars] 'err' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\components\AutomationModal.jsx:10 [react-hooks/set-state-in-effect] Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+   8 |
+   9 |   useEffect(() => {
+> 10 |     setInputValue("");
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  11 |     setMultiInputValues({});
+  12 |     setCaptchaSrc("");
+  13 |
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\components\DocumentChecklist.jsx:233 [no-unused-vars] '_' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\components\DocumentChecklist.jsx:233 [no-empty] Empty block statement.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\components\SelfDeclarationModal.jsx:4 [no-unused-vars] 'downloadPath' is defined but never used.
+E:\DESKTOP\ORCHESTRA_ITER1\ORCHESTRA\ORCHESTRA\ORCHESTRA\frontend\src\components\SelfDeclarationModal.jsx:40 [no-unused-vars] 'error' is defined but never used.

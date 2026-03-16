@@ -1,7 +1,7 @@
 import os
 
 # Poppler binaries path (required by pdf2image on Windows)
-POPPLER_PATH = r"d:\Release-25.12.0-0\Release-25.12.0-0 (1)\poppler-25.12.0\Library\bin"
+POPPLER_PATH = r"E:\poppler\poppler-25.12.0\Library\bin"
 
 # NVIDIA VLM API settings
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"

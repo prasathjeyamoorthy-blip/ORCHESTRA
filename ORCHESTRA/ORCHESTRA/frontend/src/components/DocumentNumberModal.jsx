@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LuFileText } from "react-icons/lu";
 
 export default function DocumentNumberModal({ isOpen, onSubmit }) {
   const [documentNumber, setDocumentNumber] = useState("");
@@ -14,31 +15,16 @@ export default function DocumentNumberModal({ isOpen, onSubmit }) {
   };
 
   return (
-    <div style={{
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: "rgba(0, 0, 0, 0.7)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 9999,
-    }}>
-      <div style={{
-        backgroundColor: "#fff",
-        borderRadius: "12px",
-        padding: "30px",
-        maxWidth: "450px",
-        width: "90%",
-        boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-      }}>
-        <h2 style={{ marginTop: 0, color: "#b8860b", fontSize: "22px" }}>
-          📋 Document Number Required
-        </h2>
+    <div className="overlay">
+      <div className="modal-card">
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "2rem", height: "2rem", borderRadius: "0.5rem", backgroundColor: "hsl(var(--primary)/0.1)", color: "hsl(var(--primary))" }}>
+            <LuFileText size={20} />
+          </div>
+          <h2 style={{ fontSize: "1.125rem", fontWeight: 700, margin: 0 }}>Document Number Required</h2>
+        </div>
         
-        <p style={{ color: "#555", lineHeight: "1.6", marginBottom: "20px" }}>
+        <p style={{ fontSize: "0.875rem", color: "hsl(var(--muted-foreground))", marginBottom: "1.5rem" }}>
           Please enter the Document Number for your Current Address Proof (e.g., Aadhaar number):
         </p>
 
@@ -48,36 +34,16 @@ export default function DocumentNumberModal({ isOpen, onSubmit }) {
           onChange={(e) => setDocumentNumber(e.target.value)}
           placeholder="Enter document number"
           maxLength={20}
-          style={{
-            width: "100%",
-            padding: "12px",
-            fontSize: "16px",
-            border: "2px solid #ddd",
-            borderRadius: "8px",
-            marginBottom: "20px",
-            boxSizing: "border-box",
-          }}
+          style={{ width: "100%", padding: "0.75rem", borderRadius: "0.75rem", border: "1px solid hsl(var(--border))", backgroundColor: "transparent", fontSize: "0.875rem", color: "hsl(var(--foreground))", outline: "none", boxSizing: "border-box", marginBottom: "1.5rem" }}
           onKeyPress={(e) => {
             if (e.key === 'Enter') {
               handleSubmit();
             }
           }}
+          autoFocus
         />
 
-        <button
-          onClick={handleSubmit}
-          style={{
-            width: "100%",
-            padding: "12px",
-            backgroundColor: "#b8860b",
-            color: "white",
-            border: "none",
-            borderRadius: "8px",
-            fontSize: "16px",
-            fontWeight: "600",
-            cursor: "pointer",
-          }}
-        >
+        <button onClick={handleSubmit} className="btn-primary" style={{ width: "100%" }}>
           Submit
         </button>
       </div>

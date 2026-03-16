@@ -1,72 +1,36 @@
+import ReactMarkdown from "react-markdown";
+
 export default function ChatBubble({ sender, message }) {
-  const parseSections = (text) => {
-    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const isBot = sender === "agent";
 
-    const sections = [];
-    let currentSection = null;
-
-    lines.forEach((line) => {
-      // Detect section heading
-      if (line.endsWith(":")) {
-        currentSection = {
-          title: line.replace(":", ""),
-          items: []
-        };
-        sections.push(currentSection);
-      }
-      // Detect bullet
-      else if (
-        line.startsWith("-") ||
-        line.startsWith("•") ||
-        /^\d+\./.test(line)
-      ) {
-        if (currentSection) {
-          currentSection.items.push(
-            line.replace(/^[-•]|\d+\./, "").trim()
-          );
-        }
-      }
-      // Intro / normal text
-      else {
-        sections.push({
-          text: line
-        });
-      }
-    });
-
-    return sections;
-  };
-
-  const renderMessage = () => {
-    const sections = parseSections(message);
-
-    return sections.map((section, idx) => {
-      // Intro text
-      if (section.text) {
-        return (
-          <p key={idx} className="chat-intro">
-            {section.text}
-          </p>
-        );
-      }
-
-      // Section with list
-      return (
-        <div key={idx} className="chat-section">
-          <h4 className="chat-section-title">{section.title}</h4>
-          <ul className="chat-list">
-            {section.items.map((item, i) => (
-              <li key={i}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      );
-    });
-  };
+  if (isBot) {
+    return (
+      <div className="msg-bot fade-up">
+        <ReactMarkdown
+          components={{
+            p:          ({ children }) => <p className="msg-p">{children}</p>,
+            strong:     ({ children }) => <strong className="msg-strong">{children}</strong>,
+            em:         ({ children }) => <em className="msg-em">{children}</em>,
+            h1:         ({ children }) => <h2 className="msg-h2">{children}</h2>,
+            h2:         ({ children }) => <h2 className="msg-h2">{children}</h2>,
+            h3:         ({ children }) => <h3 className="msg-h3">{children}</h3>,
+            ul:         ({ children }) => <ul className="msg-ul">{children}</ul>,
+            ol:         ({ children }) => <ol className="msg-ol">{children}</ol>,
+            li:         ({ children }) => <li className="msg-li">{children}</li>,
+            hr:         () => <hr className="msg-hr" />,
+            code:       ({ children }) => <code className="msg-code">{children}</code>,
+            blockquote: ({ children }) => <blockquote className="msg-blockquote">{children}</blockquote>,
+          }}
+        >
+          {message}
+        </ReactMarkdown>
+      </div>
+    );
+  }
 
   return (
-    <div className={`chat-bubble ${sender}`}>
-      {renderMessage()}
+    <div className="msg-user-row fade-up">
+      <div className="msg-user">{message}</div>
     </div>
   );
 }

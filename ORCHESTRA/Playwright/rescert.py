@@ -8,10 +8,9 @@ from playwright.sync_api import sync_playwright  # type: ignore
 
 
 class TNeSevaiBackendAgent:
-    def __init__(self, json_payload, ws_manager=None, loop=None):
+    def __init__(self, json_payload, ws_manager=None):
         self.data = json_payload
         self.ws_manager = ws_manager
-        self.loop = loop
 
         # Parse JSON into easily accessible variables
         self.creds = self.data.get("credentials", {})
@@ -24,16 +23,12 @@ class TNeSevaiBackendAgent:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [STATUS] {message}")
 
-    def _ws_prompt(self, event_dict, timeout=3000):
-        if not self.ws_manager or not self.loop:
+    def _ws_prompt(self, event_dict, timeout=300):
+        if not self.ws_manager:
             return input(f"AGENT PROMPT -> {event_dict.get('message', 'Enter value')}: ")
 
         self.ws_manager.latest_response = None
-        future = asyncio.run_coroutine_threadsafe(
-            self.ws_manager.send_event(event_dict),
-            self.loop
-        )
-        future.result(timeout=10) 
+        self.ws_manager.send_event_sync(event_dict)
         self.log(f"Sent WS event to UI: {event_dict.get('type')}")
 
         elapsed = 0
@@ -167,10 +162,16 @@ class TNeSevaiBackendAgent:
                 captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
                 captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
                 captcha_img.screenshot(path=captcha_path)
-                
+
+                # Encode captcha as base64 and embed directly in the WS event
+                import base64
+                with open(captcha_path, "rb") as f:
+                    captcha_b64 = "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
+
                 user_captcha = self._ws_prompt({
                     "type": "REQUEST_CAPTCHA",
-                    "message": "Please look at the captcha image and enter the code shown below."
+                    "message": "Please look at the captcha image and enter the code shown below.",
+                    "image": captcha_b64
                 })
                 
                 page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
@@ -336,10 +337,31 @@ class TNeSevaiBackendAgent:
 
                     self.log(f"Uploading {doc_label} from {filepath}...")
 
-                    # 1. Select document type from dropdown
-                    page_form.get_by_role("combobox").select_option(label=doc_label)
+                    # 1. Select document type — target the upload section's combobox specifically
+                    # Try known IDs first, then fall back to first enabled combobox
+                    doc_type_selected = False
+                    for selector in ['[id="ss:dsctype"]', '[id="ss:docType"]', '[id="ss:documentType"]']:
+                        try:
+                            el = page_form.locator(selector)
+                            if el.count() > 0:
+                                el.select_option(label=doc_label)
+                                doc_type_selected = True
+                                self.log(f"Selected doc type via {selector}")
+                                break
+                        except: pass
+
+                    if not doc_type_selected:
+                        # Fall back: first enabled (not disabled) combobox
+                        try:
+                            enabled_combos = page_form.locator("select:not([disabled])")
+                            enabled_combos.first.select_option(label=doc_label)
+                            doc_type_selected = True
+                            self.log("Selected doc type via first enabled combobox")
+                        except Exception as e:
+                            self.log(f"WARNING: Could not select doc type '{doc_label}': {e}")
+
                     time.sleep(5)
-                    
+
                     # 2. Fill document number BEFORE file upload (if needed)
                     if doc_no:
                         doc_input = page_form.locator('[id="ss:dscnum"]')

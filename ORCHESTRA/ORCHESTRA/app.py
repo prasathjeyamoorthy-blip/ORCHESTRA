@@ -78,38 +78,111 @@ def chat(req: ChatRequest):
 # PLAYWRIGHT INTEGRATION
 # ================================
 import sys
-from fastapi import BackgroundTasks
+import asyncio as _asyncio
+import threading as _threading
+from collections import deque
 
 # Add Playwright folder to Python path
 playwright_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Playwright"))
 if playwright_dir not in sys.path:
     sys.path.append(playwright_dir)
 
-# Global WebSocket Manager for Automation Events
+
 class ConnectionManager:
     def __init__(self):
-        self.active_connection: WebSocket = None
+        self._connections: list[WebSocket] = []   # all active sockets
         self.latest_response: dict = None
+        self._event_queue: deque = deque()         # events queued before any client connects
+        self._main_loop = None                     # the uvicorn event loop
 
+    # ── properties ────────────────────────────────────────────────────────────
+    @property
+    def active_connection(self) -> WebSocket | None:
+        return self._connections[0] if self._connections else None
+
+    @property
+    def is_connected(self) -> bool:
+        return len(self._connections) > 0
+
+    # ── lifecycle ─────────────────────────────────────────────────────────────
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connection = websocket
-        print("[WebSocket] Automation Frontend Connected")
+        self._connections.append(websocket)
+        self._main_loop = _asyncio.get_running_loop()
+        print(f"[WebSocket] Client connected  — total: {len(self._connections)}")
 
-    def disconnect(self):
-        self.active_connection = None
-        print("[WebSocket] Automation Frontend Disconnected")
+        # Flush any events that were queued before this client arrived
+        while self._event_queue:
+            queued = self._event_queue.popleft()
+            print(f"[WebSocket] Flushing queued event: {queued.get('type')}")
+            await self._send_to(websocket, queued)
 
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self._connections:
+            self._connections.remove(websocket)
+        print(f"[WebSocket] Client disconnected — total: {len(self._connections)}")
+
+    # ── internal send ─────────────────────────────────────────────────────────
+    async def _send_to(self, websocket: WebSocket, event_data: dict):
+        try:
+            await websocket.send_json(event_data)
+        except Exception as e:
+            print(f"[WebSocket ERROR] send failed: {e}")
+
+    # ── async send (called from the event loop) ───────────────────────────────
     async def send_event(self, event_data: dict):
-        if self.active_connection:
-            try:
-                await self.active_connection.send_json(event_data)
-            except Exception as e:
-                print(f"[WebSocket WARNING] Error sending event: {e}")
-        else:
-            print("[WebSocket WARNING] Tried to emit event but frontend is disconnected:", event_data)
+        if not self._connections:
+            print(f"[WebSocket] No client yet — queuing: {event_data.get('type')}")
+            self._event_queue.append(event_data)
+            return
+        self._event_queue.append(event_data)
+        await self._flush_queue()
+
+    # ── sync send (called from Playwright thread) ─────────────────────────────
+    def send_event_sync(self, event_data: dict, wait_timeout: float = 120.0):
+        """
+        Send event to frontend. If no client is connected, wait up to
+        wait_timeout seconds for one to connect, then send.
+        Always queues the event so it's flushed on reconnect too.
+        """
+        import time as _time
+
+        # Always queue so reconnecting clients get it immediately
+        self._event_queue.append(event_data)
+        print(f"[WebSocket] Event queued: {event_data.get('type')}")
+
+        # Wait for a client to be connected
+        deadline = _time.time() + wait_timeout
+        while not self._connections:
+            if _time.time() > deadline:
+                print(f"[WebSocket ERROR] No client connected after {wait_timeout}s — event stays queued: {event_data.get('type')}")
+                return
+            print(f"[WebSocket] Waiting for client to connect before sending {event_data.get('type')}...")
+            _time.sleep(1)
+
+        loop = self._main_loop
+        if loop is None or not loop.is_running():
+            print(f"[WebSocket ERROR] No event loop — event stays queued: {event_data.get('type')}")
+            return
+
+        # Flush the queue (sends our event + any others pending)
+        future = _asyncio.run_coroutine_threadsafe(self._flush_queue(), loop)
+        try:
+            future.result(timeout=10)
+            print(f"[WebSocket] Event sent: {event_data.get('type')}")
+        except Exception as e:
+            print(f"[WebSocket ERROR] Failed to send {event_data.get('type')}: {e}")
+
+    async def _flush_queue(self):
+        """Send all queued events to all connected clients."""
+        while self._event_queue:
+            event = self._event_queue.popleft()
+            for ws in list(self._connections):
+                await self._send_to(ws, event)
+
 
 manager = ConnectionManager()
+
 
 @app.websocket("/ws/automation")
 async def websocket_automation(websocket: WebSocket):
@@ -117,19 +190,40 @@ async def websocket_automation(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            print(f"[WebSocket] Received from frontend: {data}")
-            # Store the latest valid answer emitted by React
+            if data.get("type") == "PING":
+                continue
+            print(f"[WebSocket] Received: {data}")
             manager.latest_response = data
     except WebSocketDisconnect:
-        manager.disconnect()
+        manager.disconnect(websocket)
 
 @app.get("/automation/captcha")
 def get_captcha():
     # Serve the captcha saved by playwright
     captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
     if os.path.exists(captcha_path):
-        return FileResponse(captcha_path)
-    return {"error": "Captcha not found"}
+        return FileResponse(
+            captcha_path,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            }
+        )
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=404, content={"error": "Captcha not found"})
+
+@app.get("/automation/captcha-b64")
+def get_captcha_b64():
+    """Return captcha as base64 so the frontend can embed it directly — avoids any caching/CORS issues."""
+    import base64
+    captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
+    if os.path.exists(captcha_path):
+        with open(captcha_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return {"image": f"data:image/png;base64,{data}"}
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=404, content={"error": "Captcha not found"})
 
 @app.get("/download-declaration")
 def download_declaration():
@@ -170,21 +264,36 @@ async def upload_signed_declaration(file: UploadFile = File(...)):
             "message": str(e)
         }
 
+import threading as _threading
+
 def run_playwright_agent(payload: dict, loop=None):
     original_cwd = os.getcwd()
     try:
         os.chdir(playwright_dir)
         from rescert import TNeSevaiBackendAgent
-        # Pass the global manager reference to the agent
-        agent = TNeSevaiBackendAgent(payload, ws_manager=manager, loop=loop)
+        agent = TNeSevaiBackendAgent(payload, ws_manager=manager)
         agent.run()
+    except Exception as e:
+        print(f"[ERROR] Playwright agent crashed: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            manager.send_event_sync({
+                "type": "AUTOMATION_ERROR",
+                "message": f"Automation failed: {str(e)}"
+            })
+        except Exception:
+            pass
     finally:
         os.chdir(original_cwd)
 
+@app.get("/ws/status")
+def ws_status():
+    return {"connected": manager.is_connected}
+
 @app.post("/submit-application")
-async def submit_application(payload: dict, background_tasks: BackgroundTasks):
-    import asyncio
-    # Save payload for standalone testing: python rescert.py --payload last_payload.json
+async def submit_application(payload: dict):
+    # Save payload for standalone testing
     try:
         import json as _json
         payload_path = os.path.join(playwright_dir, "last_payload.json")
@@ -194,7 +303,9 @@ async def submit_application(payload: dict, background_tasks: BackgroundTasks):
     except Exception as e:
         print(f"[WARNING] Could not save payload: {e}")
 
-    loop = asyncio.get_running_loop()
-    background_tasks.add_task(run_playwright_agent, payload, loop)
+    # Run in a daemon thread — won't block uvicorn shutdown
+    # The thread itself will call wait_for_client() before emitting any WS events
+    t = _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=True)
+    t.start()
     return {"status": "success", "message": "Playwright task started"}
 

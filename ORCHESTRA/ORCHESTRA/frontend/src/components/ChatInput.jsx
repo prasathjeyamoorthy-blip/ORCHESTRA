@@ -1,52 +1,50 @@
 import { useState } from "react";
-import DocumentUpload from "./DocumentUpload";
+import { LuPlus, LuMic, LuSquare } from "react-icons/lu";
+import { RiSparkling2Fill } from "react-icons/ri";
 
 export default function ChatInput({ onSend, disabled, isGenerating, onStop }) {
   const [input, setInput] = useState("");
-  const [fileName, setFileName] = useState(null);
 
   const handleSend = () => {
-    // ⏸ If generating → stop
-    if (isGenerating) {
-      if (onStop) {
-        onStop();
-      }
-      return;
-    }
-
-    if (disabled) return;
-
-    // ▶ Normal send
-    if (!input.trim()) return;
-
+    if (isGenerating) { onStop?.(); return; }
+    if (disabled || !input.trim()) return;
     onSend(input);
     setInput("");
   };
 
-  const handleFileSelect = (file) => {
-    setFileName(file.name);
-    console.log("Selected file:", file);
-  };
-
   return (
-    <div className="chat-input-wrapper">
-      <div className="chat-input-container">
-        <DocumentUpload onFileSelect={handleFileSelect} />
-
-        <input
-          type="text"
-          placeholder="Ask about residence certificate..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !disabled && handleSend()}
-        />
-
-        <button onClick={handleSend} disabled={disabled && !isGenerating}>
-          {isGenerating ? "⏸" : "Send"}
-        </button>
+    <div className="input-bar-wrap">
+      <div className="input-bar-inner">
+        <div className="input-bar">
+          <button className="input-icon-btn" aria-label="Attach" tabIndex={-1}>
+            <LuPlus size={18} />
+          </button>
+          <input
+            type="text"
+            placeholder="Ask anything"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSend()}
+            disabled={disabled && !isGenerating}
+          />
+          <div className="input-right">
+            <button className="input-icon-btn" aria-label="Voice" tabIndex={-1}>
+              <LuMic size={17} />
+            </button>
+            <button
+              className={`input-send-btn ${isGenerating ? "stop" : ""}`}
+              onClick={handleSend}
+              disabled={!isGenerating && (disabled || !input.trim())}
+              aria-label="Send"
+            >
+              {isGenerating
+                ? <LuSquare size={14} fill="currentColor" />
+                : <RiSparkling2Fill size={16} />
+              }
+            </button>
+          </div>
+        </div>
       </div>
-
-      {fileName && <div className="file-preview">📄 {fileName}</div>}
     </div>
   );
 }

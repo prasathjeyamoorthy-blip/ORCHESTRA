@@ -1,330 +1,315 @@
 import { useEffect, useState, useRef } from "react";
-import AgentStatus from "./components/AgentStatus";
-import ChatBubble from "./components/ChatBubble";
-import ChatInput from "./components/ChatInput";
-import DocumentChecklist from "./components/DocumentChecklist";
-import AutomationModal from "./components/AutomationModal";
+import { LuBot, LuSparkles, LuShieldCheck,
+         LuFileCheck, LuLayoutDashboard, LuPhone, LuBookOpen,
+         LuMoon, LuSun, LuMenu, LuX } from "react-icons/lu";
+import FaqView        from "./components/FaqView";
+import AppStatusView  from "./components/AppStatusView";
+import ContactView    from "./components/ContactView";
+import ChatBubble      from "./components/ChatBubble";
+import ChatInput       from "./components/ChatInput";
+import DocumentChecklist    from "./components/DocumentChecklist";
+import AutomationModal      from "./components/AutomationModal";
 import SelfDeclarationModal from "./components/SelfDeclarationModal";
-import DocumentNumberModal from "./components/DocumentNumberModal";
+import DocumentNumberModal  from "./components/DocumentNumberModal";
 import { sendMessage } from "./api/chatApi";
 import "./index.css";
 
 export default function App() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages]   = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
-
   const [showChecklist, setShowChecklist] = useState(false);
-  const [waitingForDocumentResponse, setWaitingForDocumentResponse] =
-    useState(false);
+  const [waitingForDocReply, setWaitingForDocReply] = useState(false);
   const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
+  const chatEndRef = useRef(null);
+
+  // ── Dark mode ─────────────────────────────────────────────────────────────
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) return saved === "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+  const [activePage, setActivePage] = useState("home"); // home | faq | status | contact
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const navigate = (page) => { setActivePage(page); setDrawerOpen(false); };
 
   useEffect(() => {
-    window.scrollTo(0, 0);
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
 
-    setMessages([
-      {
-        sender: "agent",
-        text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
-      },
-    ]);
+  // ── Init ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    setMessages([{
+      sender: "agent",
+      text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
+    }]);
   }, []);
 
+  // Auto-scroll
   useEffect(() => {
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.sender === "agent") {
-        const text = lastMessage.text.toLowerCase();
-        // Specifically check if the text ends with the exact question
-        // added in the backend agent.py.
-        if (text.includes("are you ready to submit the documents")) {
-          setWaitingForDocumentResponse(true);
-        } else {
-          setWaitingForDocumentResponse(false);
-        }
-      } else {
-        setWaitingForDocumentResponse(false);
-      }
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isGenerating, showChecklist]);
+
+  // Detect "ready to submit" prompt
+  useEffect(() => {
+    if (!messages.length) return;
+    const last = messages[messages.length - 1];
+    if (last.sender === "agent" && last.text.toLowerCase().includes("are you ready to submit the documents")) {
+      setWaitingForDocReply(true);
+    } else {
+      setWaitingForDocReply(false);
     }
   }, [messages]);
 
-  const handleQuickReply = async (reply) => {
-    setWaitingForDocumentResponse(false);
-    setMessages((prev) => [...prev, { sender: "user", text: reply }]);
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const pushBot = (text) => setMessages(p => [...p, { sender: "agent", text }]);
+  const pushUser = (text) => setMessages(p => [...p, { sender: "user", text }]);
 
-    if (reply === "Yes") {
-      setShowChecklist(true);
-      return; // Stop here, don't generate bot response while checklist is open
-    } else {
-      setShowChecklist(false);
-    }
-
+  const callBackend = async (text) => {
     setIsGenerating(true);
     try {
-      const response = await sendMessage(sessionId, reply);
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: response.answer || "Please provide more details.",
-        },
-      ]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: "The service is temporarily unavailable. Please try again later.",
-        },
-      ]);
+      const res = await sendMessage(sessionId, text);
+      pushBot(res.answer || "Please provide more details.");
+    } catch {
+      pushBot("The service is temporarily unavailable. Please try again later.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleChecklistProceed = async () => {
-    setIsChecklistProceeding(true);
-
-    // Simulate slight loading delay for processing
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    setIsChecklistProceeding(false);
-    setShowChecklist(false);
-
-    // After checklist concludes, push bot confirmation:
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: "agent",
-        text: "Thank you for submitting the documents.",
-      },
-    ]);
-  };
-
-  const handleChecklistExit = () => {
-    setShowChecklist(false);
-  };
-
   const handleSend = async (text) => {
     if (!text.trim()) return;
-
-    const lowerText = text.toLowerCase();
-
-    // Check if user explicitly wants to submit/upload documents
-    const hasIntent = lowerText.includes("submit") || lowerText.includes("upload") || lowerText.includes("attach");
-    const hasContext = lowerText.includes("document") || lowerText.includes("certificate") || lowerText.includes("file");
-    const wantsToSubmit = hasIntent && hasContext;
-
-    // Add user message
-    setMessages((prev) => [...prev, { sender: "user", text }]);
-
-    if (wantsToSubmit) {
-      setShowChecklist(true);
-      setWaitingForDocumentResponse(false);
-      return; // Stop here, don't generate bot response while checklist is open
-    }
-
-    setShowChecklist(false); // Reset checklist state on new normal manual message
-    setWaitingForDocumentResponse(false);
-
-    setIsGenerating(true);
-
-    try {
-      const response = await sendMessage(sessionId, text);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: response.answer || "Please provide more details.",
-        },
-      ]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: "The service is temporarily unavailable. Please try again later.",
-        },
-      ]);
-    } finally {
-      setIsGenerating(false); // 🔥 This controls pause button correctly
-    }
+    pushUser(text);
+    const lower = text.toLowerCase();
+    const wantsSubmit = (lower.includes("submit") || lower.includes("upload") || lower.includes("attach"))
+                     && (lower.includes("document") || lower.includes("certificate") || lower.includes("file"));
+    if (wantsSubmit) { setShowChecklist(true); setWaitingForDocReply(false); return; }
+    setShowChecklist(false);
+    setWaitingForDocReply(false);
+    await callBackend(text);
   };
 
-  const handleStop = () => {
-    if (window.stopAgent) {
-      window.stopAgent();
-    }
-    setIsGenerating(false);
+  const handleQuickReply = async (reply) => {
+    setWaitingForDocReply(false);
+    pushUser(reply);
+    if (reply === "Yes") { setShowChecklist(true); return; }
+    setShowChecklist(false);
+    await callBackend(reply);
   };
 
-  // ------------------------------------
-  // WebSocket Automation Interactivity
-  // ------------------------------------
+  const handleChecklistProceed = async () => {
+    setIsChecklistProceeding(true);
+    await new Promise(r => setTimeout(r, 1200));
+    setIsChecklistProceeding(false);
+    setShowChecklist(false);
+    pushBot("Thank you for submitting the documents.");
+  };
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────
   const wsRef = useRef(null);
-  const [automationEvent, setAutomationEvent] = useState(null);
+  const [automationEvent, setAutomationEvent]       = useState(null);
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
-  const [showDocumentNumber, setShowDocumentNumber] = useState(false);
+  const [showDocumentNumber, setShowDocumentNumber]   = useState(false);
 
-  /**
-   * Opens the WebSocket connection to the backend.
-   * Called BEFORE the /submit-application fetch so the socket is ready
-   * by the time Playwright sends its first event (e.g. REQUEST_CAPTCHA).
-   */
-  const openAutomationSocket = () => {
-    // Close any stale connection first
+  const openAutomationSocket = () => new Promise((resolve) => {
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
       wsRef.current.close();
     }
-
-    const socket = new WebSocket("ws://localhost:8000/ws/automation");
-
-    socket.onopen = () => console.log("[WS] Automation WebSocket Connected");
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log("[WS] Event from Playwright:", data);
-      
-      // Handle different event types
-      if (data.type === "SELF_DECLARATION_DOWNLOADED") {
-        setSelfDeclarationPath(data.file_path || data.download_path);
-        setShowSelfDeclaration(true);
-      } else if (data.type === "REQUEST_SIGNED_DECLARATION") {
-        setSelfDeclarationPath(data.download_path);
-        setShowSelfDeclaration(true);
-      } else if (data.type === "REQUEST_DOCUMENT_NUMBER") {
-        setShowDocumentNumber(true);
-      } else {
-        setAutomationEvent(data);
-      }
+    let resolved = false;
+    const connect = () => {
+      const socket = new WebSocket("ws://localhost:8000/ws/automation");
+      let ping;
+      socket.onopen = () => {
+        ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
+        if (!resolved) { resolved = true; resolve(); }
+      };
+      socket.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if      (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+        else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+        else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+        else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
+        else                                                   { setAutomationEvent(data); }
+      };
+      socket.onclose = () => { clearInterval(ping); setTimeout(() => wsRef.current === socket && connect(), 1000); };
+      socket.onerror = () => { clearInterval(ping); if (!resolved) { resolved = true; resolve(); } };
+      wsRef.current = socket;
     };
+    connect();
+  });
 
-    socket.onclose = () => {
-      console.log("[WS] Automation WebSocket Disconnected");
-      setAutomationEvent(null);
-    };
-
-    wsRef.current = socket;
-  };
-
-  const handleAutomationSubmit = (inputValue) => {
+  const sendWS = (payload) => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "USER_ANSWER",
-        data: inputValue
-      }));
-      setAutomationEvent(null); // Hide modal while Playwright processes
-    }
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   };
 
-  const handleSelfDeclarationSubmit = (filePath) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "USER_ANSWER",
-        data: filePath
-      }));
-      setShowSelfDeclaration(false);
-    }
-  };
+  const handleAutomationSubmit      = (v) => { sendWS({ type: "USER_ANSWER", data: v }); setAutomationEvent(null); };
+  const handleSelfDeclarationSubmit = (p) => { sendWS({ type: "USER_ANSWER", data: p }); setShowSelfDeclaration(false); };
+  const handleSelfDeclarationExit   = ()  => { sendWS({ type: "USER_ANSWER", data: "exit" }); setShowSelfDeclaration(false); };
+  const handleDocumentNumberSubmit  = (n) => { sendWS({ type: "USER_ANSWER", data: n }); setShowDocumentNumber(false); };
 
-  const handleSelfDeclarationExit = () => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "USER_ANSWER",
-        data: "exit"
-      }));
-      setShowSelfDeclaration(false);
-    }
-  };
-
-  const handleDocumentNumberSubmit = (docNumber) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "USER_ANSWER",
-        data: docNumber
-      }));
-      setShowDocumentNumber(false);
-    }
-  };
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <h1>ORCHESTRA – TNeGA AI</h1>
-        <p>Official e-Sevai Residence Certificate Assistant</p>
-        <AgentStatus />
-      </header>
+    <div className="app-root">
 
-      <main className="chat-container">
-        {messages.map((msg, idx) => (
-          <ChatBubble key={idx} sender={msg.sender} message={msg.text} />
-        ))}
-
-        {waitingForDocumentResponse && (
-          <div className="quick-replies">
-            <button
-              className="quick-reply-btn"
-              onClick={() => handleQuickReply("Yes")}
-            >
-              Yes
-            </button>
-            <button
-              className="quick-reply-btn"
-              onClick={() => handleQuickReply("No")}
-            >
-              No
-            </button>
+      {/* ── Sidebar ── */}
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon">
+            <LuBot size={18} color="#fff" />
           </div>
-        )}
-
-        {showChecklist && (
-          <DocumentChecklist
-            onProceed={handleChecklistProceed}
-            onExit={handleChecklistExit}
-            isProceeding={isChecklistProceeding}
-            onOpenSocket={openAutomationSocket}
-          />
-        )}
-
-        {isGenerating && (
-          <div className="typing-indicator">
-            <span></span>
-            <span></span>
-            <span></span>
+          <div className="sidebar-logo-text">
+            <span className="sidebar-logo-title">TNeGA</span>
+            <span className="sidebar-logo-sub">e-Sevai Portal</span>
           </div>
-        )}
-      </main>
+          <button className="theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
+            {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
+          </button>
+        </div>
 
-      <ChatInput
-        onSend={handleSend}
-        disabled={isGenerating || showChecklist}
-        isGenerating={isGenerating}
-        onStop={handleStop}
-      />
+        <nav className="sidebar-nav">
+          <div className="sidebar-label">Navigation</div>
+          <button className={`nav-item${activePage==="home"?" active":""}`}    onClick={() => navigate("home")}><LuLayoutDashboard size={15} /> Home</button>
+          <button className={`nav-item${activePage==="faq"?" active":""}`}     onClick={() => navigate("faq")}><LuBookOpen size={15} /> FAQ</button>
+          <button className={`nav-item${activePage==="status"?" active":""}`}  onClick={() => navigate("status")}><LuFileCheck size={15} /> Application Status</button>
+          <button className={`nav-item${activePage==="contact"?" active":""}`} onClick={() => navigate("contact")}><LuPhone size={15} /> Contact</button>
 
-      <AutomationModal 
-        isOpen={!!automationEvent} 
-        eventData={automationEvent} 
-        onSubmit={handleAutomationSubmit} 
-      />
 
-      <SelfDeclarationModal
-        isOpen={showSelfDeclaration}
-        downloadPath={selfDeclarationPath}
-        onSubmit={handleSelfDeclarationSubmit}
-        onExit={handleSelfDeclarationExit}
-      />
+        </nav>
 
-      <DocumentNumberModal
-        isOpen={showDocumentNumber}
-        onSubmit={handleDocumentNumberSubmit}
-      />
+        <div className="sidebar-footer" />
+      </aside>
+
+      {/* ── Mobile Topbar ── */}
+      <div className="mobile-topbar">
+        <div className="mobile-topbar-left">
+          <div className="sidebar-logo-icon" style={{width:'1.75rem',height:'1.75rem',borderRadius:'0.375rem'}}>
+            <LuBot size={15} color="#fff" />
+          </div>
+          <span className="mobile-topbar-title">TNeGA</span>
+        </div>
+        <div className="mobile-topbar-right">
+          <button className="hamburger-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
+            {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
+          </button>
+          <button className="hamburger-btn" aria-label="Menu" onClick={() => setDrawerOpen(true)}>
+            <LuMenu size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Mobile Drawer ── */}
+      <div className={`drawer-overlay${drawerOpen?" open":""}`} onClick={() => setDrawerOpen(false)} />
+      <div className={`drawer${drawerOpen?" open":""}`}>
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon"><LuBot size={18} color="#fff" /></div>
+          <div className="sidebar-logo-text">
+            <span className="sidebar-logo-title">TNeGA</span>
+            <span className="sidebar-logo-sub">e-Sevai Portal</span>
+          </div>
+          <button className="hamburger-btn" aria-label="Close" onClick={() => setDrawerOpen(false)}>
+            <LuX size={15} />
+          </button>
+        </div>
+        <nav className="sidebar-nav">
+          <div className="sidebar-label">Navigation</div>
+          <button className={`nav-item${activePage==="home"?" active":""}`}    onClick={() => navigate("home")}><LuLayoutDashboard size={15} /> Home</button>
+          <button className={`nav-item${activePage==="faq"?" active":""}`}     onClick={() => navigate("faq")}><LuBookOpen size={15} /> FAQ</button>
+          <button className={`nav-item${activePage==="status"?" active":""}`}  onClick={() => navigate("status")}><LuFileCheck size={15} /> Application Status</button>
+          <button className={`nav-item${activePage==="contact"?" active":""}`} onClick={() => navigate("contact")}><LuPhone size={15} /> Contact</button>
+        </nav>
+      </div>
+
+      {/* ── Main ── */}
+      <div className="main-col">
+
+        {activePage !== "home" ? (
+          <div className="chat-scroll">
+            <div className="chat-inner">
+              {activePage === "faq"     && <FaqView />}
+              {activePage === "status"  && <AppStatusView />}
+              {activePage === "contact" && <ContactView />}
+            </div>
+          </div>
+        ) : (<>
+        {/* Scrollable chat area */}
+        <div className="chat-scroll">
+          <div className="chat-inner">
+
+            {/* Hero card */}
+            <div className="hero-card-wrap">
+              <div className="hero-card">
+                <div className="hero-dot" />
+                <div className="hero-card-inner">
+                  <div className="hero-avatar">
+                    <LuBot size={20} color="#fff" />
+                  </div>
+                  <div className="hero-info">
+                    <div className="hero-title">ORCHESTRA <span>/ TNeGA</span></div>
+                    <div className="hero-sub">Residence Certificate · e-Sevai Automation Assistant</div>
+                  </div>
+                  <div className="hero-meta">
+                    <span className="hero-tag"><LuShieldCheck size={11} /> Gov Verified</span>
+                    <span className="hero-tag accent"><LuSparkles size={11} /> AI</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {messages.map((msg, i) => (
+              <ChatBubble key={i} sender={msg.sender} message={msg.text} />
+            ))}
+
+            {/* Quick replies */}
+            {waitingForDocReply && (
+              <div className="quick-replies fade-up">
+                <button className="quick-reply-btn" onClick={() => handleQuickReply("Yes")}>Yes, proceed</button>
+                <button className="quick-reply-btn" onClick={() => handleQuickReply("No")}>Not right now</button>
+              </div>
+            )}
+
+            {/* Document checklist */}
+            {showChecklist && (
+              <DocumentChecklist
+                onProceed={handleChecklistProceed}
+                onExit={() => setShowChecklist(false)}
+                isProceeding={isChecklistProceeding}
+                onOpenSocket={openAutomationSocket}
+              />
+            )}
+
+            {/* Typing indicator */}
+            {isGenerating && (
+              <div className="typing-row fade-up">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
+            )}
+
+            <div ref={chatEndRef} />
+          </div>
+        </div>
+
+        {/* Input bar */}
+        <ChatInput
+          onSend={handleSend}
+          disabled={isGenerating || showChecklist}
+          isGenerating={isGenerating}
+          onStop={() => setIsGenerating(false)}
+        />
+      </>)}
+      </div>
+
+      {/* ── Modals ── */}
+      <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} />
+      <SelfDeclarationModal isOpen={showSelfDeclaration}  downloadPath={selfDeclarationPath} onSubmit={handleSelfDeclarationSubmit} onExit={handleSelfDeclarationExit} />
+      <DocumentNumberModal  isOpen={showDocumentNumber}   onSubmit={handleDocumentNumberSubmit} />
     </div>
   );
 }
