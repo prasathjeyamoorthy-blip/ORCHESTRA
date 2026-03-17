@@ -82,21 +82,40 @@ export default function App() {
   const handleSend = async (text) => {
     if (!text.trim()) return;
     pushUser(text);
-    const lower = text.toLowerCase();
-    const wantsSubmit = (lower.includes("submit") || lower.includes("upload") || lower.includes("attach"))
-                     && (lower.includes("document") || lower.includes("certificate") || lower.includes("file"));
-    if (wantsSubmit) { setShowChecklist(true); setWaitingForDocReply(false); return; }
     setShowChecklist(false);
     setWaitingForDocReply(false);
-    await callBackend(text);
+    setIsGenerating(true);
+    try {
+      const res = await sendMessage(sessionId, text);
+      pushBot(res.answer || "Please provide more details.");
+      // Only show the document checklist if the backend explicitly returns SHOW_DOCUMENTS stage
+      if (res.stage === "SHOW_DOCUMENTS") {
+        setShowChecklist(true);
+      }
+    } catch {
+      pushBot("The service is temporarily unavailable. Please try again later.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleQuickReply = async (reply) => {
     setWaitingForDocReply(false);
     pushUser(reply);
-    if (reply === "Yes") { setShowChecklist(true); return; }
-    setShowChecklist(false);
-    await callBackend(reply);
+    setIsGenerating(true);
+    try {
+      const res = await sendMessage(sessionId, reply);
+      pushBot(res.answer || "Please provide more details.");
+      if (res.stage === "SHOW_DOCUMENTS") {
+        setShowChecklist(true);
+      } else {
+        setShowChecklist(false);
+      }
+    } catch {
+      pushBot("The service is temporarily unavailable. Please try again later.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleChecklistProceed = async () => {

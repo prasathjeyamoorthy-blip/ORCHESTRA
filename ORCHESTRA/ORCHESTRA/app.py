@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 # --------------------------------
 from agent import (
     agentic_rag, 
-    extract_category,
     documents_node
 )
 
@@ -52,18 +51,32 @@ def chat(req: ChatRequest):
             "context": None,
             "answer": None,
             "applicant_category": None,
-            "stage": None
+            "stage": None,
+            "chat_history": []
         }
 
-    previous_stage = state.get("stage")
+    # Ensure chat_history exists for old sessions that pre-date this feature
+    if "chat_history" not in state or state["chat_history"] is None:
+        state["chat_history"] = []
 
+    previous_stage = state.get("stage")
     state["question"] = req.message
+
+    # Append user turn to history BEFORE invoking agent
+    state["chat_history"].append({"role": "user", "content": req.message})
 
     if previous_stage == "ASK_CATEGORY":
         state = extract_category(state)
         state = documents_node(state)
     else:
         state = agentic_rag.invoke(state)
+
+    # Append assistant reply to history AFTER getting the answer
+    if state.get("answer"):
+        state["chat_history"].append({"role": "assistant", "content": state["answer"]})
+
+    # Cap history to last 20 turns (10 exchanges) to avoid unbounded growth
+    state["chat_history"] = state["chat_history"][-20:]
 
     SESSIONS[req.session_id] = state
 
