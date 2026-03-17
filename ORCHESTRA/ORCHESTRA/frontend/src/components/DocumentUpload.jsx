@@ -13,7 +13,7 @@ export default function DocumentUpload({ onFileSelect }) {
     formData.append("file", file);
   
     try {
-      const response = await fetch("http://localhost:8000/upload", {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE}/upload`, {
         method: "POST",
         body: formData
       });

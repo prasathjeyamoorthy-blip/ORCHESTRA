@@ -15,7 +15,7 @@ export default function AutomationModal({ isOpen, eventData, onSubmit }) {
       if (eventData.image) {
         setCaptchaSrc(eventData.image);
       } else {
-        fetch(`http://localhost:8000/automation/captcha-b64?t=${Date.now()}`)
+        fetch(`${import.meta.env.VITE_API_BASE}/automation/captcha-b64?t=${Date.now()}`)
           .then(r => r.json())
           .then(d => { if (d.image) setCaptchaSrc(d.image); })
           .catch(err => console.error("[Captcha] Failed to load:", err));

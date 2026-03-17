@@ -142,7 +142,7 @@ export default function App() {
     }
     let resolved = false;
     const connect = () => {
-      const socket = new WebSocket("ws://localhost:8000/ws/automation");
+      const socket = new WebSocket(`${import.meta.env.VITE_WS_BASE}/ws/automation`);
       let ping;
       socket.onopen = () => {
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);

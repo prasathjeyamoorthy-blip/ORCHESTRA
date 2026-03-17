@@ -58,7 +58,7 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     setUploadError(null);
     const formData = new FormData();
     formData.append("file", file);
-    const extUrl = id === "photo" ? "http://localhost:8002/verify/photo" : "http://localhost:8002/extract";
+    const extUrl = id === "photo" ? `${import.meta.env.VITE_DOC_API_BASE}/verify/photo` : `${import.meta.env.VITE_DOC_API_BASE}/extract`;
     try {
       const res = await fetch(extUrl, { method: "POST", body: formData });
       if (res.ok) {
@@ -83,34 +83,57 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   const handleProceedClick = async () => {
     setSubmitError(null);
     setIsExtracting(true);
-    const formData = new FormData();
-    if (rawFiles.aadharCard)     formData.append("aadhaar", rawFiles.aadharCard);
-    if (rawFiles.rationCard)     formData.append("ration",  rawFiles.rationCard);
-    if (rawFiles.drivingLicense) formData.append("driving", rawFiles.drivingLicense);
-    if (rawFiles.photo)          formData.append("photo",   rawFiles.photo);
+
+    // ── Step 1: Extract data via DocumentUploadAgent ──────────────────────
+    const extractForm = new FormData();
+    if (rawFiles.aadharCard)     extractForm.append("aadhaar", rawFiles.aadharCard);
+    if (rawFiles.rationCard)     extractForm.append("ration",  rawFiles.rationCard);
+    if (rawFiles.drivingLicense) extractForm.append("driving", rawFiles.drivingLicense);
+    if (rawFiles.photo)          extractForm.append("photo",   rawFiles.photo);
+
     try {
-      const bulkRes = await fetch("http://localhost:8002/process-all", { method: "POST", body: formData });
+      const bulkRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/process-all`, { method: "POST", body: extractForm });
       if (!bulkRes.ok) throw new Error(`Document extraction failed (HTTP ${bulkRes.status})`);
       const bulkData = await bulkRes.json();
-      if (bulkData.status === "success" && bulkData.result) {
-        setBulkResults(bulkData.result);
-        const c = bulkData.result.combined;
-        const aadharNum = (credentials.aadhar_number || c.aadhaar_number || "").replace(/\s/g, '');
-        const payload = {
-          credentials: { username: credentials.username, password: credentials.password },
-          applicant_details: { can_number: credentials.can_number || "", aadhar_number: aadharNum, dob: c.dob || "", ration_card_no: c.ration_card_number || "", name: c.username || "", father_name: c.father_name || "", gender: c.gender || "", religion: c.religion || "", community: c.community || "", mobile_number: c.phone_number || "", email: c.email || "" },
-          address_details: { state: c.state || "Tamil Nadu", district: c.district || "", village: c.taluk || c.district || "", area: c.area || "", building_no: c.door_no || "", street_name: c.street_name || c.area || "", pincode: c.pincode || "", from_date: addressDetails.from_date, to_date: addressDetails.to_date, perm_state: c.state || "Tamil Nadu", perm_district: c.district || "", perm_village: c.taluk || c.district || "", perm_building_no: c.door_no || "", perm_street_name: c.street_name || c.area || "", perm_pincode: c.pincode || "" },
-          documents: { photo_path: bulkData.saved_paths?.["Photo"] || "", self_decl_path: "", aadhaar_path: bulkData.saved_paths?.["Aadhaar"] || "", address_proof_path: bulkData.saved_paths?.["Driving License"] || "", address_doc_no: c.dl_number || "" }
-        };
-        if (onOpenSocket) await onOpenSocket();
-        for (let i = 0; i < 10; i++) {
-          try { const s = await fetch("http://localhost:8000/ws/status"); const d = await s.json(); if (d.connected) break; } catch (_) {}
-          await new Promise(r => setTimeout(r, 500));
+      if (!(bulkData.status === "success" && bulkData.result)) throw new Error("Document extraction returned no results.");
+
+      // ── Step 2: Upload raw files to ORCHESTRA so Playwright can read them ──
+      const uploadForm = new FormData();
+      if (rawFiles.aadharCard)     uploadForm.append("aadhaar", rawFiles.aadharCard);
+      if (rawFiles.rationCard)     uploadForm.append("ration",  rawFiles.rationCard);
+      if (rawFiles.drivingLicense) uploadForm.append("driving", rawFiles.drivingLicense);
+      if (rawFiles.photo)          uploadForm.append("photo",   rawFiles.photo);
+
+      const uploadRes = await fetch(`${import.meta.env.VITE_API_BASE}/upload-documents`, { method: "POST", body: uploadForm });
+      if (!uploadRes.ok) throw new Error(`File upload to automation server failed (HTTP ${uploadRes.status})`);
+      const uploadData = await uploadRes.json();
+      const orchPaths = uploadData.saved_paths || {};
+
+      // ── Step 3: Build Playwright payload using ORCHESTRA-side paths ────────
+      setBulkResults(bulkData.result);
+      const c = bulkData.result.combined;
+      const aadharNum = (credentials.aadhar_number || c.aadhaar_number || "").replace(/\s/g, '');
+      const payload = {
+        credentials: { username: credentials.username, password: credentials.password },
+        applicant_details: { can_number: credentials.can_number || "", aadhar_number: aadharNum, dob: c.dob || "", ration_card_no: c.ration_card_number || "", name: c.username || "", father_name: c.father_name || "", gender: c.gender || "", religion: c.religion || "", community: c.community || "", mobile_number: c.phone_number || "", email: c.email || "" },
+        address_details: { state: c.state || "Tamil Nadu", district: c.district || "", village: c.taluk || c.district || "", area: c.area || "", building_no: c.door_no || "", street_name: c.street_name || c.area || "", pincode: c.pincode || "", from_date: addressDetails.from_date, to_date: addressDetails.to_date, perm_state: c.state || "Tamil Nadu", perm_district: c.district || "", perm_village: c.taluk || c.district || "", perm_building_no: c.door_no || "", perm_street_name: c.street_name || c.area || "", perm_pincode: c.pincode || "" },
+        documents: {
+          photo_path:        orchPaths.photo   || "",
+          self_decl_path:    "",
+          aadhaar_path:      orchPaths.aadhaar || "",
+          address_proof_path: orchPaths.driving || orchPaths.ration || "",
+          address_doc_no:    c.dl_number || ""
         }
-        setPlaywrightPayload(payload);
-        const submitRes = await fetch("http://localhost:8000/submit-application", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        if (!submitRes.ok) throw new Error(`Automation server error (HTTP ${submitRes.status}).`);
-      } else throw new Error("Document extraction returned no results.");
+      };
+
+      if (onOpenSocket) await onOpenSocket();
+      for (let i = 0; i < 10; i++) {
+        try { const s = await fetch(`${import.meta.env.VITE_API_BASE}/ws/status`); const d = await s.json(); if (d.connected) break; } catch (_) {}
+        await new Promise(r => setTimeout(r, 500));
+      }
+      setPlaywrightPayload(payload);
+      const submitRes = await fetch(`${import.meta.env.VITE_API_BASE}/submit-application`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!submitRes.ok) throw new Error(`Automation server error (HTTP ${submitRes.status}).`);
     } catch (e) {
       setSubmitError(e.message || "An unexpected error occurred.");
     } finally {

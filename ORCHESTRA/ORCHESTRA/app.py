@@ -300,8 +300,34 @@ def run_playwright_agent(payload: dict, loop=None):
     finally:
         os.chdir(original_cwd)
 
-@app.get("/ws/status")
-def ws_status():
+@app.post("/upload-documents")
+async def upload_documents(
+    aadhaar: UploadFile = File(None),
+    ration:  UploadFile = File(None),
+    driving: UploadFile = File(None),
+    photo:   UploadFile = File(None),
+):
+    """
+    Receives document files from the frontend and saves them to the
+    Playwright uploaded_documents directory so the automation agent
+    can read them by local path.
+    """
+    upload_dir = os.path.join(playwright_dir, "uploaded_documents")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    saved = {}
+    for key, file_obj in [("aadhaar", aadhaar), ("ration", ration), ("driving", driving), ("photo", photo)]:
+        if file_obj:
+            dest = os.path.join(upload_dir, file_obj.filename)
+            with open(dest, "wb") as f:
+                shutil.copyfileobj(file_obj.file, f)
+            saved[key] = os.path.abspath(dest)
+            print(f"[upload-documents] Saved {key} → {saved[key]}")
+
+    return {"status": "success", "saved_paths": saved}
+
+
+
     return {"connected": manager.is_connected}
 
 @app.post("/submit-application")

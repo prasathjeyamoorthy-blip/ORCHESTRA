@@ -26,7 +26,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
       const formData = new FormData();
       formData.append("file", uploadedFile);
       
-      const response = await fetch("http://localhost:8000/upload-signed-declaration", {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE}/upload-signed-declaration`, {
         method: "POST",
         body: formData
       });
@@ -44,7 +44,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
   };
 
   const handleDownload = () => {
-    window.open(`http://localhost:8000/download-declaration`, '_blank');
+    window.open(`${import.meta.env.VITE_API_BASE}/download-declaration`, '_blank');
   };
 
   return (
