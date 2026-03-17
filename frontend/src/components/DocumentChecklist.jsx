@@ -69,9 +69,13 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
         setRawFiles(p => ({ ...p, [id]: file }));
         setCheckedItems(p => ({ ...p, [id]: true }));
         setExpandedItem(null);
-      } else throw new Error("Server error handling upload.");
+      } else {
+        let detail = "";
+        try { const errBody = await res.json(); detail = errBody.detail || errBody.message || ""; } catch (_) {}
+        throw new Error(`Upload failed (HTTP ${res.status})${detail ? ": " + detail : "."}`);
+      }
     } catch (err) {
-      setUploadError(err.message || "Upload Failed. Please try again.");
+      setUploadError(err.message || "Upload failed. Please try again.");
     } finally {
       setIsUploading(p => ({ ...p, [id]: false }));
     }
