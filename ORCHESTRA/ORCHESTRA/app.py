@@ -96,7 +96,7 @@ import threading as _threading
 from collections import deque
 
 # Add Playwright folder to Python path
-playwright_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Playwright"))
+playwright_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "Playwright"))
 if playwright_dir not in sys.path:
     sys.path.append(playwright_dir)
 
@@ -327,8 +327,10 @@ async def upload_documents(
     return {"status": "success", "saved_paths": saved}
 
 
-
+@app.get("/ws/status")
+def ws_status():
     return {"connected": manager.is_connected}
+
 
 @app.post("/submit-application")
 async def submit_application(payload: dict):
