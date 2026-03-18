@@ -1,0 +1,351 @@
+import os
+import re
+import json
+import base64
+from io import BytesIO
+
+from pdf2image import convert_from_path
+from PIL import Image
+import requests
+from dotenv import load_dotenv
+from fastapi import HTTPException
+
+import config
+load_dotenv()
+
+
+# ---------- PDF validation ----------
+
+PDF_MAGIC = b"%PDF-"
+
+def _is_valid_pdf(path: str) -> bool:
+    """Check the file starts with the PDF magic bytes."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(5) == PDF_MAGIC
+    except Exception:
+        return False
+
+
+def _is_image_file(path: str) -> bool:
+    """Return True if PIL can open the file as an image."""
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
+# ---------- helper functions ----------
+
+def get_image_resolution(pil_image):
+    """Get the resolution of a PIL image.
+    
+    Returns:
+        dict: Contains width, height, and total_pixels (area)
+    """
+    width, height = pil_image.size
+    return {
+        "width": width,
+        "height": height,
+        "total_pixels": width * height,
+        "aspect_ratio": width / height if height > 0 else 0
+    }
+
+
+def pil_to_base64(img):
+    buffer = BytesIO()
+
+    # Compress image before encoding (VERY IMPORTANT)
+    img = img.convert("RGB")
+    img.thumbnail((1400, 1400))  # reduce size safely
+    img.save(buffer, format="JPEG", quality=70)
+
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+# keep run_vlm logic exactly as reference
+
+def run_vlm(image, text_prompt):
+
+    invoke_url = config.NVIDIA_API_URL
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('NVIDIA_META_11B')}",
+        "Content-Type": "application/json"
+    }
+
+    image_b64 = pil_to_base64(image)
+
+    payload = {
+        "model": "meta/llama-3.2-11b-vision-instruct",
+        "temperature": 0,
+        "max_tokens": 400,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}"
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    
+    response = requests.post(
+        invoke_url,
+        headers=headers,
+        json=payload,
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+    return response.json()["choices"][0]["message"]["content"]
+
+
+# ------- JSON helper -------
+
+def parse_vlm_output(text):
+    """Safely convert the VLM text response into a Python dict."""
+    # 1. Direct JSON parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Find a JSON block anywhere in the text
+    json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except Exception:
+            pass
+
+    # 3. Strip and retry
+    cleaned = text.strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # 4. Extract after "Here is the output in JSON format:"
+    if "Here is the output in JSON format:" in text:
+        try:
+            json_part = text.split("Here is the output in JSON format:")[-1].strip()
+            return json.loads(json_part)
+        except Exception:
+            pass
+
+    # 5. Narrative fallback — model returned prose instead of JSON.
+    #    Extract key field values from natural-language sentences.
+    print("[parse_vlm_output] Narrative response detected — extracting fields via regex")
+    result = {}
+    _FIELDS = [
+        "certificate_type", "name", "gender", "dob", "aadhaar_number",
+        "father_name", "religion", "community", "address", "door_no",
+        "street", "area", "city", "state", "district", "taluk",
+        "pincode", "phone_number"
+    ]
+    for field in _FIELDS:
+        # pattern: field_name is "VALUE" or field_name: VALUE
+        pattern = rf'"{field}"\s*[:\-]\s*"([^"]+)"'
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            result[field] = m.group(1).strip()
+            continue
+        # looser: "the X is VALUE" sentences
+        label = field.replace("_", "[ _]?")
+        m2 = re.search(rf'{label}[^\w]*(?:is|:)\s*["\']?([A-Za-z0-9][^,\n"\'\.]+)', text, re.IGNORECASE)
+        if m2:
+            result[field] = m2.group(1).strip()
+
+    # Special C/O extraction for father_name if still missing
+    if not result.get("father_name"):
+        m3 = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]+([A-Za-z][^\n,]+)", text, re.IGNORECASE)
+        if m3:
+            result["father_name"] = m3.group(1).strip()
+
+    if result:
+        result.setdefault("certificate_type", "Aadhaar")
+        print(f"[parse_vlm_output] Narrative extraction result: {result}")
+        return result
+
+    raise ValueError(f"Failed to parse VLM output as JSON: {text}")
+
+
+# ---------- extraction logic ----------
+
+
+def detect_certificate_type(image):
+    prompt = """
+    Identify the certificate type from this image.
+    Return ONLY one word or two-word phrase from:
+    Aadhaar
+    Ration Card
+    Address Proof
+    PAN
+    Residence Certificate
+    Income Certificate
+    Caste Certificate
+    Driving License
+    Voter ID
+    """
+
+    result = run_vlm(image, prompt)
+    # normalize answer to make matching robust
+    text = result.strip().rstrip('.').strip().lower()
+    if "aadhaar" in text:
+        return "Aadhaar"
+    if "ration" in text:
+        return "Ration Card"
+    if "address proof" in text or ("address" in text and "proof" in text):
+        return "Address Proof"
+    if "pan" in text:
+        return "PAN"
+    if "voter" in text:
+        return "Voter ID"
+    if "income" in text and "certificate" in text:
+        return "Income Certificate"
+    if "residence" in text:
+        return "Residence Certificate"
+    if "caste" in text:
+        return "Caste Certificate"
+    if "driving" in text or "dl" in text:
+        return "Driving License"
+    # fallback to raw stripped text
+    return result.strip().rstrip('.').strip()
+
+
+def _process_pages(pages: list) -> list:
+    """Run VLM extraction on a list of PIL page images."""
+    outputs = []
+    for i, page in enumerate(pages):
+        print(f"Processing page {i+1}")
+
+        resolution = get_image_resolution(page)
+        print(f"Page resolution: {resolution['width']}x{resolution['height']} (total pixels: {resolution['total_pixels']})")
+
+        try:
+            cert_type = detect_certificate_type(page)
+            print("Detected:", cert_type)
+
+            if cert_type == "Aadhaar":
+                raw = run_vlm(page, config.AADHAAR_PROMPT)
+            elif cert_type == "Ration Card":
+                raw = run_vlm(page, config.RATION_CARD_PROMPT)
+            elif cert_type == "Address Proof":
+                raw = run_vlm(page, config.ADDRESS_PROOF_PROMPT)
+            elif cert_type == "PAN":
+                raw = run_vlm(page, config.PAN_PROMPT)
+            elif cert_type == "Voter ID":
+                raw = run_vlm(page, config.VOTER_ID_PROMPT)
+            elif cert_type == "Caste Certificate":
+                raw = run_vlm(page, config.CASTE_CERTIFICATE_PROMPT)
+            elif cert_type == "Residence":
+                raw = run_vlm(page, config.RESIDENCE_PROMPT)
+            elif cert_type == "Driving License":
+                raw = run_vlm(page, config.DRIVING_LICENSE_PROMPT)
+            elif cert_type == "Income Certificate":
+                raw = run_vlm(page, config.INCOME_PROMPT)
+            else:
+                print(f"Unknown certificate type: {cert_type}, using Aadhaar prompt as fallback")
+                raw = run_vlm(page, config.AADHAAR_PROMPT)
+
+            # --- Refusal detection: retry with minimal prompt if VLM refuses ---
+            _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
+            if any(p in raw.lower() for p in _REFUSAL_PHRASES):
+                print(f"[VLM] Refusal detected, retrying with minimal prompt...")
+                _minimal = (
+                    "Read the text on this card image and return a JSON object with these keys: "
+                    "certificate_type, name, gender, dob, aadhaar_number, father_name (the name after C/O: or S/O:), "
+                    "address, door_no, street, area, city, state, district, taluk, pincode, phone_number. "
+                    "Return only the JSON."
+                )
+                raw = run_vlm(page, _minimal)
+
+            data = parse_vlm_output(raw)
+
+            # --- Aadhaar: two-stage fallback for father_name ---
+            _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
+            _current = data.get("father_name", "") or ""
+            if cert_type == "Aadhaar" and _current.strip().lower() in _MISSING:
+
+                # Stage 1: regex on raw VLM text
+                _match = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]*([^\n,\"{}]+)", raw, re.IGNORECASE)
+                if _match:
+                    _candidate = _match.group(1).strip().strip('"').strip("'")
+                    if _candidate.lower() not in _MISSING:
+                        data["father_name"] = _candidate
+                        print(f"[regex fallback] father_name → {data['father_name']}")
+
+                # Stage 2: targeted VLM call directly on the image
+                if (data.get("father_name") or "").strip().lower() in _MISSING:
+                    _father_prompt = (
+                        "Look at this Aadhaar card image carefully.\n"
+                        "Find the line that contains C/O or S/O or D/O or W/O followed by a name.\n"
+                        "Return ONLY that name as plain text — no labels, no explanation, no punctuation.\n"
+                        "For example if the card shows 'C/O: Arokiaraj' just return: Arokiaraj"
+                    )
+                    try:
+                        _father_raw = run_vlm(page, _father_prompt)
+                        print(f"[DEBUG] VLM fallback raw response: {repr(_father_raw)}")
+                        _father_raw = _father_raw.strip().strip('"').strip("'")
+                        if _father_raw and _father_raw.lower() not in _MISSING:
+                            data["father_name"] = _father_raw
+                            print(f"[VLM fallback] father_name → {data['father_name']}")
+                        else:
+                            print(f"[VLM fallback] response still missing: {repr(_father_raw)}")
+                    except Exception as _fe:
+                        print(f"[father_name VLM fallback failed]: {_fe}")
+
+            data["_resolution"] = resolution
+            outputs.append(data)
+
+        except Exception as e:
+            print(f"Error processing page {i+1}: {e}")
+
+    return outputs
+
+
+def extract_from_pdf(pdf_path: str) -> list:
+    """Extract data from a PDF (or image) file.
+
+    Raises HTTPException(400) if the file is neither a valid PDF nor a
+    recognisable image, so callers get a clear error instead of a 500.
+    """
+    # --- validate the file first ---
+    if _is_valid_pdf(pdf_path):
+        try:
+            pages = convert_from_path(
+                pdf_path,
+                dpi=200,
+                poppler_path=config.POPPLER_PATH
+            )
+        except Exception as exc:
+            print(f"[extractor] pdf2image failed even for a valid PDF: {exc}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"PDF conversion failed: {exc}"
+            )
+    elif _is_image_file(pdf_path):
+        # File is actually an image (JPG/PNG/etc.) – open it directly
+        print("[extractor] File is an image, not a PDF – processing as single page image.")
+        pages = [Image.open(pdf_path).convert("RGB")]
+    else:
+        # Not a PDF and not a recognisable image
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The uploaded file is not a valid PDF or recognised image. "
+                "Please upload a proper PDF document."
+            )
+        )
+
+    return _process_pages(pages)
