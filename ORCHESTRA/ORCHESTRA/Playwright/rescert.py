@@ -2,7 +2,7 @@ import os
 import time
 import json
 import asyncio
-import urllib.request
+import requests
 from datetime import datetime
 from playwright.sync_api import sync_playwright  # type: ignore
 
@@ -104,20 +104,33 @@ class TNeSevaiBackendAgent:
     MAX_GOTO_RETRIES = 3
 
     def _check_connectivity(self, max_retries=5, retry_delay=5):
+        """
+        Check if the portal is reachable using GET (HEAD returns 405 on TNeGA).
+        After max_retries failures, proceeds anyway — Playwright handles navigation.
+        """
         attempt = 0
         while True:
             attempt += 1
             try:
                 self.log(f"Checking portal connectivity (attempt {attempt})...")
-                urllib.request.urlopen(self.PORTAL_URL, timeout=10)
-                self.log("✓ Portal is reachable!")
-                return True
+                response = requests.get(self.PORTAL_URL, timeout=10, allow_redirects=True)
+                if response.status_code == 200:
+                    self.log("✓ Portal reachable!")
+                    return True
+                else:
+                    self.log(f"✗ Portal not reachable (HTTP {response.status_code}).")
+            except requests.exceptions.Timeout:
+                self.log(f"✗ Portal not reachable (request timed out).")
+            except requests.exceptions.ConnectionError as e:
+                self.log(f"✗ Portal not reachable (connection error: {e}).")
             except Exception as e:
-                if attempt >= max_retries:
-                    self.log(f"⚠ Could not verify portal connectivity after {attempt} attempts — proceeding anyway.")
-                    return True   # don't block; let Playwright handle it
-                self.log(f"✗ Cannot reach portal. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
+                self.log(f"✗ Portal not reachable (unexpected error: {e}).")
+
+            if attempt >= max_retries:
+                self.log(f"⚠ Could not verify portal connectivity after {attempt} attempts — proceeding anyway.")
+                return True   # don't block; let Playwright handle navigation
+            self.log(f"Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
 
     def _goto_with_retry(self, page, url):
         for attempt in range(1, self.MAX_GOTO_RETRIES + 1):
