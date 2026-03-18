@@ -145,10 +145,8 @@ class TNeSevaiBackendAgent:
                 time.sleep(5)
 
     def run(self):
-        import threading
-        thread = threading.Thread(target=self._run_playwright)
-        thread.start()
-        thread.join()
+        # Call directly — the outer thread in app.py is already non-daemon
+        self._run_playwright()
     
     def _run_playwright(self):
         try:

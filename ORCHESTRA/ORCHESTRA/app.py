@@ -285,23 +285,29 @@ import threading as _threading
 
 def run_playwright_agent(payload: dict, loop=None):
     original_cwd = os.getcwd()
+    print(f"[Playwright] Thread started — playwright_dir: {playwright_dir}")
     try:
         os.chdir(playwright_dir)
+        print(f"[Playwright] cwd changed to: {os.getcwd()}")
+        print(f"[Playwright] sys.path includes: {playwright_dir in sys.path}")
         from rescert import TNeSevaiBackendAgent
+        print(f"[Playwright] rescert imported successfully")
         agent = TNeSevaiBackendAgent(payload, ws_manager=manager)
         agent.run()
+    except ImportError as e:
+        print(f"[ERROR] Import failed: {e}")
+        import traceback; traceback.print_exc()
+        try:
+            manager.send_event_sync({"type": "AUTOMATION_ERROR", "message": f"Import error: {str(e)}"})
+        except Exception: pass
     except Exception as e:
         print(f"[ERROR] Playwright agent crashed: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         try:
-            manager.send_event_sync({
-                "type": "AUTOMATION_ERROR",
-                "message": f"Automation failed: {str(e)}"
-            })
-        except Exception:
-            pass
+            manager.send_event_sync({"type": "AUTOMATION_ERROR", "message": f"Automation failed: {str(e)}"})
+        except Exception: pass
     finally:
+        print(f"[Playwright] Thread finished")
         os.chdir(original_cwd)
 
 @app.post("/upload-documents")
@@ -348,9 +354,9 @@ async def submit_application(payload: dict):
     except Exception as e:
         print(f"[WARNING] Could not save payload: {e}")
 
-    # Run in a daemon thread — won't block uvicorn shutdown
-    # The thread itself will call wait_for_client() before emitting any WS events
-    t = _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=True)
+    # Non-daemon thread — daemon=True causes silent kills on Render's free tier
+    # when uvicorn goes idle between requests
+    t = _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=False)
     t.start()
     return {"status": "success", "message": "Playwright task started"}
 
