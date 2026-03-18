@@ -157,7 +157,12 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                browser = playwright.chromium.launch(headless=True, slow_mo=200)
+                proxy_server = os.environ.get("PLAYWRIGHT_PROXY")
+                launch_args = {"headless": True, "slow_mo": 200}
+                if proxy_server:
+                    launch_args["proxy"] = {"server": proxy_server}
+                    self.log(f"Using proxy: {proxy_server}")
+                browser = playwright.chromium.launch(**launch_args)
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
 
