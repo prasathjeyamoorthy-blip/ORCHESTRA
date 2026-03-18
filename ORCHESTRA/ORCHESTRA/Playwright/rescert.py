@@ -103,19 +103,19 @@ class TNeSevaiBackendAgent:
     NAV_TIMEOUT = 90_000
     MAX_GOTO_RETRIES = 3
 
-    def _check_connectivity(self, max_retries=None, retry_delay=5):
+    def _check_connectivity(self, max_retries=5, retry_delay=5):
         attempt = 0
         while True:
             attempt += 1
             try:
                 self.log(f"Checking portal connectivity (attempt {attempt})...")
-                urllib.request.urlopen(self.PORTAL_URL, timeout=15)
+                urllib.request.urlopen(self.PORTAL_URL, timeout=10)
                 self.log("✓ Portal is reachable!")
                 return True
             except Exception as e:
-                if max_retries and attempt >= max_retries:
-                    self.log(f"✗ Failed to reach portal after {attempt} attempts")
-                    return False
+                if attempt >= max_retries:
+                    self.log(f"⚠ Could not verify portal connectivity after {attempt} attempts — proceeding anyway.")
+                    return True   # don't block; let Playwright handle it
                 self.log(f"✗ Cannot reach portal. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
 
@@ -140,7 +140,7 @@ class TNeSevaiBackendAgent:
     def _run_playwright(self):
         try:
             self.log("Checking portal connectivity...")
-            self._check_connectivity(max_retries=None, retry_delay=5)
+            self._check_connectivity()
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
