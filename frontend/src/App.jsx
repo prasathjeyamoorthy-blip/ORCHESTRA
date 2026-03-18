@@ -203,15 +203,14 @@ Just type your question in plain language and I will assist you right away.`,
     if (quickKey) { pushBot(QUICK_RESPONSES[quickKey]); return; }
 
     // Document submission intent — show checklist directly
-    const wantsForm = (
-      lower.includes("submit") || lower.includes("upload") || lower.includes("attach") ||
-      lower.includes("application form") || lower.includes("fill form") || lower.includes("start application") ||
-      lower.includes("apply now") || lower.includes("begin") || lower.includes("proceed") ||
-      lower.includes("login") || lower.includes("credentials") || lower.includes("start")
-    ) && (
-      lower.includes("document") || lower.includes("certificate") || lower.includes("file") ||
-      lower.includes("form") || lower.includes("application") || lower.includes("apply")
-    );
+    const submitKeywords = [
+      "submit", "upload", "attach", "apply", "application form", "fill form",
+      "start application", "apply now", "ready to submit", "want to submit",
+      "want to apply", "want to upload", "i want the form", "show form",
+      "open form", "credentials", "login credentials", "portal login",
+      "start the process", "begin the process", "proceed with"
+    ];
+    const wantsForm = submitKeywords.some(kw => lower.includes(kw));
 
     if (wantsForm) {
       pushBot("Sure! Please fill in your portal credentials and upload your documents below.");
