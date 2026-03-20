@@ -35,7 +35,7 @@ export default function DocumentNumberModal({ isOpen, onSubmit }) {
           placeholder="Enter document number"
           maxLength={20}
           style={{ width: "100%", padding: "0.75rem", borderRadius: "0.75rem", border: "1px solid hsl(var(--border))", backgroundColor: "transparent", fontSize: "0.875rem", color: "hsl(var(--foreground))", outline: "none", boxSizing: "border-box", marginBottom: "1.5rem" }}
-          onKeyPress={(e) => {
+          onKeyDown={(e) => {
             if (e.key === 'Enter') {
               handleSubmit();
             }

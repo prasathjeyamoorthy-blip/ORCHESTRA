@@ -1,7 +1,7 @@
 import os
 
 # Poppler binaries path (required by pdf2image on Windows)
-POPPLER_PATH = "/usr/bin" if os.name != "nt" else r"D:\Release-25.12.0-0\Release-25.12.0-0 (1)\poppler-25.12.0\Library\bin"
+POPPLER_PATH = "/usr/bin" if os.name != "nt" else r"E:\poppler\poppler-25.12.0\Library\bin"
 # NVIDIA VLM API settings
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_API_KEY_ENV = "NVIDIA_META_11B"
@@ -54,12 +54,18 @@ Output JSON only.
 
 
 RATION_CARD_PROMPT = """
-Extract only the Tamil text that appears to the left of the QR code
-in this ration card.
+Extract ONLY the following fields from this Ration Card image.
+Return strict JSON only. Do not include any explanation.
 
-Return raw Tamil text only.
-Do not translate.
-
+{
+    "certificate_type": "Ration Card",
+    "name": "",
+    "mother_name": "",
+    "number": "",
+    "district": "",
+    "taluk": "",
+    "state": ""
+}
 Output JSON only.
 """
 
@@ -150,9 +156,9 @@ Return strict JSON:
     "religion": "",
     "community": "",
     "gender":"",
-    "address":"",
-    "door_no": "",
-    "street": "",
+    "pincode": "",
+    "taluk": "",
+}   "street": "",
     "area": "",
     "city": "",
     "state": "",

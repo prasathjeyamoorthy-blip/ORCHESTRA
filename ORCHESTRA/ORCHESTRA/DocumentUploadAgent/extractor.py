@@ -81,7 +81,7 @@ def run_vlm(image, text_prompt):
     payload = {
         "model": "meta/llama-3.2-11b-vision-instruct",
         "temperature": 0,
-        "max_tokens": 400,
+        "max_tokens": 800,
         "messages": [
             {
                 "role": "user",
@@ -224,8 +224,43 @@ def detect_certificate_type(image):
 
 
 def _process_pages(pages: list) -> list:
-    """Run VLM extraction on a list of PIL page images."""
+    """Run VLM extraction on a list of PIL page images.
+    
+    Uses a single combined VLM call per page to detect certificate type
+    AND extract fields simultaneously, halving the number of API calls.
+    """
     outputs = []
+
+    # Combined prompt: detect type and extract in one shot
+    COMBINED_PROMPT = """
+Look at this document image and do two things in one response:
+
+1. Identify the certificate type. Choose ONLY from:
+   Aadhaar, Ration Card, Address Proof, PAN, Driving License,
+   Voter ID, Caste Certificate, Residence Certificate, Income Certificate
+
+2. Extract all relevant fields based on the type.
+
+Return a single JSON object. Always include "certificate_type" as the first key.
+
+For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, religion, community, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
+For Ration Card use keys: certificate_type, name, mother_name, number, district, taluk, state
+For Driving License use keys: certificate_type, name, dob, dl_number, address, state, pincode
+For Address Proof use keys: certificate_type, username, father_name, religion, community, door_no, address, street_name, pincode, from_date, to_date, state, district, taluk, count_of_residence_years
+For PAN use keys: certificate_type, name, father_name, dob, pan_number
+For Voter ID use keys: certificate_type, name, father_name, dob, voter_id
+For Caste Certificate use keys: certificate_type, name, father_name, mother_name, dob, religion, community, caste, sub_caste, address, door_no, street, area, city, state, district, taluk, pincode, issued_date, issuing_authority
+For Residence Certificate use keys: certificate_type, name, father_name, religion, community, gender, address, door_no, street, area, city, state, pincode, taluk
+For Income Certificate use keys: certificate_type, name, father_name, religion, community, dob, address, income, issued_date, issuing_authority
+
+Note: for father_name on Aadhaar, look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon.
+
+Return ONLY the JSON object. No explanation.
+"""
+
+    _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
+    _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
+
     for i, page in enumerate(pages):
         print(f"Processing page {i+1}")
 
@@ -233,33 +268,11 @@ def _process_pages(pages: list) -> list:
         print(f"Page resolution: {resolution['width']}x{resolution['height']} (total pixels: {resolution['total_pixels']})")
 
         try:
-            cert_type = detect_certificate_type(page)
-            print("Detected:", cert_type)
+            # Single combined VLM call — detects type and extracts fields together
+            raw = run_vlm(page, COMBINED_PROMPT)
+            cert_type = "Unknown"
 
-            if cert_type == "Aadhaar":
-                raw = run_vlm(page, config.AADHAAR_PROMPT)
-            elif cert_type == "Ration Card":
-                raw = run_vlm(page, config.RATION_CARD_PROMPT)
-            elif cert_type == "Address Proof":
-                raw = run_vlm(page, config.ADDRESS_PROOF_PROMPT)
-            elif cert_type == "PAN":
-                raw = run_vlm(page, config.PAN_PROMPT)
-            elif cert_type == "Voter ID":
-                raw = run_vlm(page, config.VOTER_ID_PROMPT)
-            elif cert_type == "Caste Certificate":
-                raw = run_vlm(page, config.CASTE_CERTIFICATE_PROMPT)
-            elif cert_type == "Residence":
-                raw = run_vlm(page, config.RESIDENCE_PROMPT)
-            elif cert_type == "Driving License":
-                raw = run_vlm(page, config.DRIVING_LICENSE_PROMPT)
-            elif cert_type == "Income Certificate":
-                raw = run_vlm(page, config.INCOME_PROMPT)
-            else:
-                print(f"Unknown certificate type: {cert_type}, using Aadhaar prompt as fallback")
-                raw = run_vlm(page, config.AADHAAR_PROMPT)
-
-            # --- Refusal detection: retry with minimal prompt if VLM refuses ---
-            _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
+            # Refusal detection: retry with minimal prompt
             if any(p in raw.lower() for p in _REFUSAL_PHRASES):
                 print(f"[VLM] Refusal detected, retrying with minimal prompt...")
                 _minimal = (
@@ -271,11 +284,12 @@ def _process_pages(pages: list) -> list:
                 raw = run_vlm(page, _minimal)
 
             data = parse_vlm_output(raw)
+            cert_type = data.get("certificate_type", "Unknown")
+            print("Detected:", cert_type)
 
             # --- Aadhaar: two-stage fallback for father_name ---
-            _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
             _current = data.get("father_name", "") or ""
-            if cert_type == "Aadhaar" and _current.strip().lower() in _MISSING:
+            if "aadhaar" in cert_type.lower() and _current.strip().lower() in _MISSING:
 
                 # Stage 1: regex on raw VLM text
                 _match = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]*([^\n,\"{}]+)", raw, re.IGNORECASE)

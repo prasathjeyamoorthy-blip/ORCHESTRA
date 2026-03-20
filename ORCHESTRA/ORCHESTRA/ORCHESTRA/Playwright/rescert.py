@@ -18,10 +18,64 @@ class TNeSevaiBackendAgent:
         self.address = self.data.get("address_details", {})
         self.docs = self.data.get("documents", {})
 
+    # Maps raw log messages to friendly user-facing status text
+    _FRIENDLY = [
+        ("Checking portal connectivity",       "Checking if the portal is online…"),
+        ("Portal is reachable",                "Portal is online ✓"),
+        ("Launching Browser",                  "Starting the browser…"),
+        ("Entering Credentials",               "Logging in to your account…"),
+        ("Extracting Captcha",                 "Loading the captcha image…"),
+        ("Sent WS event",                      None),   # suppress internal events
+        ("Clicking Login",                     "Submitting login…"),
+        ("Navigating to Residence Certificate","Opening Residence Certificate service…"),
+        ("Searching CAN",                      "Looking up your account…"),
+        ("Typing Aadhaar Number",              "Entering your Aadhaar number securely…"),
+        ("Injecting Date of Birth",            "Filling in your date of birth…"),
+        ("Requesting OTP",                     "Sending OTP to your mobile number…"),
+        ("OTP Confirmed",                      "OTP verified ✓ — loading the form…"),
+        ("Filling Form Details",               "Filling in your application details…"),
+        ("Submitting Details Table",           "Saving your address details…"),
+        ("Submitting Form",                    "Submitting the application form…"),
+        ("Commencing Document Processing",     "Starting document uploads…"),
+        ("Step 1/3: Uploading Photo",          "Uploading your photograph…"),
+        ("Step 2/3: Downloading Self Declaration", "Downloading the Self Declaration form…"),
+        ("Sending Self Declaration",           "Waiting for your signed declaration…"),
+        ("Received signed Self Declaration",   "Signed declaration received ✓"),
+        ("Step 3/3: Uploading Current Address Proof", "Uploading your address proof…"),
+        ("All Documents Uploaded",             "All documents uploaded ✓ — going to payment…"),
+        ("SUCCESS",                            "Done! Payment page reached ✓"),
+        ("Wrong captcha",                      "❌ Wrong captcha — please try again with the new image."),
+        ("Wrong OTP",                          "❌ Wrong OTP — please check your mobile and retry."),
+        ("CRITICAL ERROR",                     "Something went wrong. Please try again."),
+        ("WARNING",                            None),   # suppress warnings from UI
+        ("Navigation attempt",                 None),   # suppress retry noise
+        ("Navigating to",                      None),   # suppress raw URLs
+        ("Selected",                           None),   # suppress field-level noise
+    ]
+
     def log(self, message):
-        """Prints status updates to the terminal for the backend agent to read."""
+        """Prints status to terminal and sends a friendly update to the frontend."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [STATUS] {message}")
+
+        if not self.ws_manager:
+            return
+
+        # Find the first matching friendly label
+        friendly = None
+        for keyword, label in self._FRIENDLY:
+            if keyword.lower() in message.lower():
+                friendly = label
+                break
+
+        # None means suppress this message from the UI
+        if friendly is None:
+            return
+
+        self.ws_manager.send_event_sync({
+            "type": "STATUS_UPDATE",
+            "message": friendly
+        })
 
     def _ws_prompt(self, event_dict, timeout=300):
         if not self.ws_manager:
@@ -43,6 +97,142 @@ class TNeSevaiBackendAgent:
             elapsed += 1
 
         raise TimeoutError(f"No user response received within {timeout}s for event: {event_dict.get('type')}")
+
+    def _ws_prompt_captcha(self, page, timeout=300):
+        """Prompt for captcha, handling REFRESH_CAPTCHA action messages in the loop."""
+        import base64
+
+        def _screenshot_captcha():
+            captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
+            captcha_img = page.locator("#captcha_image, img[src*='Captcha'], img[src*='captcha']").first
+            captcha_img.screenshot(path=captcha_path)
+            with open(captcha_path, "rb") as f:
+                return "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
+
+        def _click_captcha_refresh():
+            """Click the refresh icon next to the captcha for a near-instant new captcha."""
+            try:
+                # The green circular arrows icon is an <img> near the captcha image.
+                clicked = page.evaluate("""() => {
+                    const captcha = document.querySelector('#captcha_image, img[src*="Captcha"], img[src*="captcha"]');
+                    if (!captcha) return false;
+                    for (let el = captcha.parentElement; el; el = el.parentElement) {
+                        const imgs = el.querySelectorAll('img');
+                        for (const img of imgs) {
+                            if (img !== captcha) { img.click(); return true; }
+                        }
+                        const links = el.querySelectorAll('a');
+                        for (const a of links) { a.click(); return true; }
+                        if (el.tagName === 'TABLE' || el.tagName === 'FORM') break;
+                    }
+                    return false;
+                }""")
+                if clicked:
+                    self.log("Captcha refresh icon clicked.")
+                    # Wait for captcha image to reload
+                    time.sleep(1.5)
+                    # Always re-fill both credentials — portal clears them on captcha refresh
+                    try:
+                        user_field = page.get_by_role("textbox", name="User Name")
+                        pass_field = page.get_by_role("textbox", name="Password")
+                        user_field.wait_for(state="visible", timeout=3000)
+                        user_field.fill(self.creds.get("username", ""))
+                        pass_field.wait_for(state="visible", timeout=3000)
+                        pass_field.fill(self.creds.get("password", ""))
+                    except: pass
+                    return
+                raise Exception("refresh icon not found via JS")
+            except Exception as e:
+                self.log(f"Captcha JS click failed ({e}), falling back to page reload...")
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=8000)
+                    time.sleep(1)
+                    try: page.get_by_role("link", name="English Version").click(timeout=2000)
+                    except: pass
+                    try: page.get_by_role("button", name="Citizen Login").click(timeout=2000)
+                    except: pass
+                    try:
+                        user_field = page.get_by_role("textbox", name="User Name")
+                        user_field.wait_for(state="visible", timeout=3000)
+                        user_field.fill(self.creds.get("username", ""))
+                        pass_field = page.get_by_role("textbox", name="Password")
+                        pass_field.wait_for(state="visible", timeout=3000)
+                        pass_field.fill(self.creds.get("password", ""))
+                    except: pass
+                except Exception as e2:
+                    self.log(f"Reload fallback also failed: {e2}")
+
+        # Outer loop: re-screenshot and re-prompt after each refresh
+        while True:
+            captcha_b64 = _screenshot_captcha()
+            self.ws_manager.latest_response = None
+            self.ws_manager.send_event_sync({
+                "type": "REQUEST_CAPTCHA",
+                "message": "Please look at the captcha image and enter the code shown below.",
+                "image": captcha_b64
+            })
+
+            # Inner loop: wait for USER_ANSWER or REFRESH_CAPTCHA
+            elapsed = 0
+            got_refresh = False
+            while elapsed < timeout:
+                response = self.ws_manager.latest_response
+                if response is not None:
+                    msg_type = response.get("type", "")
+                    if msg_type == "REFRESH_CAPTCHA":
+                        self.log("User requested captcha refresh...")
+                        _click_captcha_refresh()
+                        # Take new screenshot and push it to frontend immediately
+                        new_b64 = _screenshot_captcha()
+                        self.ws_manager.send_event_sync({
+                            "type": "CAPTCHA_REFRESHED",
+                            "image": new_b64
+                        })
+                        got_refresh = True
+                        break  # break inner loop → outer loop re-prompts with new image
+                    elif msg_type == "USER_ANSWER":
+                        return str(response.get("data", ""))
+                time.sleep(1)
+                elapsed += 1
+
+            if not got_refresh:
+                raise TimeoutError("No captcha response received within timeout.")
+            # got_refresh=True → outer while True loops back, re-screenshots and re-sends REQUEST_CAPTCHA
+
+    def _ws_prompt_otp(self, page_form, timeout=300):
+        """Prompt for OTP, handling GENERATE_OTP action messages in the loop."""
+        self.ws_manager.latest_response = None
+        self.ws_manager.send_event_sync({
+            "type": "REQUEST_OTP",
+            "message": "An OTP has been sent to your registered mobile number. Please enter the OTP below."
+        })
+
+        elapsed = 0
+        while elapsed < timeout:
+            response = self.ws_manager.latest_response
+            if response is not None:
+                msg_type = response.get("type", "")
+                if msg_type == "GENERATE_OTP":
+                    # User clicked Generate OTP — click the button on the portal
+                    self.log("User requested new OTP generation...")
+                    try:
+                        page_form.get_by_role("button", name="Generate OTP").click()
+                        time.sleep(2)
+                    except: pass
+                    self.ws_manager.latest_response = None
+                    self.ws_manager.send_event_sync({
+                        "type": "STATUS_MESSAGE",
+                        "message": "A new OTP has been sent to your mobile number."
+                    })
+                    elapsed = 0
+                    continue
+                elif msg_type == "USER_ANSWER":
+                    data = response.get("data", "")
+                    return str(data)
+            time.sleep(1)
+            elapsed += 1
+
+        raise TimeoutError("No OTP response received within timeout.")
 
     def format_date_for_injection(self, date_str):
         try:
@@ -144,7 +334,7 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                browser = playwright.chromium.launch(headless=False, slow_mo=200)
+                browser = playwright.chromium.launch(headless=True, slow_mo=200)
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
 
@@ -157,28 +347,48 @@ class TNeSevaiBackendAgent:
                 page.get_by_role("textbox", name="User Name").fill(self.creds.get("username"))
                 page.get_by_role("textbox", name="Password").fill(self.creds.get("password"))
 
-                # --- Captcha Handling ---
-                self.log("Extracting Captcha...")
-                captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
-                captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
-                captcha_img.screenshot(path=captcha_path)
-
-                # Encode captcha as base64 and embed directly in the WS event
+                # --- Captcha Handling — retry loop ---
                 import base64
-                with open(captcha_path, "rb") as f:
-                    captcha_b64 = "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
 
-                user_captcha = self._ws_prompt({
-                    "type": "REQUEST_CAPTCHA",
-                    "message": "Please look at the captcha image and enter the code shown below.",
-                    "image": captcha_b64
-                })
-                
-                page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
+                while True:
+                    if self.ws_manager:
+                        user_captcha = self._ws_prompt_captcha(page)
+                    else:
+                        captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
+                        captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
+                        captcha_img.screenshot(path=captcha_path)
+                        user_captcha = input("Enter captcha: ")
 
-                with page.expect_navigation(timeout=60000):
+                    page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
                     self.log("Clicking Login...")
                     page.get_by_role("button", name="Login").click()
+                    time.sleep(3)
+
+                    # Check if login failed — inspect page HTML for known error strings
+                    page_html = page.content().lower()
+                    captcha_failed = (
+                        "does not match the code in the image" in page_html
+                        or "code you typed does not match" in page_html
+                        or "invalid captcha" in page_html
+                        or "captcha is incorrect" in page_html
+                    )
+
+                    if captcha_failed:
+                        self.log("Wrong captcha entered. Please try again...")
+                        if self.ws_manager:
+                            self.ws_manager.send_event_sync({
+                                "type": "STATUS_MESSAGE",
+                                "message": "❌ Wrong captcha! A new captcha has been loaded — please try again."
+                            })
+                        # Re-fill credentials (page may have cleared them)
+                        try:
+                            page.get_by_role("textbox", name="User Name").fill(self.creds.get("username"))
+                            page.get_by_role("textbox", name="Password").fill(self.creds.get("password"))
+                        except: pass
+                        continue  # retry loop
+                    else:
+                        # No error text found — login succeeded
+                        break
 
                 # --- Nav to Certificate ---
                 self.log("Navigating to Residence Certificate...")
@@ -226,18 +436,49 @@ class TNeSevaiBackendAgent:
                 """)
                 time.sleep(4)
                 
-                # --- OTP Flow ---
+                # --- OTP Flow — retry loop ---
                 self.log("Requesting OTP from Server...")
                 page_form.get_by_role("button", name="Generate OTP").click()
-                time.sleep(3) 
-                
-                user_otp = self._ws_prompt({
-                    "type": "REQUEST_OTP",
-                    "message": "An OTP has been sent to your registered mobile number. Please enter the OTP below."
-                })
-                
-                page_form.locator('[id="statusform:otp_id"]').fill(user_otp)
-                page_form.get_by_role("button", name="Confirm OTP").click()
+                time.sleep(3)
+
+                while True:
+                    if self.ws_manager:
+                        user_otp = self._ws_prompt_otp(page_form)
+                    else:
+                        user_otp = input("Enter OTP: ")
+
+                    page_form.locator('[id="statusform:otp_id"]').fill(user_otp)
+                    page_form.get_by_role("button", name="Confirm OTP").click()
+                    time.sleep(3)
+
+                    # Check if OTP failed — inspect page HTML for known error strings
+                    otp_page_html = page_form.content().lower()
+                    otp_failed = (
+                        "please enter valid otp" in otp_page_html
+                        or "invalid otp" in otp_page_html
+                        or "otp does not match" in otp_page_html
+                        or "incorrect otp" in otp_page_html
+                        or "otp expired" in otp_page_html
+                        or "wrong otp" in otp_page_html
+                    )
+
+                    if otp_failed:
+                        self.log("Wrong OTP entered. Generating a new OTP and asking user to retry...")
+                        if self.ws_manager:
+                            self.ws_manager.send_event_sync({
+                                "type": "STATUS_MESSAGE",
+                                "message": "❌ Wrong OTP! A new OTP is being sent to your mobile — please try again."
+                            })
+                        # Clear the OTP field and generate a fresh OTP
+                        try:
+                            page_form.locator('[id="statusform:otp_id"]').fill("")
+                            page_form.get_by_role("button", name="Generate OTP").click()
+                            time.sleep(3)
+                        except: pass
+                        continue  # retry loop
+                    else:
+                        # No error text — OTP accepted
+                        break
                 
                 self.log("OTP Confirmed. Proceeding to Form...")
                 page_form.get_by_role("button", name="Proceed").click()
@@ -271,17 +512,6 @@ class TNeSevaiBackendAgent:
                     try: page_form.locator('[id="residence:fatherName"]').fill(self.applicant.get("father_name"))
                     except: pass
 
-                if self.applicant.get("gender") and is_dropdown_empty('[id="residence:gender"]'):
-                    self.safe_select_dropdown(page_form, '[id="residence:gender"]', self.applicant.get("gender"), "Gender")
-                if self.applicant.get("religion") and is_dropdown_empty('[id="residence:religion"]'):
-                    self.safe_select_dropdown(page_form, '[id="residence:religion"]', self.applicant.get("religion"), "Religion")
-                if self.applicant.get("community") and is_dropdown_empty('[id="residence:community"]'):
-                    self.safe_select_dropdown(page_form, '[id="residence:community"]', self.applicant.get("community"), "Community")
-                if self.address.get("state") and is_dropdown_empty('[id="residence:state"]'):
-                    self.safe_select_dropdown(page_form, '[id="residence:state"]', self.address.get("state"), "State")
-                if self.address.get("district") and is_dropdown_empty('[id="residence:district"]'):
-                    self.safe_select_dropdown(page_form, '[id="residence:district"]', self.address.get("district"), "District")
-                
                 revenue_village_value = self.address.get("area") or self.address.get("village")
                 if is_dropdown_empty('[id="residence:cRvillageListId"]'):
                     if revenue_village_value:
@@ -452,7 +682,56 @@ class TNeSevaiBackendAgent:
                         except: continue
 
                 self.log("SUCCESS! Payment page reached. Backend job complete.")
-                time.sleep(5) 
+                time.sleep(3)
+
+                # Accept T&C and click Make Payment
+                try:
+                    page_form.scroll_into_view_if_needed = lambda: None  # no-op guard
+                    # Scroll to bottom to reveal T&C and Make Payment button
+                    page_form.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1.5)
+
+                    # Accept Terms & Conditions checkbox
+                    try:
+                        tc_checkbox = page_form.locator(
+                            "input[type='checkbox']"
+                        ).last
+                        if not tc_checkbox.is_checked():
+                            tc_checkbox.check(force=True)
+                            self.log("Terms & Conditions accepted.")
+                        time.sleep(0.5)
+                    except Exception as e:
+                        self.log(f"T&C checkbox not found or already checked: {e}")
+
+                    # Click Make Payment button
+                    try:
+                        page_form.get_by_role("button", name="Make Payment").click(force=True)
+                        self.log("Make Payment clicked.")
+                    except:
+                        try:
+                            page_form.locator("input[value='Make Payment'], button:has-text('Make Payment'), a:has-text('Make Payment')").first.click(force=True)
+                            self.log("Make Payment clicked (fallback).")
+                        except Exception as e:
+                            self.log(f"Make Payment button not found: {e}")
+
+                    time.sleep(3)
+
+                    # Get the payment gateway URL and send to frontend to open in browser
+                    try:
+                        payment_url = page_form.url
+                        self.log(f"Payment gateway URL: {payment_url}")
+                        if self.ws_manager:
+                            self.ws_manager.send_event_sync({
+                                "type": "OPEN_PAYMENT_URL",
+                                "url": payment_url
+                            })
+                    except Exception as e:
+                        self.log(f"Could not get payment URL: {e}")
+                except Exception as e:
+                    self.log(f"Payment step error: {e}")
+
+                self.log("User redirected to payment gateway. Backend job complete.")
+                time.sleep(2)
                 browser.close()
 
         except Exception as e:

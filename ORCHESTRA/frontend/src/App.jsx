@@ -198,26 +198,9 @@ Just type your question in plain language and I will assist you right away.`,
     pushUser(text);
     const lower = text.toLowerCase().trim();
 
-    // Quick-action intercept — no backend call needed
-    const quickKey = Object.keys(QUICK_RESPONSES).find(k => lower === k || lower.startsWith(k));
+    // Quick-action intercept — exact keyword matches only
+    const quickKey = Object.keys(QUICK_RESPONSES).find(k => lower === k);
     if (quickKey) { pushBot(QUICK_RESPONSES[quickKey]); return; }
-
-    // Document submission intent — show checklist directly
-    const wantsForm = (
-      lower.includes("submit") || lower.includes("upload") || lower.includes("attach") ||
-      lower.includes("application form") || lower.includes("fill form") || lower.includes("start application") ||
-      lower.includes("apply now") || lower.includes("begin") || lower.includes("proceed") ||
-      lower.includes("login") || lower.includes("credentials") || lower.includes("start")
-    ) && (
-      lower.includes("document") || lower.includes("certificate") || lower.includes("file") ||
-      lower.includes("form") || lower.includes("application") || lower.includes("apply")
-    );
-
-    if (wantsForm) {
-      pushBot("Sure! Please fill in your portal credentials and upload your documents below.");
-      setShowChecklist(true);
-      return;
-    }
 
     setShowChecklist(false);
     setWaitingForDocReply(false);
@@ -252,12 +235,10 @@ Just type your question in plain language and I will assist you right away.`,
     }
   };
 
-  const handleChecklistProceed = async () => {
-    setIsChecklistProceeding(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setIsChecklistProceeding(false);
+  const handleChecklistExit = () => {
+    sendWS({ type: "USER_CLOSE" });
     setShowChecklist(false);
-    pushBot("Thank you for submitting the documents.");
+    setFinalPageImage("");
   };
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
@@ -266,6 +247,7 @@ Just type your question in plain language and I will assist you right away.`,
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
   const [showDocumentNumber, setShowDocumentNumber]   = useState(false);
+  const [automationStatus, setAutomationStatus]       = useState("");
 
   const openAutomationSocket = () => new Promise((resolve) => {
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
@@ -284,7 +266,12 @@ Just type your question in plain language and I will assist you right away.`,
       };
       socket.onmessage = (e) => {
         const data = JSON.parse(e.data);
-        if      (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+        if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+        else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+        else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+        else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
+        else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
+        else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
         else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
         else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
         else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
@@ -303,6 +290,7 @@ Just type your question in plain language and I will assist you right away.`,
   };
 
   const handleAutomationSubmit      = (v) => { sendWS({ type: "USER_ANSWER", data: v }); setAutomationEvent(null); };
+  const handleAutomationAction      = (v) => { sendWS(v); };
   const handleSelfDeclarationSubmit = (p) => { sendWS({ type: "USER_ANSWER", data: p }); setShowSelfDeclaration(false); };
   const handleSelfDeclarationExit   = ()  => { sendWS({ type: "USER_ANSWER", data: "exit" }); setShowSelfDeclaration(false); };
   const handleDocumentNumberSubmit  = (n) => { sendWS({ type: "USER_ANSWER", data: n }); setShowDocumentNumber(false); };
@@ -339,48 +327,26 @@ Just type your question in plain language and I will assist you right away.`,
         <div className="sidebar-footer" />
       </aside>
 
-      {/* ── Mobile Topbar ── */}
-      <div className="mobile-topbar">
-        <div className="mobile-topbar-left">
-          <div className="sidebar-logo-icon" style={{width:'1.75rem',height:'1.75rem',borderRadius:'0.375rem'}}>
-            <LuBot size={15} color="#fff" />
-          </div>
-          <span className="mobile-topbar-title">TNeGA</span>
-        </div>
-        <div className="mobile-topbar-right">
-          <button className="hamburger-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
-            {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
-          </button>
-          <button className="hamburger-btn" aria-label="Menu" onClick={() => setDrawerOpen(true)}>
-            <LuMenu size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* ── Mobile Drawer ── */}
-      <div className={`drawer-overlay${drawerOpen?" open":""}`} onClick={() => setDrawerOpen(false)} />
-      <div className={`drawer${drawerOpen?" open":""}`}>
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon"><LuBot size={18} color="#fff" /></div>
-          <div className="sidebar-logo-text">
-            <span className="sidebar-logo-title">TNeGA</span>
-            <span className="sidebar-logo-sub">e-Sevai Portal</span>
-          </div>
-          <button className="hamburger-btn" aria-label="Close" onClick={() => setDrawerOpen(false)}>
-            <LuX size={15} />
-          </button>
-        </div>
-        <nav className="sidebar-nav">
-          <div className="sidebar-label">Navigation</div>
-          <button className={`nav-item${activePage==="home"?" active":""}`}    onClick={() => navigate("home")}><LuLayoutDashboard size={15} /> Home</button>
-          <button className={`nav-item${activePage==="faq"?" active":""}`}     onClick={() => navigate("faq")}><LuBookOpen size={15} /> FAQ</button>
-          <button className={`nav-item${activePage==="status"?" active":""}`}  onClick={() => navigate("status")}><LuFileCheck size={15} /> Application Status</button>
-          <button className={`nav-item${activePage==="contact"?" active":""}`} onClick={() => navigate("contact")}><LuPhone size={15} /> Contact</button>
-        </nav>
-      </div>
-
       {/* ── Main ── */}
       <div className="main-col">
+
+        {/* ── Mobile Topbar ── */}
+        <div className="mobile-topbar">
+          <div className="mobile-topbar-left">
+            <div className="sidebar-logo-icon" style={{width:'1.75rem',height:'1.75rem',borderRadius:'0.375rem'}}>
+              <LuBot size={15} color="#fff" />
+            </div>
+            <span className="mobile-topbar-title">TNeGA</span>
+          </div>
+          <div className="mobile-topbar-right">
+            <button className="hamburger-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
+              {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
+            </button>
+            <button className="hamburger-btn" aria-label="Menu" onClick={() => setDrawerOpen(true)}>
+              <LuMenu size={16} />
+            </button>
+          </div>
+        </div>
 
         {activePage !== "home" ? (
           <div className="chat-scroll">
@@ -429,10 +395,11 @@ Just type your question in plain language and I will assist you right away.`,
             {/* Document checklist */}
             {showChecklist && (
               <DocumentChecklist
-                onProceed={handleChecklistProceed}
-                onExit={() => setShowChecklist(false)}
+                onProceed={() => {}}
+                onExit={handleChecklistExit}
                 isProceeding={isChecklistProceeding}
                 onOpenSocket={openAutomationSocket}
+                automationStatus={automationStatus}
               />
             )}
 
@@ -460,7 +427,7 @@ Just type your question in plain language and I will assist you right away.`,
       </div>
 
       {/* ── Modals ── */}
-      <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} />
+      <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} onAction={handleAutomationAction} />
       <SelfDeclarationModal isOpen={showSelfDeclaration}  downloadPath={selfDeclarationPath} onSubmit={handleSelfDeclarationSubmit} onExit={handleSelfDeclarationExit} />
       <DocumentNumberModal  isOpen={showDocumentNumber}   onSubmit={handleDocumentNumberSubmit} />
     </div>

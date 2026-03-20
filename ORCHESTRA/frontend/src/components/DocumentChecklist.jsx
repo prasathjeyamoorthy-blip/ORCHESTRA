@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MdOutlineCloudUpload, MdDeleteOutline } from "react-icons/md";
 import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert } from "react-icons/lu";
 
@@ -18,7 +18,7 @@ function FloatingInput({ label, name, type = "text", value, onChange, maxLength 
   );
 }
 
-export default function DocumentChecklist({ onProceed, onExit, isProceeding, onOpenSocket }) {
+export default function DocumentChecklist({ onProceed, onExit, isProceeding, onOpenSocket, automationStatus }) {
   const [checkedItems, setCheckedItems] = useState({ aadharCard: false, rationCard: false, photo: false, drivingLicense: false });
   const [expandedItem, setExpandedItem] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState({});
@@ -32,6 +32,20 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   const [isExtracting, setIsExtracting] = useState(false);
   const [credentials, setCredentials] = useState({ username: "", password: "", can_number: "", aadhar_number: "" });
   const [addressDetails, setAddressDetails] = useState({ from_date: "", to_date: "" });
+  // Latched step completion — once true, stays true regardless of future status messages
+  const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
+
+  // Latch steps as automation progresses
+  useEffect(() => {
+    if (!automationStatus) return;
+    const s = automationStatus.toLowerCase();
+    setCompletedSteps(prev => ({
+      loggedIn:    prev.loggedIn    || s.includes("otp verified") || s.includes("loading the form") || s.includes("filling in") || s.includes("saving your address") || s.includes("uploading") || s.includes("all documents") || s.includes("payment") || s.includes("done"),
+      formFilled:  prev.formFilled  || s.includes("saving your address") || s.includes("submitting the application") || s.includes("uploading") || s.includes("all documents") || s.includes("payment") || s.includes("done"),
+      docsUploaded:prev.docsUploaded|| s.includes("all documents uploaded") || s.includes("going to payment") || s.includes("payment") || s.includes("done"),
+      submitted:   prev.submitted   || s.includes("done!") || s.includes("payment page reached"),
+    }));
+  }, [automationStatus]);
 
   const documents = [
     { id: "aadharCard",     label: "Aadhar card" },
@@ -147,45 +161,51 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
 
   // ── Success screen ────────────────────────────────────────────────────────
   if (bulkResults) {
-    const p = playwrightPayload;
+    const isDone = automationStatus && (
+      automationStatus.includes("Done!") ||
+      automationStatus.includes("Payment page") ||
+      automationStatus.includes("went wrong")
+    );
+    const isError = automationStatus && automationStatus.includes("went wrong");
+
     return (
       <div className="cl-card fade-up">
-        <div className="cl-success-header">
-          <LuCircleCheck size={22} />
-          <h3 className="cl-title">Processing Complete</h3>
-        </div>
-        <p className="cl-sub">Automation has started in the background.</p>
-
-        <div className="cl-section">
-          <div className="cl-section-label">Validation Summary</div>
-          <div className="cl-row"><span>Name Match</span><strong>{bulkResults.validation?.name_similarity?.toFixed(1) ?? "—"}%</strong></div>
-          <div className="cl-row"><span>DOB Match</span><strong>{bulkResults.validation?.dob_match ? "Yes" : "No"}</strong></div>
-          <div className="cl-row"><span>Confidence</span><strong>{bulkResults.confidence_score ?? "—"}%</strong></div>
-          <div className="cl-row">
-            <span>Status</span>
-            <strong style={{ color: bulkResults.validation?.name_match ? "var(--primary)" : "#ef4444" }}>
-              {bulkResults.validation?.name_match ? "APPROVED" : "REVIEW REQUIRED"}
-            </strong>
+        <div className="cl-live-header">
+          <div className={`cl-live-icon ${isDone ? (isError ? "error" : "done") : "running"}`}>
+            {isDone
+              ? (isError ? "✕" : "✓")
+              : <span className="cl-spin-ring" />
+            }
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 className="cl-title" key={automationStatus} style={{ animation: "status-fade 0.35s ease both" }}>
+              {automationStatus || "Starting automation…"}
+            </h3>
+            <p className="cl-sub" style={{ marginTop: "0.2rem" }}>
+              {isDone
+                ? (isError ? "Please try again or contact support." : "Payment page opened in your browser — complete your payment there.")
+                : "Sit back — we're handling everything for you."}
+            </p>
           </div>
         </div>
 
-        {p && (
-          <div className="cl-section">
-            <div className="cl-section-label">Applicant Details</div>
-            <div className="cl-row"><span>Name</span><strong>{p.applicant_details?.name}</strong></div>
-            <div className="cl-row"><span>Father Name</span><strong>{p.applicant_details?.father_name}</strong></div>
-            <div className="cl-row"><span>Gender</span><strong>{p.applicant_details?.gender}</strong></div>
-            <div className="cl-row"><span>Aadhaar</span><strong>{p.applicant_details?.aadhar_number}</strong></div>
-            <div className="cl-row"><span>DOB</span><strong>{p.applicant_details?.dob}</strong></div>
-          </div>
-        )}
 
-        <div className="cl-footer">
-          <div className="cl-running">
-            <span className="cl-pulse" />
-            Playwright running in background…
-          </div>
-          <button className="btn-secondary" onClick={() => onProceed ? onProceed() : onExit()}>Close</button>
+        <div className="cl-steps">
+          {[
+            { label: "Logged in",              done: completedSteps.loggedIn },
+            { label: "Form filled",            done: completedSteps.formFilled },
+            { label: "Documents uploaded",     done: completedSteps.docsUploaded },
+            { label: "Submitted to portal",    done: completedSteps.submitted },
+          ].map((step, i) => (
+            <div key={i} className={`cl-step ${step.done ? "done" : ""}`}>
+              <div className="cl-step-dot">{step.done ? "✓" : i + 1}</div>
+              <span className="cl-step-label">{step.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="cl-actions" style={{ marginTop: "1.25rem" }}>
+          <button className="btn-secondary" onClick={onExit}>Close</button>
         </div>
       </div>
     );
