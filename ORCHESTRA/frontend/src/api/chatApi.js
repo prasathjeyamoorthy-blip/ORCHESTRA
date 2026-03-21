@@ -11,7 +11,12 @@ export async function sendMessage(sessionId, message) {
   });
 
   if (!res.ok) {
-    throw new Error("Backend error");
+    let detail = `Backend error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body.error) detail = body.error;
+    } catch (_) {}
+    throw new Error(detail);
   }
 
   return res.json();

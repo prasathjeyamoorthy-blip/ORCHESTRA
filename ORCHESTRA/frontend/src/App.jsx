@@ -11,10 +11,84 @@ import DocumentChecklist    from "./components/DocumentChecklist";
 import AutomationModal      from "./components/AutomationModal";
 import SelfDeclarationModal from "./components/SelfDeclarationModal";
 import DocumentNumberModal  from "./components/DocumentNumberModal";
+import { HeroGeometric } from "./components/ui/shape-landing-hero";
+import AnimatedShaderBackground from "./components/ui/animated-shader-background";
+import { HoverButton } from "./components/ui/hover-button";
+import { AppSidebar } from "./components/AppSidebar";
+import { GooeyText } from "./components/ui/gooey-text-morphing";
 import { sendMessage } from "./api/chatApi";
 import "./index.css";
 
+const TYPING_WORDS = ["TNeGA AI Assistant", "e-Sevai Automation"];
+
+function LandingOverlay({ onStart }) {
+  const [displayed, setDisplayed] = useState("");
+  const [wordIdx, setWordIdx] = useState(0);
+  const [charIdx, setCharIdx] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const word = TYPING_WORDS[wordIdx];
+    let timeout;
+    if (!deleting && charIdx < word.length) {
+      timeout = setTimeout(() => setCharIdx(i => i + 1), 80);
+    } else if (!deleting && charIdx === word.length) {
+      timeout = setTimeout(() => setDeleting(true), 1600);
+    } else if (deleting && charIdx > 0) {
+      timeout = setTimeout(() => setCharIdx(i => i - 1), 45);
+    } else if (deleting && charIdx === 0) {
+      setDeleting(false);
+      setWordIdx(i => (i + 1) % TYPING_WORDS.length);
+    }
+    setDisplayed(word.slice(0, charIdx));
+    return () => clearTimeout(timeout);
+  }, [charIdx, deleting, wordIdx]);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 10,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", gap: "1.75rem",
+    }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{
+          fontSize: "clamp(2rem, 4.5vw, 3.5rem)",
+          fontWeight: 800,
+          color: "#fff",
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+          letterSpacing: "-0.03em",
+          lineHeight: 1.2,
+          marginBottom: "0.5rem",
+          textShadow: "0 2px 24px rgba(0,0,0,0.4)",
+        }}>
+          {displayed}
+          <span style={{
+            display: "inline-block",
+            width: "3px", height: "1em",
+            background: "#ffffff",
+            marginLeft: "4px",
+            verticalAlign: "middle",
+            borderRadius: "2px",
+            animation: "blink-cursor 0.75s step-end infinite",
+          }} />
+        </div>
+        <div style={{
+          fontSize: "clamp(0.8rem, 1.5vw, 1rem)",
+          color: "rgba(255,255,255,0.45)",
+          fontWeight: 500,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+        }}>
+          Powered by ORCHESTRA
+        </div>
+      </div>
+      <HoverButton onClick={onStart}>Get Started</HoverButton>
+    </div>
+  );
+}
+
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [messages, setMessages]   = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -23,24 +97,48 @@ export default function App() {
   const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
   const chatEndRef = useRef(null);
 
-  // ── Dark mode ─────────────────────────────────────────────────────────────
-  const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved) return saved === "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  // ── Dark mode — always dark ───────────────────────────────────────────────
+  const [dark, setDark] = useState(true);
+  
+  useEffect(() => {
+    document.documentElement.classList.add("dark");
+    localStorage.setItem("theme", "dark");
+  }, []);
+  const [activePage, setActivePage] = useState(() => {
+    const hash = window.location.hash.replace("#", "");
+    return ["faq", "status", "contact"].includes(hash) ? hash : "home";
   });
-  const [activePage, setActivePage] = useState("home"); // home | faq | status | contact
+  const [pageHistory, setPageHistory] = useState(["home"]);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const navigate = (page) => { setActivePage(page); setDrawerOpen(false); };
+  const navigate = (page) => {
+    window.history.pushState({ page }, "", `#${page}`);
+    setPageHistory(h => [...h, page]);
+    setActivePage(page);
+    setDrawerOpen(false);
+  };
 
+  const navigateBack = () => {
+    window.history.back();
+  };
+
+  // Listen to browser back/forward
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("theme", dark ? "dark" : "light");
-  }, [dark]);
+    const onPop = (e) => {
+      const page = e.state?.page || "home";
+      setActivePage(page);
+      setPageHistory(h => h.length > 1 ? h.slice(0, -1) : h);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
+    // Seed browser history so back button works from the start
+    window.history.replaceState({ page: "home" }, "", "#home");
     setMessages([{
       sender: "agent",
       text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
@@ -186,8 +284,8 @@ Just type your question in plain language and I will assist you right away.`,
     try {
       const res = await sendMessage(sessionId, text);
       pushBot(res.answer || "Please provide more details.");
-    } catch {
-      pushBot("The service is temporarily unavailable. Please try again later.");
+    } catch (err) {
+      pushBot(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -209,8 +307,8 @@ Just type your question in plain language and I will assist you right away.`,
       const res = await sendMessage(sessionId, text);
       pushBot(res.answer || "Please provide more details.");
       if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
-    } catch {
-      pushBot("The service is temporarily unavailable. Please try again later.");
+    } catch (err) {
+      pushBot(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -228,8 +326,8 @@ Just type your question in plain language and I will assist you right away.`,
       } else {
         setShowChecklist(false);
       }
-    } catch {
-      pushBot("The service is temporarily unavailable. Please try again later.");
+    } catch (err) {
+      pushBot(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -300,37 +398,25 @@ Just type your question in plain language and I will assist you right away.`,
     <div className="app-root">
 
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <LuBot size={18} color="#fff" />
-          </div>
-          <div className="sidebar-logo-text">
-            <span className="sidebar-logo-title">TNeGA</span>
-            <span className="sidebar-logo-sub">e-Sevai Portal</span>
-          </div>
-          <button className="theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
-            {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
-          </button>
-        </div>
-
-        <nav className="sidebar-nav">
-          <div className="sidebar-label">Navigation</div>
-          <button className={`nav-item${activePage==="home"?" active":""}`}    onClick={() => navigate("home")}><LuLayoutDashboard size={15} /> Home</button>
-          <button className={`nav-item${activePage==="faq"?" active":""}`}     onClick={() => navigate("faq")}><LuBookOpen size={15} /> FAQ</button>
-          <button className={`nav-item${activePage==="status"?" active":""}`}  onClick={() => navigate("status")}><LuFileCheck size={15} /> Application Status</button>
-          <button className={`nav-item${activePage==="contact"?" active":""}`} onClick={() => navigate("contact")}><LuPhone size={15} /> Contact</button>
-
-
-        </nav>
-
-        <div className="sidebar-footer" />
-      </aside>
+      {!showLanding && (
+        <AppSidebar
+          activePage={activePage}
+          onNavigate={navigate}
+          drawerOpen={drawerOpen}
+          onDrawerClose={() => setDrawerOpen(false)}
+        />
+      )}
 
       {/* ── Main ── */}
       <div className="main-col">
+        {/* Animated background — shader on landing, geometric on chat */}
+        {showLanding ? <AnimatedShaderBackground /> : <HeroGeometric />}
+
+        {/* ── Landing overlay ── */}
+        {showLanding && <LandingOverlay onStart={() => setShowLanding(false)} />}
 
         {/* ── Mobile Topbar ── */}
+        {!showLanding && (<>
         <div className="mobile-topbar">
           <div className="mobile-topbar-left">
             <div className="sidebar-logo-icon" style={{width:'1.75rem',height:'1.75rem',borderRadius:'0.375rem'}}>
@@ -361,24 +447,15 @@ Just type your question in plain language and I will assist you right away.`,
         <div className="chat-scroll">
           <div className="chat-inner">
 
-            {/* Hero card */}
-            <div className="hero-card-wrap">
-              <div className="hero-card">
-                <div className="hero-dot" />
-                <div className="hero-card-inner">
-                  <div className="hero-avatar">
-                    <LuBot size={20} color="#fff" />
-                  </div>
-                  <div className="hero-info">
-                    <div className="hero-title">ORCHESTRA <span>/ TNeGA</span></div>
-                    <div className="hero-sub">Residence Certificate · e-Sevai Automation Assistant</div>
-                  </div>
-                  <div className="hero-meta">
-                    <span className="hero-tag"><LuShieldCheck size={11} /> Gov Verified</span>
-                    <span className="hero-tag accent"><LuSparkles size={11} /> AI</span>
-                  </div>
-                </div>
-              </div>
+            {/* Gooey morphing title */}
+            <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.5rem", marginTop: "2rem" }}>
+              <GooeyText
+                texts={["TNeGA", "ORCHESTRA"]}
+                morphTime={1.2}
+                cooldownTime={2.5}
+                className="gooey-wrap"
+                textClassName="gooey-title"
+              />
             </div>
             {messages.map((msg, i) => (
               <ChatBubble key={i} sender={msg.sender} message={msg.text} />
@@ -422,7 +499,9 @@ Just type your question in plain language and I will assist you right away.`,
           disabled={isGenerating || showChecklist}
           isGenerating={isGenerating}
           onStop={() => setIsGenerating(false)}
+          showChips={messages.length <= 1 && !showChecklist}
         />
+      </>)}
       </>)}
       </div>
 

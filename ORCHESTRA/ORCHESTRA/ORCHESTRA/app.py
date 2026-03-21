@@ -1,10 +1,12 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict
 import os
 import re
 import time
 import sys
+import traceback
 import threading as _threading
 import asyncio as _asyncio
 from collections import deque
@@ -31,16 +33,48 @@ _MAX_MS = 3000   # warn if slower than this
 # ── Timing log ─────────────────────────────────────────────────────────────────
 _TIMING_LOG: list = []
 
-# ── Answer post-processing: strip "provide personal details" blocks ────────────
+# ── Answer post-processing ─────────────────────────────────────────────────────
 _STRIP_PATTERNS = [
     r"(?i)additionally[^.]*?(?:applicant|you|user)\s+needs?\s+to\s+provide\s+personal\s+details[^:]*:[\s\S]*?(?=\n\n|\Z)",
     r"(?i)(?:[-•*]\s*applicant\s+(?:father\s+name|mobile\s+number|email\s+id|date\s+of\s+birth)[^\n]*\n?)+",
     r"(?i)(?:you\s+will\s+need\s+to|the\s+applicant\s+needs?\s+to)\s+provide\s+personal\s+details[^:]*:[\s\S]*?(?=\n\n|\Z)",
 ]
 
+def _fix_markdown(text: str) -> str:
+    """Fix malformed markdown produced by the LLM."""
+    # Strip filler openers
+    text = re.sub(
+        r"^(I will handle this for you\.?\s*|According to the context,?\s*|"
+        r"I will take care of this\.?\s*|I am submitting on your behalf\.?\s*)",
+        "", text, flags=re.IGNORECASE
+    ).lstrip()
+
+    lines = text.split("\n")
+    fixed = []
+    for line in lines:
+        # Fix numbered list items that contain stray asterisks used as sub-bullets
+        # e.g. "4. *5. *6. *7.* **Current Address Proof**"
+        # → split into proper list items
+        m = re.match(r'^(\d+)\.\s+(\*\d+\.\s+)+\*?\s*(.+)$', line)
+        if m:
+            # Extract the actual content after all the stray *N. markers
+            content = re.sub(r'\*\d+\.\s*', '', line)
+            content = re.sub(r'^\d+\.\s+', '', content).strip()
+            line = f"- {content}"
+
+        # Fix lines that are just stray asterisk-number patterns like "*5." or "* 6."
+        line = re.sub(r'^\s*\*(\d+)\.\s*', r'\1. ', line)
+
+        # Fix bold markers with spaces: "** text **" → "**text**"
+        line = re.sub(r'\*\*\s+(.+?)\s+\*\*', r'**\1**', line)
+
+        fixed.append(line)
+    return "\n".join(fixed)
+
 def _clean_answer(text: str) -> str:
     for pattern in _STRIP_PATTERNS:
         text = re.sub(pattern, "", text)
+    text = _fix_markdown(text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -68,10 +102,18 @@ def chat(req: ChatRequest):
 
     t_start = time.perf_counter()
 
-    if previous_stage == "ASK_CATEGORY":
-        state = documents_node(state)
-    else:
-        state = agentic_rag.invoke(state)
+    try:
+        if previous_stage == "ASK_CATEGORY":
+            state = documents_node(state)
+        else:
+            state = agentic_rag.invoke(state)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(f"[ERROR] /chat failed:\n{tb}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(exc), "traceback": tb}
+        )
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
     total_ms = round(elapsed_ms)

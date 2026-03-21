@@ -11,24 +11,24 @@
     "name": "Lohith",
     "father_name": "Gopalakrishnan",
     "gender": "MALE",
-    "religion": "Hindu",
-    "community": "Gounder",
+    "religion": "HINDU",
+    "community": "GOUNDAR",
     "mobile_number": "XXXX XXXX 0111",
     "email": ""
   },
   "address_details": {
-    "state": "Tamil Nadu",
-    "district": "Cuddalore",
-    "village": "Gunduuppalavadi",
-    "area": "Gunduuppalavadi",
+    "state": "TAMIL NADU",
+    "district": "CUDDALORE",
+    "village": "CUDDALORE",
+    "area": "GUNDUUPPALAVADI",
     "building_no": "55",
     "street_name": "WORLD VISION NAGAR",
     "pincode": "607002",
     "from_date": "26/07/2023",
-    "to_date": "20/03/2026",
-    "perm_state": "Tamil Nadu",
-    "perm_district": "Cuddalore",
-    "perm_village": "Gunduuppalavadi",
+    "to_date": "21/03/2026",
+    "perm_state": "TAMIL NADU",
+    "perm_district": "CUDDALORE",
+    "perm_village": "CUDDALORE",
     "perm_building_no": "55",
     "perm_street_name": "WORLD VISION NAGAR",
     "perm_pincode": "607002"
@@ -38,6 +38,6 @@
     "self_decl_path": "",
     "aadhaar_path": "E:\\DESKTOP\\ORCH_DEP\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_pdf_aadhar.pdf",
     "address_proof_path": "E:\\DESKTOP\\ORCH_DEP\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_driv_png.png",
-    "address_doc_no": "TN31 20250006924"
+    "address_doc_no": "A1+"
   }
 }
