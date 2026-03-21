@@ -12,7 +12,7 @@
     "father_name": "Gopalakrishnan",
     "gender": "MALE",
     "religion": "HINDU",
-    "community": "GOUNDAR",
+    "community": "OTHER BACKWARD CLASS",
     "mobile_number": "XXXX XXXX 0111",
     "email": ""
   },
@@ -24,8 +24,8 @@
     "building_no": "55",
     "street_name": "WORLD VISION NAGAR",
     "pincode": "607002",
-    "from_date": "26/07/2023",
-    "to_date": "21/03/2026",
+    "from_date": "09/08/2023",
+    "to_date": "22/03/2026",
     "perm_state": "TAMIL NADU",
     "perm_district": "CUDDALORE",
     "perm_village": "CUDDALORE",
@@ -34,10 +34,10 @@
     "perm_pincode": "607002"
   },
   "documents": {
-    "photo_path": "E:\\DESKTOP\\ORCH_DEP\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_photo.jpeg",
+    "photo_path": "D:\\TNESEVAI\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\LOHITHG.jpg",
     "self_decl_path": "",
-    "aadhaar_path": "E:\\DESKTOP\\ORCH_DEP\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_pdf_aadhar.pdf",
-    "address_proof_path": "E:\\DESKTOP\\ORCH_DEP\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\lohit_driv_png.png",
-    "address_doc_no": "A1+"
+    "aadhaar_path": "D:\\TNESEVAI\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\in.gov.uidai-ADHAR-2c881618229e6df55d45151b1029b82a.pdf",
+    "address_proof_path": "D:\\TNESEVAI\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\ORCHESTRA\\Playwright\\uploaded_documents\\Screenshot 2026-01-26 200035.png",
+    "address_doc_no": "TN31 20250006924"
   }
 }

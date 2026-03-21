@@ -1,20 +1,22 @@
-FROM python:3.10-slim
-
-RUN apt-get update && apt-get install -y \
-    poppler-utils \
-    wget \
-    curl \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install system dependencies for OpenCV and other packages
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Explicitly install headless opencv
+RUN pip install opencv-python-headless
+
 COPY . .
 
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+EXPOSE 8000
 
-RUN pip install playwright
-RUN playwright install --with-deps
-
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port $PORT"]
+# Explicitly mapping port 8002 local to 8000 in Docker
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

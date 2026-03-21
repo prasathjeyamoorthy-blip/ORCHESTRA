@@ -13,8 +13,11 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[
+        "http://[REPLACE_WITH_ELASTIC_IP]",
+        "http://[REPLACE_WITH_ELASTIC_IP]:80"
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

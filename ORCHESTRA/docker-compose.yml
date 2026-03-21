@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  frontend:
+    image: nginx:alpine
+    container_name: react_frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+    restart: always
+    depends_on:
+      - cv_api
+      - playwright_api
+
+  cv_api:
+    build:
+      context: ./ORCHESTRA/DocumentUploadAgent
+    container_name: cv_fastapi
+    ports:
+      - "8000:8000"
+    restart: always
+
+  playwright_api:
+    build:
+      context: ./ORCHESTRA/ORCHESTRA
+    container_name: playwright_fastapi
+    ports:
+      - "8001:8001"
+    restart: always
