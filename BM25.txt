@@ -1,0 +1,74 @@
+🧠 What is BM25?
+
+BM25 (Best Matching 25) is a ranking algorithm used in search engines to score how relevant a document is to a query based on keywords.
+
+It improves simple keyword matching by being smarter about:
+
+How often a word appears
+How rare that word is across all documents
+How long the document is
+
+
+🧪 Why BM25 is powerful
+
+It uses three key tricks:
+
+1. Term Frequency (TF)
+
+More occurrences → more relevant
+👉 If "backend" appears 5 times, it's probably important
+
+2. Inverse Document Frequency (IDF)
+
+Rare words matter more
+👉 “FastAPI” > “the”
+
+3. Length normalization
+
+Long documents don’t get unfair advantage
+👉 Prevents huge texts from dominating
+
+
+
+🧪 Example of BM25
+
+Query:
+
+fast api python
+
+Documents:
+
+Doc1: fast api python backend
+Doc2: python python python slow api
+
+Word Matching:
+
+Doc1 → fast, api, python  (all words match)
+Doc2 → api, python        (missing "fast")
+
+Term Frequency (TF):
+
+Doc1:
+fast = 1
+api = 1
+python = 1
+
+Doc2:
+fast = 0
+api = 1
+python = 3
+
+IDF (importance of words):
+
+"fast"   → high importance (rare word)
+"api"    → medium importance
+"python" → low importance (common word)
+
+Final Result:
+
+Doc1 score > Doc2 score
+
+Conclusion:
+
+Doc1 is more relevant because it contains all query words,
+especially the important word "fast", and is not overly repetitive.
