@@ -1,0 +1,69 @@
+{
+    "resume": {
+        "token_number": "0204162200",
+        "email": "saairamgowshik@gmail.com",
+        "dob": "04/05/2006"
+    },
+    "applicant": {
+        "application_type": "49A",
+        "category": "Individual",
+        "submission_mode": "aadhaar_ekyc",
+        "paperless": true,
+
+        "title": "Mr",
+        "last_name": "SEKAR",
+        "first_name": "GOWSHIK",
+        "middle_name": "",
+        "dob": "04/05/2006",
+        "email": "saairamgowshik@gmail.com",
+        "mobile": "9876543210",
+
+        "gender": "M",
+        "aadhaar_number": "123456789012",
+        "aadhaar_photo_consent": "Yes",
+
+        "father_last": "SEKAR",
+        "father_first": "RAMESH",
+        "father_middle": "",
+        "mother_last": "SEKAR",
+        "mother_first": "LAKSHMI",
+        "mother_middle": "",
+        "name_on_card": "father",
+
+        "source_of_income": "No income",
+        "address_type": "Residence",
+        "address_flat": "12/A",
+        "address_building": "Sri Apartments",
+        "address_street": "Gandhi Road",
+        "address_area": "T Nagar",
+        "address_city": "Chennai",
+        "address_state": "TAMIL NADU",
+        "address_pin": "600017",
+        "address_country": "INDIA",
+
+        "tel_std_code": "044",
+        "tel_number": "28154320",
+
+        "residential_status": "Resident",
+        "passport_number": "",
+        "taxpayer_id": "",
+        "representative_assessee": false,
+
+        "ao_area_code": "",
+        "ao_type": "",
+        "ao_range_code": "",
+        "ao_number": "",
+        "ao_state": "TAMIL NADU",
+        "ao_city": "CHENNAI",
+
+        "proof_identity": "Aadhaar Card",
+        "proof_address": "Aadhaar Card",
+        "proof_dob": "Aadhaar Card",
+        "declaration_name": "GOWSHIK SEKAR",
+        "verification_place": "Chennai",
+        "document_upload_path": ""
+    },
+    "server": {
+        "otp_port": 5055
+    }
+}

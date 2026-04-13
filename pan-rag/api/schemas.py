@@ -18,4 +18,6 @@ class AnswerResponse(BaseModel):
     session_id: str
     intent: Optional[str] = None
     language: Optional[str] = None
-    followups: Optional[list[str]] = []   # ← suggested next questions
+    followups: Optional[list[str]] = []
+    open_upload: Optional[bool] = False
+    close_form: Optional[bool] = False

@@ -1,41 +1,88 @@
+@import "tailwindcss";
+
+/* ── Theme variables ─────────────────────────────────────────── */
 :root {
-  --bg: #f5f6fa;
+  --bg: #030303;
+  --surface: rgba(14,10,26,0.97);
+  --border: rgba(255,255,255,0.07);
+  --text: #e5e7eb;
+  --text-muted: rgba(255,255,255,0.75);
+  --text-dim: rgba(255,255,255,0.4);
+  --bubble-user: #3730a3;
+  --bubble-bot: rgba(255,255,255,0.03);
+  --input-bg: rgba(17,13,30,0.95);
+}
+
+:root.light {
+  --bg: #f9f9f9;
   --surface: #ffffff;
-  --border: #e2e4ea;
-  --text: #374151;
-  --text-muted: #6b7280;
-  --accent: #1a56db;
-  --accent-light: #eff6ff;
-  --user-bg: #1a56db;
-  --user-text: #ffffff;
-  --bot-bg: #ffffff;
-  --bot-text: #1f2937;
-  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.05);
-  font: 15px/1.6 system-ui, 'Segoe UI', sans-serif;
+  --border: rgba(0,0,0,0.08);
+  --text: #1a1a1a;
+  --text-muted: #374151;
+  --text-dim: #6b7280;
+  --bubble-user: #4f46e5;
+  --bubble-bot: rgba(0,0,0,0.03);
+  --input-bg: #ffffff;
+}
+
+body {
+  background-color: var(--bg);
   color: var(--text);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111827;
-    --surface: #1f2937;
-    --border: #374151;
-    --text: #d1d5db;
-    --text-muted: #9ca3af;
-    --accent: #3b82f6;
-    --accent-light: #1e3a5f;
-    --user-bg: #2563eb;
-    --user-text: #ffffff;
-    --bot-bg: #1f2937;
-    --bot-text: #f3f4f6;
-  }
+@keyframes cin-fade-up {
+  from { opacity: 0; transform: translateY(50px); filter: blur(14px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0px);  }
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+@keyframes cin-wipe {
+  from { opacity: 0; clip-path: inset(0 100% 0 0); }
+  to   { opacity: 1; clip-path: inset(0 0% 0 0);   }
+}
 
-body { height: 100dvh; display: flex; flex-direction: column; }
+.cin-line1 {
+  animation: cin-fade-up 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+}
 
-#root { height: 100dvh; display: flex; flex-direction: column; }
+.cin-line2 {
+  animation: cin-wipe 1.4s cubic-bezier(0.77, 0, 0.18, 1) 1.0s both;
+}
+
+.text-cinematic-glow {
+  background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 40px rgba(139,92,246,0.45)) drop-shadow(0 4px 16px rgba(0,0,0,0.9));
+}
+
+.text-cinematic-accent {
+  background: linear-gradient(135deg, #a78bfa 0%, #f9a8d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 30px rgba(167,139,250,0.55));
+}
+
+/* ── Shiny text effect ───────────────────────────────────────── */
+.shiny-text {
+  background: linear-gradient(
+    120deg,
+    rgba(255,255,255,0.15) 0%,
+    rgba(255,255,255,0.15) 40%,
+    rgba(255,255,255,0.85) 50%,
+    rgba(255,255,255,0.15) 60%,
+    rgba(255,255,255,0.15) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shiny-sweep 3.5s linear infinite;
+}
+
+@keyframes shiny-sweep {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}

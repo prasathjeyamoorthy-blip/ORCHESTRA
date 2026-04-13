@@ -1,0 +1,27 @@
+# API
+fastapi
+uvicorn[standard]
+
+# LLM
+openai
+
+# Retrieval
+chromadb
+sentence-transformers
+rank-bm25
+
+# Scraping
+playwright
+
+# Memory
+redis
+
+# Validation
+pydantic
+
+# HTTP (test_chat.py + doc agent forwarding)
+requests
+httpx
+
+# Config
+python-dotenv

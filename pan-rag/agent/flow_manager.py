@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from agent.service_flows import get_service, detect_service
 
-SESSIONS_DIR = Path("storage/sessions")
+SESSIONS_DIR = Path(__file__).parent.parent / "storage" / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
