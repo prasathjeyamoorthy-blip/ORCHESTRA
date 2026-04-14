@@ -86,3 +86,27 @@ body {
   0%   { background-position: 200% center; }
   100% { background-position: -200% center; }
 }
+
+/* ── Reduced motion — respect OS setting ────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .cin-line1, .cin-line2 {
+    animation: none;
+    opacity: 1;
+    clip-path: none;
+    transform: none;
+    filter: none;
+  }
+  .shiny-text {
+    animation: none;
+    background: rgba(255,255,255,0.85);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+}
+
+/* ── Mobile base tweaks ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  .cin-line1 { animation-duration: 0.9s; }
+  .cin-line2 { animation-duration: 0.9s; animation-delay: 0.5s; }
+  .shiny-text { animation-duration: 5s; }
+}

@@ -94,7 +94,8 @@ def handle_message(
             }
 
         # Upload intent mid-flow — open the panel only if this service has documents
-        if _is_upload_now(question):
+        # AND the question is not informational (e.g. "what is PAN" mid-flow)
+        if _is_upload_now(question) and not _is_off_topic_during_flow(question):
             service = get_service(flow.state.get("service_id", ""))
             if service.get("documents"):
                 return {
@@ -126,33 +127,33 @@ def _start_flow_response(flow: FlowManager, language: str) -> dict:
 
     if step == "applicant_type":
         answer = (
-            f"Sure! Let's get your **{name}** sorted.\n\n"
-            f"Quick question — which of these applies to you?\n\n"
+            f"Let's get your **{name}** sorted.\n\n"
+            f"Quick one — which of these fits you?\n\n"
             f"**1.** Indian Citizen\n"
             f"**2.** Indian Company / HUF / Firm\n"
-            f"**3.** Foreign Citizen or Entity\n\n"
-            f"Just reply with 1, 2, or 3 and we'll take it from there."
+            f"**3.** Foreign Citizen / NRI / Overseas\n\n"
+            f"Just reply with 1, 2, or 3."
         )
 
     elif step == "pan_number":
         answer = (
-            f"On it! To get started with **{name}**, I'll need your existing PAN number.\n\n"
-            f"It's a 10-character code — looks like **ABCDE1234F**. Go ahead and share it."
+            f"Sure, let's get your **{name}** going. I'll need your existing PAN number first.\n\n"
+            f"It's the 10-character code — like **ABCDE1234F**. Go ahead."
         )
 
     elif step == "aadhaar_number":
         answer = (
-            f"To link your Aadhaar with PAN, I just need two things from you:\n\n"
+            f"To link your Aadhaar with PAN, I need two things:\n\n"
             f"**1.** Your PAN number\n"
             f"**2.** Your Aadhaar number\n\n"
-            f"Let's start — what's your PAN number?"
+            f"Start with your PAN — what is it?"
         )
 
     elif step == "documents":
         answer = _ask_for_documents(flow)
 
     else:
-        answer = f"Let's get started with **{name}**!\n\n" + _ask_for_documents(flow)
+        answer = f"Let's get your **{name}** moving!\n\n" + _ask_for_documents(flow)
 
     return {
         "answer"   : answer,
@@ -170,32 +171,54 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str) -> dict:
 
     # ── Applicant type ───────────────────────────────────────────
     if step == "applicant_type":
-        inp = user_input.strip()
-        if "1" in inp or "indian citizen" in inp.lower():
+        inp = user_input.strip().lower()
+
+        # ── Foreign / NRI / Overseas bucket ──────────────────────
+        _foreign_signals = re.compile(
+            r"\b(3|three|foreign|nri|non.?resident|overseas|oci|pio|"
+            r"outside\s+india|not\s+indian|abroad|expat|expatriate|"
+            r"us\s+citizen|uk\s+citizen|foreign\s+national|"
+            r"i\s+(am|live|stay|reside|work).{0,20}(abroad|outside|foreign|usa|uk|us|canada|australia|dubai|gulf))\b",
+            re.IGNORECASE
+        )
+        # ── Indian entity bucket ──────────────────────────────────
+        _entity_signals = re.compile(
+            r"\b(2|two|company|huf|firm|llp|trust|partnership|"
+            r"hindu\s+undivided|business\s+entity|corporate|organisation|organization)\b",
+            re.IGNORECASE
+        )
+        # ── Indian citizen bucket ─────────────────────────────────
+        _indian_signals = re.compile(
+            r"\b(1|one|indian\s+citizen|indian|india|resident\s+indian|"
+            r"i\s+am\s+indian|i\s+live\s+in\s+india|individual)\b",
+            re.IGNORECASE
+        )
+
+        if _foreign_signals.search(inp):
+            # Cancel the guided flow — RAG will answer for NRI/foreign
+            flow.state["service_id"] = None
+            flow.state["complete"] = True
+            flow.save()
+            return None   # falls through to RAG in chain.py
+
+        elif _entity_signals.search(inp):
+            # Cancel the guided flow — RAG will answer for companies/HUF
+            flow.state["service_id"] = None
+            flow.state["complete"] = True
+            flow.save()
+            return None   # falls through to RAG in chain.py
+
+        elif _indian_signals.search(inp):
             flow.state["applicant_type"] = "indian_citizen"
             flow.advance_step()
             flow.save()
             answer = "Got it — applying as an **Indian Citizen**.\n\n" + _ask_for_documents(flow)
-
-        elif "2" in inp or "company" in inp.lower() or "huf" in inp.lower():
-            flow.state["applicant_type"] = "indian_entity"
-            flow.advance_step()
-            flow.save()
-            answer = "Got it — applying as an **Indian Company / HUF / Firm**.\n\n" + _ask_for_documents(flow)
-
-        elif "3" in inp or "foreign" in inp.lower():
-            flow.start_flow("pan_apply_foreign")
-            answer = (
-                "Got it — for foreign citizens and entities we use **Form 49AA**.\n\n"
-                + _ask_for_documents(flow)
-            )
-
         else:
             answer = (
                 "Hmm, I didn't catch that. Could you pick one of these?\n\n"
                 "**1.** Indian Citizen\n"
                 "**2.** Indian Company / HUF / Firm\n"
-                "**3.** Foreign Citizen or Entity"
+                "**3.** Foreign Citizen / NRI / Overseas"
             )
 
         return {"answer": answer, "sources": [], "followups": [], "guided": True, "step": step}
@@ -256,9 +279,18 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str) -> dict:
 
     # ── Documents ────────────────────────────────────────────────
     elif step == "documents":
+        # Informational questions mid-flow → let RAG handle them
+        if _is_off_topic_during_flow(user_input):
+            return None
+
         inp = user_input.strip().lower()
-        if inp in ("yes", "y", "yeah", "yep", "sure", "ok", "okay", "ready"):
-            # Signal frontend to open upload panel
+        _confirm = re.compile(
+            r"^(yes|y|yeah|yep|yup|sure|ok|okay|ready|"
+            r"i\s+am\s+ready|i'm\s+ready|let'?s\s+go|proceed|"
+            r"upload\s+now|open\s+it|go\s+ahead|do\s+it)$",
+            re.IGNORECASE
+        )
+        if _confirm.match(inp):
             return {
                 "answer"      : "Great! The upload panel is now open. Please upload your **Aadhaar Card**, **Driving License**, and **Passport-size Photograph** one at a time.",
                 "sources"     : [],

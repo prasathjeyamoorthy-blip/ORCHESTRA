@@ -209,11 +209,9 @@ export default function App() {
       return
     }
 
-    // Local cancellation — close form instantly, then let backend respond
-    const cancelWords = ['stop', 'cancel', 'nah', 'nope', 'quit', 'exit', 'nevermind', 'never mind', 'forget it', 'abort']
-    if (cancelWords.some(w => question.trim().toLowerCase().startsWith(w))) {
-      setShowForm(false)
-    }    if (!started) setStarted(true)
+    // Close form on every new user message — backend will re-open if needed
+    setShowForm(false)
+    if (!started) setStarted(true)
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: question }])
     setLoading(true)
     try {
@@ -269,13 +267,13 @@ export default function App() {
       {page === 'home' && <Home onGetStarted={() => setPage('chat')} />}
       {page === 'chat' && (
         <SpotlightBackground>
-          <div className="w-full min-h-screen flex flex-col items-center transition-colors duration-300"
+          <div className="w-full min-h-[100svh] flex flex-col items-center transition-colors duration-300"
             style={{ fontFamily: 'Inter, sans-serif' }}>
 
             {/* Theme toggle removed */}
 
             {/* Scrollable content */}
-            <div className="w-full max-w-2xl mx-auto flex flex-col min-h-screen px-3 sm:px-5 pt-6 sm:pt-8 pb-48 sm:pb-52">
+            <div className="w-full max-w-2xl mx-auto flex flex-col min-h-[100svh] px-3 sm:px-5 pt-5 sm:pt-8 pb-36 sm:pb-44">
 
               {/* Landing */}
               {!started && (
@@ -315,7 +313,7 @@ export default function App() {
             </div>
 
             {/* Fixed input */}
-            <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-center px-3 sm:px-4 pb-4 sm:pb-6 pt-4 bg-gradient-to-t from-[#050508] via-[#050508]/90 to-transparent">
+            <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-center px-3 sm:px-4 pb-4 sm:pb-6 pt-3 bg-gradient-to-t from-[#050508] via-[#050508]/90 to-transparent" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               <div className="w-full max-w-2xl">
                 <PromptInputBox
                   onSend={(msg, files) => {

@@ -138,21 +138,16 @@ def _is_informational(question: str) -> bool:
 
 # ── Service patterns ──────────────────────────────────────────────────────────
 _SERVICE_PATTERNS = [
-    ("pan_apply_foreign", re.compile(
-        r"\b(foreign|nri|oci|pio|non.?resident|overseas)\b.{0,30}\bpan\b"
-        r"|\bpan\b.{0,30}\b(foreign|nri|oci|pio|non.?resident|overseas)\b"
-        r"|\bform\s*49\s*aa\b",
-        re.IGNORECASE
-    )),
+    # Only Indian citizen PAN application triggers the guided flow + upload panel
     ("pan_apply_indian", re.compile(
-        r"i\s+want\s+to\s+(apply|register|get|create|make|obtain).{0,20}pan"
+        r"i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have).{0,20}pan"
         r"|i\s+need\s+to\s+(apply|register|get|create).{0,20}pan"
-        r"|i\s+want\s+(a\s+)?(new\s+)?pan\b"
+        r"|i\s+(want|wanna|wana)\s+(a\s+)?(new\s+)?pan\b"
         r"|i\s+need\s+(a\s+)?(new\s+)?pan\b"
         r"|help\s+me\s+(apply|get|register|create).{0,20}pan"
         r"|apply\s+(for\s+)?(a\s+)?(new\s+)?pan\b"
         r"|register\s+(for\s+)?(a\s+)?pan\b"
-        r"|get\s+(a\s+)?(new\s+)?pan\s*card\b"
+        r"|get\s+(a\s+)?(new\s+)?pan\b"
         r"|create\s+(a\s+)?pan\b"
         r"|obtain\s+(a\s+)?pan\b"
         r"|enroll\s+(for\s+)?pan\b"
@@ -176,7 +171,7 @@ _SERVICE_PATTERNS = [
         r"|\b(name\s+change|address\s+change|dob\s+change|date\s+of\s+birth\s+change)\b",
         re.IGNORECASE
     )),
-    # aadhaar_link and pan_verify intentionally excluded — handled by RAG only
+    # pan_apply_foreign, aadhaar_link, pan_verify — RAG only, no guided flow
 ]
 
 
