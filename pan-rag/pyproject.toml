@@ -4,4 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "deep-translator>=1.11.4",
+    "sacremoses>=0.1.1",
+    "sentencepiece>=0.2.1",
+    "transformers>=5.8.1",
+]

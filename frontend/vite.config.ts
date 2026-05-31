@@ -12,7 +12,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api/auth':  'http://localhost:4000',
+      '/api/chat':  'http://localhost:4000',
+      '/api/files': 'http://localhost:4000',
+      '/api/otp':   'http://localhost:4000',
+      '/api':       'http://localhost:8002',
     },
+    historyApiFallback: true,
   },
 })

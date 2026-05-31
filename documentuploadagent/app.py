@@ -17,6 +17,7 @@ from pan_verification_upd import (
     validate_aadhaar_fields,
     validate_photo_fields,
 )
+from cross_validator import SessionDocumentStore
 
 load_dotenv()
 
@@ -26,6 +27,11 @@ CORS(app)
 NVIDIA_KEY = os.getenv('NVIDIA_META_11B')
 if not NVIDIA_KEY:
     print("⚠️  Set NVIDIA_META_11B in .env — get it from https://build.nvidia.com")
+
+# One shared store for all sessions (in-memory; fine for single-process dev)
+doc_store = SessionDocumentStore()
+
+REQUIRED_DOCS = ["aadhaar", "driving_license", "photograph"]
 
 
 # ── helpers ──────────────────────────────────────────────────
@@ -108,7 +114,9 @@ def _handle_aadhaar(tmp_path: str, session_id: str):
     errors = validate_aadhaar_fields(data)
 
     extracted = data.model_dump()
-    return jsonify({
+    doc_store.save(session_id, "aadhaar", extracted)
+
+    response = {
         'status': 'success' if not errors else 'partial',
         'doc_type': 'aadhaar',
         'session_id': session_id,
@@ -128,7 +136,9 @@ def _handle_aadhaar(tmp_path: str, session_id: str):
             'state': data.state,
             'confidence': data.confidence,
         }
-    })
+    }
+    _append_cross_validation(session_id, response)
+    return jsonify(response)
 
 
 def _handle_photo(tmp_path: str, session_id: str):
@@ -136,11 +146,14 @@ def _handle_photo(tmp_path: str, session_id: str):
     data = PhotoData(**raw)
     errors = validate_photo_fields(data)
 
-    return jsonify({
+    extracted = data.model_dump()
+    doc_store.save(session_id, "photograph", extracted)
+
+    response = {
         'status': 'success' if not errors else 'partial',
         'doc_type': 'photograph',
         'session_id': session_id,
-        'extracted': data.model_dump(),
+        'extracted': extracted,
         'validation_errors': errors,
         'verified': len(errors) == 0,
         'message': (
@@ -154,7 +167,9 @@ def _handle_photo(tmp_path: str, session_id: str):
             'plain_background': data.plain_background,
             'confidence': data.confidence,
         }
-    })
+    }
+    _append_cross_validation(session_id, response)
+    return jsonify(response)
 
 
 def _handle_driving_license(tmp_path: str, session_id: str):
@@ -181,7 +196,9 @@ Return ONLY raw JSON. Null for missing fields.
     if raw.get('document_type', '').lower() != 'driving_license':
         errors.append(f"Document does not appear to be a Driving License (detected: {raw.get('document_type')})")
 
-    return jsonify({
+    doc_store.save(session_id, "driving_license", raw)
+
+    response = {
         'status': 'success' if not errors else 'partial',
         'doc_type': 'driving_license',
         'session_id': session_id,
@@ -200,10 +217,79 @@ Return ONLY raw JSON. Null for missing fields.
             'state': raw.get('state'),
             'confidence': raw.get('confidence'),
         }
-    })
+    }
+    _append_cross_validation(session_id, response)
+    return jsonify(response)
+
+
+def _append_cross_validation(session_id: str, response: dict):
+    """
+    If all 3 required documents are now uploaded for this session,
+    run cross-validation and attach the result to the response.
+    """
+    if not doc_store.all_uploaded(session_id, REQUIRED_DOCS):
+        uploaded = list(doc_store._sessions.get(session_id, {}).keys())
+        remaining = [d for d in REQUIRED_DOCS if d not in uploaded]
+        response['cross_validation'] = {
+            'complete': False,
+            'remaining_docs': remaining,
+            'message': f"Waiting for: {', '.join(remaining)}",
+        }
+        return
+
+    result = doc_store.cross_validate(session_id)
+    response['cross_validation'] = {
+        'complete':     True,
+        'passed':       result.passed,
+        'errors':       result.errors,
+        'warnings':     result.warnings,
+        'cross_checks': result.cross_checks,
+        'message': (
+            '✅ All documents cross-validated successfully — ready to submit.'
+            if result.passed
+            else f'❌ Cross-validation failed with {len(result.errors)} error(s). Please fix and re-upload.'
+        ),
+    }
+    # Downgrade status if cross-validation failed
+    if not result.passed:
+        response['status'] = 'cross_validation_failed'
+        response['verified'] = False
 
 
 # ── legacy /api/verify (kept for compatibility) ───────────────
+
+@app.route('/api/cross-validate/<session_id>', methods=['GET'])
+def cross_validate_session(session_id: str):
+    """Trigger cross-validation for a session on demand."""
+    if not doc_store.all_uploaded(session_id, REQUIRED_DOCS):
+        uploaded  = list(doc_store._sessions.get(session_id, {}).keys())
+        remaining = [d for d in REQUIRED_DOCS if d not in uploaded]
+        return jsonify({
+            'complete': False,
+            'remaining_docs': remaining,
+            'message': f"Still waiting for: {', '.join(remaining)}",
+        })
+
+    result = doc_store.cross_validate(session_id)
+    return jsonify({
+        'complete':     True,
+        'passed':       result.passed,
+        'errors':       result.errors,
+        'warnings':     result.warnings,
+        'cross_checks': result.cross_checks,
+        'message': (
+            '✅ All documents cross-validated successfully.'
+            if result.passed
+            else f'❌ {len(result.errors)} cross-validation error(s) found.'
+        ),
+    })
+
+
+@app.route('/api/session/clear/<session_id>', methods=['DELETE'])
+def clear_session(session_id: str):
+    doc_store.clear(session_id)
+    return jsonify({'cleared': session_id})
+
 
 @app.route('/api/verify', methods=['POST'])
 def verify_documents():

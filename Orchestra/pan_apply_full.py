@@ -65,8 +65,24 @@ APPLICANT = {
     "address_pin":      "560034",
     "address_country":  "India",      # change for 49AA applicants
 
-    # Source of income (dropdown text)
-    "source_of_income": "Salary",     # Salary | Business/Profession | No income | etc.
+    # Source of income (checkboxes — can be multiple, comma-separated)
+    "source_of_income": "Salary",     # Salary | Income from Business / Profession | Income from House property | Income from Other sources | Capital Gains | No income
+
+    # Address for communication
+    "address_for_comm": "Residence",  # Residence | Office | Representative Assessee (RA)
+
+    # Aadhaar photo on PAN card
+    "aadhaar_photo_consent": True,    # True = Yes (agree) | False = No (disagree)
+
+    # Residential status
+    "residential_status": "Resident", # Resident | Non-resident | Resident but not ordinarily resident
+
+    # TIN and Passport (required for Non-resident / foreign applicants)
+    "passport_number":  "",           # e.g. "A1234567" — leave blank for residents
+    "tin_number":       "",           # Taxpayer Identification Number — leave blank if not applicable
+
+    # Representative Assessee
+    "representative_assessee": False, # True = Yes | False = No
 
     # ── Page 4 – AO Code (skip if using Aadhaar auto-fill) ───
     # Leave all blank to use Aadhaar-based auto-fill
@@ -639,6 +655,39 @@ def step2_get_token(page, applicant_data=None) -> str:
 def step3_personal_details(page, d):
     log.info("=== Step 3: Personal Details ===")
 
+    # ── Select submission mode ────────────────────────────────
+    # First option = Aadhaar-based Online PAN Application (eKYC)
+    # This must be selected before filling other fields
+    if d.get("paperless", True):
+        for sel in [
+            "xpath://input[@type='radio' and (@value='E' or contains(@value,'aadhaar') or contains(@value,'Aadhaar') or contains(@value,'ekyc') or contains(@value,'EKYC'))]",
+            "xpath://input[@type='radio'][1]",  # fallback: first radio on the page
+        ]:
+            try:
+                radio = page.ele(sel, timeout=4)
+                if radio and not radio.attr("checked"):
+                    radio.click()
+                    time.sleep(0.5)
+                    log.info("[Step3] Aadhaar-based submission mode selected.")
+                break
+            except Exception:
+                continue
+
+        # Delivery mode: Physical copy + soft copy (first option)
+        for sel in [
+            "xpath://input[@type='radio' and (contains(@value,'physical') or contains(@value,'Physical') or contains(@value,'both') or contains(@value,'P'))]",
+            "xpath://fieldset//input[@type='radio'][1]",
+        ]:
+            try:
+                radio = page.ele(sel, timeout=3)
+                if radio and not radio.attr("checked"):
+                    radio.click()
+                    time.sleep(0.3)
+                    log.info("[Step3] Physical + soft copy delivery selected.")
+                break
+            except Exception:
+                continue
+
     # Gender
     safe_select(page, "tag:select@name:gender", GENDER_MAP.get(d["gender"], d["gender"]))
     safe_select(page, "tag:select@name:maritalStatus", MARITAL_MAP.get(d["marital_status"], d["marital_status"]))
@@ -658,6 +707,20 @@ def step3_personal_details(page, d):
     if d.get("name_on_card"):
         safe_input(page, "tag:input@name:nameOnCard", d["name_on_card"])
 
+    # ── Aadhaar photo consent dropdown ───────────────────────────
+    consent = d.get("aadhaar_photo_consent", True)
+    consent_val = "Y" if consent else "N"
+    for sel in [
+        "tag:select@name:aadhaarPhotoConsent",
+        "xpath://select[contains(@name,'photo') or contains(@name,'Photo') or contains(@name,'consent') or contains(@name,'Consent')]",
+    ]:
+        try:
+            page.ele(sel, timeout=3).select(consent_val)
+            log.info(f"[Step3] Aadhaar photo consent set to: {'Yes' if consent else 'No'}")
+            break
+        except Exception:
+            continue
+
     if not click_next(page):
         raise RuntimeError("Step 3 could not proceed to next page.")
     log.info("Step 3 done.")
@@ -669,6 +732,106 @@ def step3_personal_details(page, d):
 def step4_address(page, d):
     log.info("=== Step 4: Address & Contact Details ===")
 
+    # ── Source of income checkboxes (multiple allowed) ────────────
+    soi_map = {
+        "Salary":                              "salary",
+        "Income from Business / Profession":   "business",
+        "Income from House property":          "house",
+        "Income from Other sources":           "other",
+        "Capital Gains":                       "capital",
+        "No income":                           "noincome",
+    }
+    selected_soi = d.get("source_of_income", "")
+    for label, val in soi_map.items():
+        if label.lower() in selected_soi.lower():
+            for sel in [
+                f"xpath://input[@type='checkbox' and contains(@value,'{val}')]",
+                f"xpath://label[contains(text(),'{label}')]/preceding-sibling::input[@type='checkbox']",
+                f"xpath://label[contains(text(),'{label}')]/..//input[@type='checkbox']",
+            ]:
+                try:
+                    cb = page.ele(sel, timeout=2)
+                    if cb and not cb.attr("checked"):
+                        cb.click()
+                        time.sleep(0.2)
+                    break
+                except Exception:
+                    continue
+
+    # ── Address for communication radio ──────────────────────────
+    addr_comm = d.get("address_for_comm", "Residence")
+    addr_val_map = {
+        "Residence":                    ["R", "residence", "Residence"],
+        "Office":                       ["O", "office", "Office"],
+        "Representative Assessee (RA)": ["RA", "representative", "Representative"],
+    }
+    for val in addr_val_map.get(addr_comm, ["R"]):
+        for sel in [
+            f"xpath://input[@type='radio' and @value='{val}']",
+            f"xpath://label[contains(text(),'{addr_comm}')]/preceding-sibling::input[@type='radio']",
+            f"xpath://label[contains(text(),'{val}')]/..//input[@type='radio']",
+        ]:
+            try:
+                radio = page.ele(sel, timeout=2)
+                if radio and not radio.attr("checked"):
+                    radio.click()
+                    time.sleep(0.3)
+                    log.info(f"[Step4] Address for communication set to: {addr_comm}")
+                break
+            except Exception:
+                continue
+
+    # ── Residential Status radio ──────────────────────────────────
+    res_map = {
+        "Resident":                              "R",
+        "Non-resident":                          "N",
+        "Resident but not ordinarily resident":  "O",
+    }
+    res_val = res_map.get(d.get("residential_status", "Resident"), "R")
+    for sel in [
+        f"xpath://input[@type='radio' and @value='{res_val}']",
+        f"xpath://label[contains(text(),\"{d.get('residential_status','Resident')}\")]/..//input[@type='radio']",
+    ]:
+        try:
+            radio = page.ele(sel, timeout=3)
+            if radio and not radio.attr("checked"):
+                radio.click(); time.sleep(0.3)
+                log.info(f"[Step4] Residential status: {d.get('residential_status')}")
+            break
+        except Exception:
+            continue
+
+    # ── TIN and Passport ──────────────────────────────────────────
+    if d.get("passport_number"):
+        safe_input(page, [
+            "tag:input@name:passportNumber",
+            "tag:input@id:passportNumber",
+            "xpath://input[contains(@name,'passport') or contains(@id,'passport')]",
+        ], d["passport_number"])
+
+    if d.get("tin_number"):
+        safe_input(page, [
+            "tag:input@name:tinNumber",
+            "tag:input@name:taxpayerIdNumber",
+            "xpath://input[contains(@name,'tin') or contains(@name,'TIN') or contains(@name,'taxpayer')]",
+        ], d["tin_number"])
+
+    # ── Representative Assessee ───────────────────────────────────
+    ra = d.get("representative_assessee", False)
+    ra_val = "Y" if ra else "N"
+    for sel in [
+        f"xpath://input[@type='radio' and @value='{ra_val}' and (contains(@name,'representative') or contains(@name,'Representative'))]",
+        f"xpath://label[text()=\"{'Yes' if ra else 'No'}\"]/..//input[@type='radio']",
+    ]:
+        try:
+            radio = page.ele(sel, timeout=3)
+            if radio and not radio.attr("checked"):
+                radio.click(); time.sleep(0.3)
+                log.info(f"[Step4] Representative Assessee: {'Yes' if ra else 'No'}")
+            break
+        except Exception:
+            continue
+
     safe_input(page, "tag:input@name:flatDoorBldgNo",    d["address_flat"])
     safe_input(page, "tag:input@name:nameBldgVillage",   d["address_building"])
     safe_input(page, "tag:input@name:roadStreet",        d["address_street"])
@@ -677,7 +840,6 @@ def step4_address(page, d):
     safe_select(page, "tag:select@name:state",           d["address_state"])
     safe_input(page, "tag:input@name:pinCode",           d["address_pin"])
     safe_select(page, "tag:select@name:country",         d["address_country"])
-    safe_select(page, "tag:select@name:sourceOfIncome",  d["source_of_income"])
 
     if not click_next(page):
         raise RuntimeError("Step 4 could not proceed to next page.")
@@ -710,14 +872,28 @@ def step6_documents(page, d):
     log.info("=== Step 6: Document Proofs ===")
 
     if d["paperless"]:
-        # Select paperless / Aadhaar e-KYC mode
-        try:
-            page.ele(
-                "xpath://input[@value='E' or contains(@value,'aadhaar') or contains(@value,'paperless')]",
-                timeout=5).click()
-        except Exception:
-            pass
-        safe_input(page, "tag:input@name:aadhaarNumber", d["aadhaar_number"].replace(" ", ""))
+        # Select Aadhaar e-KYC / paperless mode radio button
+        for sel in [
+            "xpath://input[@type='radio' and (@value='E' or @value='e' or contains(@value,'aadhaar') or contains(@value,'Aadhaar') or contains(@value,'ekyc') or contains(@value,'paperless'))]",
+            "xpath://input[@type='radio'][1]",
+        ]:
+            try:
+                radio = page.ele(sel, timeout=4)
+                if radio and not radio.attr("checked"):
+                    radio.click()
+                    time.sleep(0.5)
+                    log.info("[Step6] Aadhaar e-KYC mode selected.")
+                break
+            except Exception:
+                continue
+
+        # Enter Aadhaar number
+        aadhaar = d["aadhaar_number"].replace(" ", "").replace("-", "")
+        safe_input(page, [
+            "tag:input@name:aadhaarNumber",
+            "tag:input@id:aadhaarNumber",
+            "tag:input@placeholder:Aadhaar",
+        ], aadhaar)
     else:
         safe_select(page, "tag:select@name:proofOfIdentity", d["proof_identity"])
         safe_select(page, "tag:select@name:proofOfAddress",  d["proof_address"])

@@ -1,6 +1,7 @@
 # API
 fastapi
 uvicorn[standard]
+python-multipart
 
 # LLM
 openai
@@ -15,6 +16,7 @@ playwright
 
 # Memory
 redis
+supabase
 
 # Validation
 pydantic
@@ -25,3 +27,20 @@ httpx
 
 # Config
 python-dotenv
+
+# Translation (Tamil / Hindi)
+# Primary: IndicTrans2 (ai4bharat) — best open-source model for Indian languages
+# Install: pip install transformers sentencepiece sacremoses
+# The model (ai4bharat/indictrans2-en-indic-1B) is downloaded on first use (~2 GB).
+# Fallback: deep-translator (Google Translate) — used when IndicTrans2 is unavailable.
+transformers
+sentencepiece
+sacremoses
+deep-translator
+
+# Voice (STT + TTS — shared with voice-agent)
+faster-whisper
+kokoro
+numpy
+scipy
+sounddevice

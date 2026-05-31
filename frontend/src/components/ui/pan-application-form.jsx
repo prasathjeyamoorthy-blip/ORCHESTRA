@@ -97,15 +97,28 @@ function DocSlot({ slot, upload, preview, isLoading, error, onFile }) {
 }
 
 // ── Main form ─────────────────────────────────────────────────────
-export function PanApplicationForm({ sessionId, onComplete, onCancel }) {
-  const [step, setStep] = useState(0)
+export function PanApplicationForm({ sessionId, initialValues, onComplete, onCancel }) {
+  // Determine which steps are already complete from initialValues
+  function getInitialStep(iv) {
+    if (!iv) return 0
+    const step0Done = iv.motherName?.trim() && iv.salary?.trim()
+    const step1Done = iv.incomeTypes?.length > 0
+    const step2Done = iv.email?.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(iv.email)
+    if (step0Done && step1Done && step2Done) return 3
+    if (step0Done && step1Done) return 2
+    if (step0Done) return 1
+    return 0
+  }
+
+  const iv = initialValues || {}
+  const [step, setStep] = useState(() => getInitialStep(iv))
   const [errors, setErrors] = useState({})
 
-  // Form data
-  const [motherName, setMotherName] = useState('')
-  const [salary, setSalary] = useState('')
-  const [email, setEmail] = useState('')
-  const [incomeTypes, setIncomeTypes] = useState([])
+  // Form data — pre-fill from initialValues
+  const [motherName, setMotherName] = useState(iv.motherName || '')
+  const [salary, setSalary] = useState(iv.salary || '')
+  const [email, setEmail] = useState(iv.email || '')
+  const [incomeTypes, setIncomeTypes] = useState(iv.incomeTypes || [])
 
   // Docs
   const [uploads, setUploads] = useState({})

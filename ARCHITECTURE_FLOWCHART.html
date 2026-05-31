@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>System Architecture Flowchart</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0}
+header{background:linear-gradient(135deg,#1e293b,#0f172a);padding:28px 40px;border-bottom:1px solid #334155}
+header h1{font-size:1.8rem;color:#38bdf8}
+header p{color:#94a3b8;margin-top:6px;font-size:.95rem}
+nav{display:flex;gap:8px;padding:16px 40px;background:#1e293b;border-bottom:1px solid #334155;flex-wrap:wrap}
+nav button{padding:8px 18px;border-radius:6px;border:1px solid #334155;background:#0f1117;color:#94a3b8;cursor:pointer;font-size:.85rem;transition:all .2s}
+nav button:hover,nav button.active{background:#38bdf8;color:#0f1117;border-color:#38bdf8;font-weight:600}
+.section{display:none;padding:32px 40px}
+.section.active{display:block}
+.section h2{font-size:1.3rem;color:#38bdf8;margin-bottom:8px}
+.desc{color:#94a3b8;margin-bottom:24px;font-size:.9rem;line-height:1.6;max-width:900px}
+.diagram-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:28px;overflow-x:auto}
+.mermaid{min-width:600px}
+.badge{display:inline-block;background:#064e3b;color:#34d399;border:1px solid #34d399;border-radius:20px;padding:4px 14px;font-size:.78rem;font-weight:600;margin-bottom:14px}
+.badge.red{background:#450a0a;color:#f87171;border-color:#f87171}
+.badge.blue{background:#0c1a3a;color:#60a5fa;border-color:#60a5fa}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px}
+.card h3{color:#f1f5f9;font-size:.95rem;margin-bottom:10px}
+.card ul{list-style:none;padding:0}
+.card ul li{color:#94a3b8;font-size:.83rem;padding:3px 0;padding-left:14px;position:relative}
+.card ul li::before{content:"→";position:absolute;left:0;color:#38bdf8}
+</style>
+</head>
+<body>
+<header>
+  <h1>&#128202; System Architecture — Visual Flowchart</h1>
+  <p>End-to-end flow: Auth · Zero-Knowledge Encryption · Document Upload/Download · RAG Chat · Document Verification Agent</p>
+</header>
+<nav>
+  <button class="active" onclick="show('overview')">&#127968; Overview</button>
+  <button onclick="show('auth')">&#128272; Auth Flow</button>
+  <button onclick="show('encryption')">&#128274; Zero-Knowledge Encryption</button>
+  <button onclick="show('upload')">&#128228; Document Upload</button>
+  <button onclick="show('download')">&#128229; Document Download</button>
+  <button onclick="show('chat')">&#129302; RAG Chat</button>
+  <button onclick="show('docagent')">&#128196; Doc Verification Agent</button>
+  <button onclick="show('security')">&#128737; Security Layers</button>
+</nav>
+
+<!-- OVERVIEW -->
+<div id="overview" class="section active">
+  <h2>System Overview</h2>
+  <p class="desc">High-level map of all services and how they connect. The frontend talks to the Express backend and Supabase directly. The backend proxies chat to the RAG service. Documents are encrypted client-side before ever leaving the browser.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+graph TB
+    subgraph Browser["&#127760; Browser (React + Vite)"]
+        UI[UI Components]
+        CryptoLib["crypto.ts\nAES-256-GCM"]
+        KeyMem["keySession.ts\nIn-memory MEK only"]
+    end
+
+    subgraph ExpressBackend["&#9881; Express Backend :3001"]
+        AuthR["/api/auth/*"]
+        ChatR["/api/chat/*"]
+        FilesR["/api/files/*"]
+        VToken["verifyToken middleware"]
+        RLimit["rateLimiter middleware"]
+    end
+
+    subgraph Supabase["&#9729; Supabase"]
+        SupaAuth["Auth Service"]
+        SupaDB["PostgreSQL + RLS"]
+        SupaStorage["Storage Bucket\n(private, encrypted blobs)"]
+        EdgeFn["Edge Functions"]
+    end
+
+    subgraph RAGService["&#129302; RAG Service :8000 (Python)"]
+        AskStream["/api/ask-stream SSE"]
+        AskAPI["/api/ask"]
+        SessionMgr["Session Manager"]
+    end
+
+    subgraph DocAgent["&#128196; Document Verification Agent :5001 (Flask)"]
+        UploadAPI["/api/upload"]
+        CrossVal["Cross Validator"]
+        VLM["NVIDIA VLM / Gemini"]
+    end
+
+    UI -->|"PBKDF2 + AES-GCM\n(all in browser)"| CryptoLib
+    CryptoLib --> KeyMem
+    UI -->|"httpOnly cookies"| AuthR
+    UI -->|"JWT via cookie"| ChatR
+    UI -->|"encrypted blob"| SupaStorage
+    UI -->|"metadata only"| SupaDB
+    AuthR --> SupaAuth
+    ChatR --> VToken
+    VToken --> RAGService
+    FilesR --> VToken
+    FilesR --> SupaStorage
+    ChatR --> SupaDB
+    RAGService --> SupaDB
+    DocAgent --> VLM
+    UI -->|"plaintext after decrypt"| DocAgent
+
+    style Browser fill:#0c1a3a,stroke:#3b82f6,color:#e2e8f0
+    style ExpressBackend fill:#1a1a2e,stroke:#8b5cf6,color:#e2e8f0
+    style Supabase fill:#0a2a1a,stroke:#34d399,color:#e2e8f0
+    style RAGService fill:#1a0a2e,stroke:#a78bfa,color:#e2e8f0
+    style DocAgent fill:#1a1a0a,stroke:#fbbf24,color:#e2e8f0
+    </div>
+  </div>
+</div>
+
+<!-- AUTH FLOW -->
+<div id="auth" class="section">
+  <h2>Authentication Flow</h2>
+  <p class="desc">Signup and login both go through Supabase Auth. After client-side login, tokens are synced to the Express backend as httpOnly cookies so server-side routes can verify them without exposing tokens to JavaScript.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as User Browser
+    participant FE as React Frontend
+    participant BE as Express Backend
+    participant SB as Supabase Auth
+    participant DB as Supabase DB
+
+    Note over U,DB: ── SIGNUP ──
+    U->>FE: Enter email + password
+    FE->>SB: supabase.auth.signUp()
+    SB-->>FE: session + user
+    FE->>FE: generateMEK() + generateSalt()
+    FE->>FE: deriveKEK(password, salt)
+    FE->>FE: wrapMEK(mek, kek) → wrappedMEK
+    FE->>DB: INSERT user_crypto_meta(salt, wrappedMEK)
+    Note right of DB: RLS: only this user_id can write
+    FE->>BE: POST /api/auth/sync-session(tokens)
+    BE->>SB: getUser(access_token) verify
+    BE-->>FE: Set httpOnly cookies
+    FE->>FE: setSessionKey(mek) in memory only
+
+    Note over U,DB: ── LOGIN ──
+    U->>FE: Enter email + password
+    FE->>SB: supabase.auth.signInWithPassword()
+    SB-->>FE: session + user
+    FE->>DB: SELECT salt, wrapped_mek WHERE user_id=me
+    Note right of DB: RLS enforced
+    DB-->>FE: salt + wrappedMEK
+    FE->>FE: deriveKEK(password, salt)
+    FE->>FE: unwrapMEK(wrappedMEK, kek) → mek
+    Note right of FE: Throws if wrong password
+    FE->>BE: POST /api/auth/sync-session(tokens)
+    BE-->>FE: Set httpOnly cookies
+    FE->>FE: setSessionKey(mek) in memory only
+
+    Note over U,DB: ── LOGOUT ──
+    FE->>FE: clearSessionKey() — wipe MEK from RAM
+    FE->>SB: supabase.auth.signOut()
+    FE->>BE: POST /api/auth/logout
+    BE-->>FE: Clear cookies
+    </div>
+  </div>
+</div>
+
+<!-- ZERO-KNOWLEDGE ENCRYPTION -->
+<div id="encryption" class="section">
+  <h2>Zero-Knowledge Encryption Architecture</h2>
+  <p class="desc">The server and admin NEVER see your files or your MEK. All encryption happens in the browser using the Web Crypto API. The server only stores an opaque encrypted blob it cannot decrypt.</p>
+  <span class="badge">&#128274; Zero-Knowledge — Server sees only ciphertext</span>
+  <div class="diagram-box">
+    <div class="mermaid">
+flowchart TD
+    PWD["User Password"] -->|"PBKDF2\n310,000 iterations\nSHA-256"| KEK["KEK\nKey Encryption Key\nnever stored, never sent"]
+    SALT["Random Salt\n16 bytes\nstored in DB plaintext"] --> KEK
+    
+    MEK["MEK\nMaster Encryption Key\nAES-256 random\nnever stored raw"] -->|"AES-GCM wrap\nrandom 12-byte IV"| WMEK["Wrapped MEK\nbase64 blob\nstored in Supabase DB"]
+    KEK --> WMEK
+
+    MEK -->|"AES-256-GCM\nrandom 12-byte IV per file"| EBLOB["Encrypted Blob\n[12-byte IV][ciphertext]\nstored in Storage bucket"]
+    PLAINFILE["User's File\nplaintext"] --> EBLOB
+
+    WMEK -->|"unwrapKey(KEK)"| MEK2["MEK in memory\nextractable: false\nlost on page refresh"]
+    KEK2["KEK re-derived\non each login"] --> MEK2
+    MEK2 -->|"decrypt"| PLAINFILE2["Decrypted File\nin browser only"]
+    EBLOB --> PLAINFILE2
+
+    style PWD fill:#450a0a,stroke:#f87171,color:#fecaca
+    style KEK fill:#450a0a,stroke:#f87171,color:#fecaca
+    style MEK fill:#0c1a3a,stroke:#60a5fa,color:#bfdbfe
+    style MEK2 fill:#0c1a3a,stroke:#60a5fa,color:#bfdbfe
+    style WMEK fill:#064e3b,stroke:#34d399,color:#d1fae5
+    style EBLOB fill:#064e3b,stroke:#34d399,color:#d1fae5
+    style PLAINFILE2 fill:#1a1a0a,stroke:#fbbf24,color:#fef3c7
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h3>&#128274; What the server/admin CAN see</h3>
+      <ul>
+        <li>Salt (non-secret, needed for PBKDF2)</li>
+        <li>Wrapped MEK (opaque encrypted blob)</li>
+        <li>Encrypted file blob (unreadable binary)</li>
+        <li>File metadata (name, size, mime type)</li>
+        <li>User email + auth tokens</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>&#128683; What the server/admin CANNOT see</h3>
+      <ul>
+        <li>User's password (never sent to server)</li>
+        <li>KEK (derived in browser, never stored)</li>
+        <li>MEK raw bytes (non-extractable CryptoKey)</li>
+        <li>Plaintext file contents</li>
+        <li>Decrypted document data</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENT UPLOAD -->
+<div id="upload" class="section">
+  <h2>Document Upload Flow</h2>
+  <p class="desc">Files are encrypted entirely in the browser before upload. The encrypted blob is stored in a private Supabase Storage bucket. Only metadata (filename, size, mime type) is stored in the database — no plaintext content ever reaches the server.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant FE as Browser (useDocumentUpload)
+    participant Crypto as crypto.ts
+    participant SB as Supabase Storage
+    participant DB as Supabase DB (RLS)
+
+    U->>FE: Select file to upload
+    FE->>FE: getSessionKey() → MEK from memory
+    Note right of FE: Fails if not logged in
+    FE->>Crypto: encryptFile(file, mek)
+    Crypto->>Crypto: randomBytes(12) → IV
+    Crypto->>Crypto: AES-256-GCM encrypt(plaintext, mek, iv)
+    Crypto->>Crypto: combine [IV][ciphertext]
+    Crypto-->>FE: encryptedBlob (application/octet-stream)
+    
+    FE->>SB: storage.upload(userId/uuid-encrypted, encryptedBlob)
+    Note right of SB: Private bucket\nRLS: only owner can upload to own folder
+    SB-->>FE: storagePath confirmed
+    
+    FE->>DB: INSERT document_meta(user_id, storage_path, filename, mime, size)
+    Note right of DB: RLS: auth.uid() = user_id enforced
+    DB-->>FE: document id
+
+    FE-->>U: Upload complete
+    Note over U,DB: Plaintext NEVER left the browser
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENT DOWNLOAD -->
+<div id="download" class="section">
+  <h2>Document Download Flow</h2>
+  <p class="desc">Download requires the user's password to re-derive the KEK and unwrap the MEK. This means even a stolen session token cannot decrypt files — the password is always required. Decryption happens entirely in the browser.</p>
+  <span class="badge red">&#128274; Password required even with valid session</span>
+  <div class="diagram-box">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant FE as Browser (useDocumentDownload)
+    participant DB as Supabase DB
+    participant SB as Supabase Storage
+    participant Crypto as crypto.ts
+
+    U->>FE: Click download + enter password
+    FE->>DB: SELECT salt, wrapped_mek FROM user_crypto_meta
+    Note right of DB: RLS: own row only
+    DB-->>FE: salt + wrappedMEK
+
+    FE->>Crypto: deriveKEK(password, salt)
+    Note right of Crypto: PBKDF2 310k iterations
+    Crypto-->>FE: KEK (in memory)
+
+    FE->>Crypto: unwrapMEK(wrappedMEK, kek)
+    Note right of Crypto: Throws if wrong password
+    Crypto-->>FE: MEK (non-extractable)
+
+    FE->>SB: createSignedUrl(storagePath, 60s TTL)
+    Note right of SB: RLS: only owner can get signed URL
+    SB-->>FE: signedUrl (60 second expiry)
+
+    FE->>SB: fetch(signedUrl) → encryptedBlob
+    SB-->>FE: [IV][ciphertext] blob
+
+    FE->>Crypto: decryptFile(encryptedBlob, mek, mimeType)
+    Crypto->>Crypto: slice IV (first 12 bytes)
+    Crypto->>Crypto: AES-256-GCM decrypt(ciphertext, mek, iv)
+    Crypto-->>FE: plainBlob
+
+    FE-->>U: Browser download triggered
+    Note over U,SB: Plaintext NEVER sent to any server
+    </div>
+  </div>
+</div>
+
+<!-- RAG CHAT -->
+<div id="chat" class="section">
+  <h2>RAG Chat Flow</h2>
+  <p class="desc">Chat messages go through the Express backend (JWT verified via httpOnly cookie), which loads conversation history from Redis/Supabase, builds a user context block, then proxies to the Python RAG service as a Server-Sent Events stream. Facts extracted from messages are persisted to the user profile.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant FE as React Frontend
+    participant BE as Express /api/chat
+    participant Redis as Redis (Upstash)
+    participant DB as Supabase DB
+    participant RAG as RAG Service :8000
+
+    U->>FE: Type message + send
+    FE->>BE: POST /api/chat {message, session_id}\nwith httpOnly cookie
+    BE->>BE: verifyToken middleware\ncheck access_token cookie
+    
+    par Load in parallel
+        BE->>Redis: GET chat:userId:sessionId
+        Redis-->>BE: history (or miss → load from DB)
+        BE->>Redis: GET profile:userId
+        Redis-->>BE: user facts profile
+    end
+
+    BE->>BE: extractFacts(message) → update profile
+    BE->>BE: buildUserContext(profile, history)
+    Note right of BE: Injects verified facts +\nrecent conversation window
+
+    BE->>RAG: POST /api/ask-stream\n{question, session_id, user_id, user_context}
+    RAG-->>BE: SSE stream begins
+
+    loop SSE Token Stream
+        RAG-->>BE: {type:"token", text:"..."}
+        BE-->>FE: forward SSE token
+        FE-->>U: Render streaming text
+    end
+
+    RAG-->>BE: {type:"done", collected_facts:{...}}
+    BE->>Redis: cache updated history
+    BE->>DB: INSERT conversations (user+assistant turns)
+    BE->>Redis: cache merged profile
+    BE->>DB: UPSERT user_profiles(facts)
+    BE->>DB: UPDATE chat_sessions(updated_at, title)
+    BE-->>FE: {type:"done"}
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENT VERIFICATION AGENT -->
+<div id="docagent" class="section">
+  <h2>Document Verification Agent Flow</h2>
+  <p class="desc">The Flask agent receives plaintext files (decrypted in the browser first), runs technical checks, then uses a Vision Language Model (NVIDIA/Gemini) to extract structured data. After all 3 documents are uploaded, cross-validation checks consistency across them.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+flowchart TD
+    A["User uploads file\n(Aadhaar / DL / Photo)"] --> B["useAgentFileAccess\nPassword verification"]
+    B -->|"Wrong password"| DENY["Access Denied"]
+    B -->|"Correct password"| C["Decrypt file in browser\ncrypto.ts decryptFile()"]
+    C --> D["POST /api/upload\nplaintext FormData\ndoc_type + session_id"]
+
+    D --> E["Flask: basic_file_check()\nExtension, size 20KB-10MB"]
+    E -->|"Fail"| ERR1["422 Error returned"]
+    E -->|"Pass"| F["image_quality_check()\nBlur score, brightness,\nresolution via OpenCV"]
+    F -->|"Fail"| ERR2["422 Error returned"]
+    F -->|"Pass"| G{doc_type?}
+
+    G -->|"aadhaar"| H["run_vlm(AADHAAR_PROMPT)\nNVIDIA VLM extraction"]
+    G -->|"photograph"| I["run_vlm(PHOTO_PROMPT)\nFace + quality check"]
+    G -->|"driving_license"| J["run_vlm(DL_PROMPT)\nDL field extraction"]
+
+    H --> K["validate_aadhaar_fields()\nDOB, number format,\npincode, document type"]
+    I --> L["validate_photo_fields()\nFace centered, plain BG,\nno sunglasses, colored"]
+    J --> M["validate_dl_fields()\nName, document type"]
+
+    K --> N["doc_store.save(session, type, data)"]
+    L --> N
+    M --> N
+
+    N --> O{All 3 docs\nuploaded?}
+    O -->|"No"| P["Return partial result\n+ remaining_docs list"]
+    O -->|"Yes"| Q["cross_validate()\nName match across docs\nDOB consistency\nConfidence check"]
+    Q -->|"Pass"| R["status: success\nReady to submit"]
+    Q -->|"Fail"| S["status: cross_validation_failed\nErrors listed"]
+
+    style DENY fill:#450a0a,stroke:#f87171,color:#fecaca
+    style ERR1 fill:#450a0a,stroke:#f87171,color:#fecaca
+    style ERR2 fill:#450a0a,stroke:#f87171,color:#fecaca
+    style R fill:#064e3b,stroke:#34d399,color:#d1fae5
+    style S fill:#450a0a,stroke:#f87171,color:#fecaca
+    </div>
+  </div>
+</div>
+
+<!-- SECURITY LAYERS -->
+<div id="security" class="section">
+  <h2>Security Layers</h2>
+  <p class="desc">Defense in depth — every layer independently blocks unauthorized access. Even if one layer is bypassed, the others prevent data exposure.</p>
+  <div class="diagram-box">
+    <div class="mermaid">
+flowchart LR
+    subgraph L1["Layer 1: Network"]
+        HTTPS["HTTPS only\nin production"]
+        CORS["CORS whitelist\nCLIENT_URL only"]
+        HELMET["Helmet.js\nsecurity headers"]
+    end
+    subgraph L2["Layer 2: Rate Limiting"]
+        RL1["Login: 5 attempts\n/ 15 min"]
+        RL2["Signup: 10 accounts\n/ hour"]
+    end
+    subgraph L3["Layer 3: Auth"]
+        JWT["JWT via httpOnly cookie\nnot accessible to JS"]
+        REFRESH["Auto-refresh\nexpired tokens"]
+        VERIFY["verifyToken middleware\non every protected route"]
+    end
+    subgraph L4["Layer 4: Database RLS"]
+        RLS1["user_crypto_meta:\nauth.uid() = user_id"]
+        RLS2["document_meta:\nauth.uid() = user_id"]
+        RLS3["chat_sessions:\nauth.uid() = user_id"]
+        RLS4["conversations:\nauth.uid() = user_id"]
+        RLS5["Storage bucket:\nfolder = user_id"]
+    end
+    subgraph L5["Layer 5: Encryption"]
+        E2E["AES-256-GCM\nclient-side only"]
+        PBKDF2["PBKDF2 310k iter\npassword hardening"]
+        NOMEK["MEK never stored\nnever transmitted"]
+        PWDGATE["Password required\nto decrypt — even\nwith valid session"]
+    end
+
+    L1 --> L2 --> L3 --> L4 --> L5
+
+    style L1 fill:#1a1a2e,stroke:#8b5cf6,color:#e2e8f0
+    style L2 fill:#1a0a0a,stroke:#f87171,color:#e2e8f0
+    style L3 fill:#0c1a3a,stroke:#60a5fa,color:#e2e8f0
+    style L4 fill:#0a2a1a,stroke:#34d399,color:#e2e8f0
+    style L5 fill:#1a1a0a,stroke:#fbbf24,color:#e2e8f0
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h3>&#128737; Admin / Server cannot access files because:</h3>
+      <ul>
+        <li>Files encrypted with AES-256-GCM before leaving browser</li>
+        <li>MEK derived from user password — never stored anywhere</li>
+        <li>KEK derived via PBKDF2 — never transmitted to server</li>
+        <li>Supabase storage only holds opaque binary blobs</li>
+        <li>Even with DB + storage access, blobs are unreadable</li>
+        <li>Password required to decrypt — server never has it</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>&#128272; Session token theft is mitigated because:</h3>
+      <ul>
+        <li>Tokens in httpOnly cookies — not accessible to JS/XSS</li>
+        <li>Download requires password re-entry every time</li>
+        <li>MEK lost on page refresh — must re-login to restore</li>
+        <li>Signed URLs expire in 60 seconds</li>
+        <li>RLS blocks cross-user data access at DB level</li>
+        <li>SameSite: strict prevents CSRF attacks</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1e293b',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#334155',
+      lineColor: '#38bdf8',
+      secondaryColor: '#0f172a',
+      tertiaryColor: '#1e293b',
+      background: '#0f1117',
+      mainBkg: '#1e293b',
+      nodeBorder: '#334155',
+      clusterBkg: '#0f172a',
+      titleColor: '#38bdf8',
+      edgeLabelBackground: '#1e293b',
+      actorBkg: '#1e293b',
+      actorBorder: '#38bdf8',
+      actorTextColor: '#e2e8f0',
+      actorLineColor: '#38bdf8',
+      signalColor: '#38bdf8',
+      signalTextColor: '#e2e8f0',
+      labelBoxBkgColor: '#1e293b',
+      labelBoxBorderColor: '#334155',
+      labelTextColor: '#e2e8f0',
+      loopTextColor: '#e2e8f0',
+      noteBorderColor: '#334155',
+      noteBkgColor: '#0f172a',
+      noteTextColor: '#94a3b8',
+      activationBorderColor: '#38bdf8',
+      activationBkgColor: '#1e293b',
+      sequenceNumberColor: '#38bdf8'
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+    sequence: { actorMargin: 60, width: 160, height: 50, boxMargin: 10, useMaxWidth: true }
+  });
+
+  function show(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    event.target.classList.add('active');
+    // Re-render mermaid diagrams in newly shown section
+    mermaid.run({ nodes: document.getElementById(id).querySelectorAll('.mermaid') });
+  }
+</script>
+</body>
+</html>

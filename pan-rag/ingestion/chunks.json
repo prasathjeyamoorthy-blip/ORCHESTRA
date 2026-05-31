@@ -3182,5 +3182,53 @@
     "chunk_index": 1,
     "total_chunks": 2,
     "text": "ges I have to pay while submitting the 'Form for Changes or Correction in TAN data for TAN allotted'?\nIf I change my address, should I inform ITD or should I apply for a new TAN?\nHow can one find out Assessing Officer (AO) Details?\nWhat can serve as proof of TAN in case one has lost the TAN allotment letter?\nTo enhance and personalize your experience, we use cookies https://proteantech.in/cookie-policy\nOK\nSettings"
+  },
+  {
+    "chunk_id": "manual__documents_required_individual__chunk_0",
+    "url": "https://tinpan.proteantech.in/services/pan/documents-required.html",
+    "title": "Documents Required for PAN Card Application - Individual",
+    "chunk_index": 0,
+    "total_chunks": 5,
+    "text": "Documents Required for PAN Card Application - Individual Indian Citizens (Form 49A)\n\nProof of Identity (any one):\n- Aadhaar Card issued by UIDAI\n- Voter ID Card (Election Commission of India)\n- Passport\n- Driving Licence\n- Ration Card with photograph\n- Arms Licence\n- Photo identity card issued by Central/State Government or Public Sector Undertaking\n- Pensioner Card with photograph\n- Central Government Health Scheme Card or Ex-Servicemen Contributory Health Scheme photo card\n- Certificate of identity in Original signed by a Member of Parliament, Member of Legislative Assembly, Municipal Councillor or a Gazetted Officer\n- Bank Certificate in Original on letter head from the branch (along with name and stamp of the issuing officer) containing duly attested photograph and bank account number of the applicant"
+  },
+  {
+    "chunk_id": "manual__documents_required_individual__chunk_1",
+    "url": "https://tinpan.proteantech.in/services/pan/documents-required.html",
+    "title": "Documents Required for PAN Card Application - Proof of Address",
+    "chunk_index": 1,
+    "total_chunks": 5,
+    "text": "Documents Required for PAN Card Application - Proof of Address (any one):\n\n- Aadhaar Card issued by UIDAI\n- Voter ID Card\n- Driving Licence\n- Passport\n- Passport of Spouse\n- Post Office Passbook having address of the applicant\n- Latest property tax assessment order\n- Domicile certificate issued by the Government\n- Allotment letter of accommodation issued by Central or State Government (not more than 3 years old)\n- Property Registration Document\n- Electricity Bill (not more than 3 months old)\n- Landline Telephone or Broadband connection bill (not more than 3 months old)\n- Water Bill (not more than 3 months old)\n- Consumer Gas Connection Card or Book or Piped Gas Bill (not more than 3 months old)\n- Bank Account Statement (not more than 3 months old)\n- Depository Account Statement (not more than 3 months old)\n- Credit Card Statement (not more than 3 months old)\n- Certificate of address in Original signed by a Member of Parliament, Member of Legislative Assembly, Municipal Councillor or a Gazetted Officer\n- Employer certificate in Original"
+  },
+  {
+    "chunk_id": "manual__documents_required_individual__chunk_2",
+    "url": "https://tinpan.proteantech.in/services/pan/documents-required.html",
+    "title": "Documents Required for PAN Card Application - Proof of Date of Birth",
+    "chunk_index": 2,
+    "total_chunks": 5,
+    "text": "Documents Required for PAN Card Application - Proof of Date of Birth (any one):\n\n- Aadhaar Card issued by UIDAI\n- Voter ID Card\n- Driving Licence\n- Passport\n- Matriculation Certificate or Mark Sheet of recognized board\n- Birth Certificate issued by the Municipal Authority or any office authorized to issue Birth and Death Certificate by the Registrar of Births and Deaths\n- Photo identity card issued by Central Government or State Government or Central Public Sector Undertaking or State Public Sector Undertaking\n- Domicile Certificate issued by the Government\n- Central Government Health Service Scheme Card or Ex-Servicemen Contributory Health Scheme photo card\n- Pension Payment Order\n- Marriage Certificate issued by the Registrar of Marriages\n- Affidavit sworn before a Magistrate stating the date of birth\n\nNote: Aadhaar Card alone covers all three proofs — Proof of Identity, Proof of Address, and Proof of Date of Birth — making it the most convenient single document for PAN application."
+  },
+  {
+    "chunk_id": "manual__documents_required_individual__chunk_3",
+    "url": "https://tinpan.proteantech.in/services/pan/documents-required.html",
+    "title": "PAN Application Process and Fees",
+    "chunk_index": 3,
+    "total_chunks": 5,
+    "text": "PAN Card Application Process for Indian Citizens:\n\nStep 1: Fill Form 49A — available online at the NSDL/Protean portal or UTIITSL portal. You can apply online or offline.\n\nStep 2: Submit documents — Proof of Identity, Proof of Address, and Proof of Date of Birth (any one from each category). Two recent passport-size photographs are required.\n\nStep 3: Pay the fee:\n- For Indian address delivery: Rs. 107 (including GST)\n- For foreign address delivery: Rs. 1,017 (including GST)\n- e-PAN (digital only): Rs. 72 (including GST)\n\nStep 4: After submission, you receive an acknowledgement number to track your application.\n\nStep 5: Physical PAN card is dispatched within 15-20 working days. e-PAN is available within 2-3 working days.\n\nOnline application: Apply at onlineservices.nsdl.com or www.utiitsl.com\nOffline application: Submit Form 49A at any TIN Facilitation Centre or PAN Service Centre."
+  },
+  {
+    "chunk_id": "manual__documents_required_individual__chunk_4",
+    "url": "https://tinpan.proteantech.in/services/pan/documents-required.html",
+    "title": "PAN Application for Non-Individuals and Special Cases",
+    "chunk_index": 4,
+    "total_chunks": 5,
+    "text": "PAN Application for Non-Individual Entities:\n\nCompanies: Certificate of Registration issued by the Registrar of Companies.\n\nPartnership Firms: Certificate of Registration issued by the Registrar of Firms, or Copy of Partnership Deed.\n\nLimited Liability Partnerships (LLP): Certificate of Registration issued by the Registrar of LLPs.\n\nTrusts: Trust Deed or Certificate of Registration Number issued by Charity Commissioner.\n\nHUF (Hindu Undivided Family): An affidavit by the Karta of the HUF stating the name, father's name and address of all the coparceners on the date of application, and copy of any document in the name of Karta of HUF as proof of identity, address and date of birth.\n\nNRI/Foreign Citizens: Use Form 49AA. Passport is mandatory as proof of identity. Proof of address can be a bank statement from the country of residence, NRE bank account statement, or Overseas Citizen of India (OCI) card.\n\nAadhaar-PAN Linking: Mandatory for all Indian citizens. Link via the Income Tax e-filing portal at incometax.gov.in. The deadline has passed and a penalty fee of Rs. 1,000 applies for late linking."
+  },
+  {
+    "chunk_id": "manual__pan_fees__chunk_0",
+    "url": "https://onlineservices.proteantech.in/paam/endUserRegisterContact.html",
+    "title": "PAN Card Application Fees - Physical and e-PAN",
+    "chunk_index": 0,
+    "total_chunks": 1,
+    "text": "PAN Card Application Fees (Processing Fee including GST)\n\nOption 1: Physical PAN Card + e-PAN Card (soft copy)\nThe applicant receives the physical PAN card at the communication address AND an e-PAN card in PDF format at the email address mentioned in the application form.\n\nFor Indian address delivery:\n- e-KYC & e-Sign paperless application / e-Sign scanned based: ₹101\n- Physical Mode (paper form submitted at TIN-FC): ₹107\n\nFor Foreign address delivery:\n- e-Sign scanned based: ₹1011\n- Physical Mode: ₹1017\n\nOption 2: Only e-PAN Card (soft copy only)\nOnly the e-PAN card in PDF format is dispatched to the email address. Physical PAN card will NOT be dispatched to the communication address.\n\n- e-KYC & e-Sign paperless application / e-Sign scanned based: ₹66\n- Physical Mode (paper form submitted at TIN-FC): ₹72\n\nSummary:\n- Cheapest option: Only e-PAN via eKYC/e-Sign = ₹66\n- Physical + e-PAN via eKYC/e-Sign (Indian address) = ₹101\n- Physical + e-PAN via Physical Mode (Indian address) = ₹107\n- Physical + e-PAN (Foreign address, e-Sign) = ₹1011\n- Physical + e-PAN (Foreign address, Physical Mode) = ₹1017\n\nNote: For Aadhaar-based eKYC online application (paperless), the fee is ₹101 for physical+soft copy or ₹66 for soft copy only."
   }
 ]

@@ -1,0 +1,10 @@
+nvidia-riva-client
+sounddevice
+numpy
+requests
+rank-bm25
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart
+faster-whisper

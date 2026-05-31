@@ -5,36 +5,32 @@ SERVICES = {
     "pan_apply_indian": {
         "name": "New PAN Card Application (Indian Citizen/Entity)",
         "form": "Form 49A",
-        "steps": ["applicant_type", "personal_details", "documents", "photo", "summary"],
+        "steps": ["applicant_type", "submission_mode", "delivery_mode", "aadhaar_photo", "source_of_income", "address_for_comm", "residential_status", "rep_assessee", "details_collection", "confirmation", "documents", "summary"],
         "documents": {
-            "identity_proof": {
-                "label": "Proof of Identity",
-                "options": ["Aadhaar Card", "Passport", "Voter ID", "Driving License"],
+            "aadhaar": {
+                "label": "Aadhaar Card",
+                "options": ["Aadhaar Card (front & back scan or photo)"],
                 "count": 1,
             },
-            "address_proof": {
-                "label": "Proof of Address",
-                "options": ["Aadhaar Card", "Passport", "Bank Statement (last 3 months)", "Utility Bill"],
-                "count": 1,
-            },
-            "dob_proof": {
-                "label": "Proof of Date of Birth",
-                "options": ["Aadhaar Card", "Passport", "Birth Certificate", "Matriculation Certificate"],
+            "driving_license": {
+                "label": "Driving License",
+                "options": ["Valid Driving License (front side)"],
                 "count": 1,
             },
             "photograph": {
-                "label": "Passport-size Photograph",
-                "options": ["Recent passport-size photo (white background)"],
+                "label": "Applicant Photograph",
+                "options": ["Recent passport-size photo (white background, no sunglasses)"],
                 "count": 1,
             },
         },
-        "smart_rules": {"aadhaar": ["identity_proof", "address_proof", "dob_proof"]},
+        # No smart rules — all 3 docs are mandatory and distinct
+        "smart_rules": {},
     },
 
     "pan_apply_foreign": {
         "name": "New PAN Card Application (Foreign Citizen/Entity)",
         "form": "Form 49AA",
-        "steps": ["applicant_type", "personal_details", "documents", "photo", "summary"],
+        "steps": ["applicant_type", "documents", "summary"],
         "documents": {
             "identity_proof": {
                 "label": "Proof of Identity",
@@ -117,8 +113,10 @@ SERVICES = {
 
 
 # ── Informational question guard ──────────────────────────────────────────────
+# NOTE: "how to apply / how do I apply" are ACTION intents, not informational — excluded here
 _INFO_QUESTION_PATTERN = re.compile(
-    r"^(why|what|how\s+does|how\s+is|what\s+is|what\s+are|"
+    r"^(why|what\s+is|what\s+are|what\s+documents|which\s+documents|"
+    r"how\s+does|how\s+is|how\s+long|how\s+much|how\s+many\s+days|"
     r"should\s+i|do\s+i\s+need|is\s+it|are\s+there|"
     r"tell\s+me|explain|describe|difference|benefit|reason|"
     r"purpose|importance|advantage|disadvantage|"
@@ -126,25 +124,34 @@ _INFO_QUESTION_PATTERN = re.compile(
     r"what\s+happens|what\s+if|can\s+you\s+tell|"
     r"i\s+want\s+to\s+know|i\s+want\s+to\s+understand|"
     r"i\s+want\s+to\s+learn|curious\s+about|"
-    r"what\s+documents|which\s+documents|documents\s+required|"
-    r"how\s+long|how\s+much|what\s+is\s+the\s+fee|"
-    r"how\s+many\s+days|processing\s+time)",
+    r"documents\s+required|"
+    r"what\s+is\s+the\s+fee|processing\s+time)",
     re.IGNORECASE
 )
 
 def _is_informational(question: str) -> bool:
-    return bool(_INFO_QUESTION_PATTERN.match(question.strip()))
+    q = question.strip()
+    # "how to apply", "how do I apply", "how can I apply" → action intent, NOT informational
+    _HOW_TO_APPLY = re.compile(
+        r"^how\s+(to|do\s+i|can\s+i|do\s+we|should\s+i)\s+(apply|register|get|create|obtain|start|begin|proceed)",
+        re.IGNORECASE
+    )
+    if _HOW_TO_APPLY.match(q):
+        return False
+    return bool(_INFO_QUESTION_PATTERN.match(q))
 
 
 # ── Service patterns ──────────────────────────────────────────────────────────
 _SERVICE_PATTERNS = [
     # Only Indian citizen PAN application triggers the guided flow + upload panel
     ("pan_apply_indian", re.compile(
-        r"i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have).{0,20}pan"
-        r"|i\s+need\s+to\s+(apply|register|get|create).{0,20}pan"
+        # Standard spellings — require whitespace/word boundary before "pan"
+        r"i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have)\s.{0,15}\bpan\b"
+        r"|i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have)\s+(for\s+)?(a\s+)?(new\s+)?\bpan\b"
+        r"|i\s+need\s+to\s+(apply|register|get|create)\s.{0,15}\bpan\b"
         r"|i\s+(want|wanna|wana)\s+(a\s+)?(new\s+)?pan\b"
         r"|i\s+need\s+(a\s+)?(new\s+)?pan\b"
-        r"|help\s+me\s+(apply|get|register|create).{0,20}pan"
+        r"|help\s+me\s+(apply|get|register|create)\s.{0,15}\bpan\b"
         r"|apply\s+(for\s+)?(a\s+)?(new\s+)?pan\b"
         r"|register\s+(for\s+)?(a\s+)?pan\b"
         r"|get\s+(a\s+)?(new\s+)?pan\b"
@@ -154,8 +161,13 @@ _SERVICE_PATTERNS = [
         r"|new\s+pan\s*(card)?\b"
         r"|fresh\s+pan\b"
         r"|first\s+time\s+pan\b"
-        r"|pan\s*(card)?\s*(apply|application|registration)\b"
-        r"|\bform\s*49\s*a\b(?!\s*a)",
+        r"|pan\s+(card\s+)?(apply|application|registration)\b"
+        r"|\bform\s*49\s*a\b(?!\s*a)"
+        # "how to apply for pan"
+        r"|how\s+(to|do\s+i|can\s+i|do\s+we|should\s+i)\s+(apply|register|get|create|obtain|start|begin)\s.{0,25}\bpan\b"
+        # Common typos of "apply" — still require space before pan
+        r"|i\s+(want|wanna|wana|wan)\s+(to\s+)?(aply|appply|appley|applay|aplly|applyy|applu|apli)\s.{0,15}\bpan\b"
+        r"|i\s+(wnat|watn|wan|wana|wnna|wannt|wwant)\s+(to\s+)?(apply|aply|appply)\s.{0,15}\bpan\b",
         re.IGNORECASE
     )),
     ("pan_reprint", re.compile(
@@ -175,13 +187,55 @@ _SERVICE_PATTERNS = [
 ]
 
 
+# ── Fuzzy spelling correction ─────────────────────────────────────────────────
+# Maps common action words (with typos) to their canonical form
+_FUZZY_ACTION_WORDS = [
+    "apply", "register", "get", "create", "obtain", "enroll", "make", "have",
+]
+_FUZZY_INTENT_WORDS = [
+    "want", "wanna", "need", "like", "wish",
+]
+
+def _fuzzy_correct_word(word: str, candidates: list[str], threshold: float = 0.75) -> str | None:
+    """Return the best matching candidate if similarity >= threshold, else None."""
+    from difflib import SequenceMatcher
+    best, best_score = None, 0.0
+    for c in candidates:
+        score = SequenceMatcher(None, word.lower(), c).ratio()
+        if score > best_score:
+            best, best_score = c, score
+    return best if best_score >= threshold else None
+
+
+def _fuzzy_detect_pan_apply(question: str) -> bool:
+    """
+    Fuzzy fallback: tokenise the question and check if it contains
+    a near-match for an intent word + action word + 'pan'.
+    Catches typos like 'aply', 'wnat', 'appply', etc.
+    """
+    tokens = re.findall(r"[a-z]+", question.lower())
+    if "pan" not in tokens:
+        return False
+
+    has_intent = any(_fuzzy_correct_word(t, _FUZZY_INTENT_WORDS) for t in tokens)
+    has_action = any(_fuzzy_correct_word(t, _FUZZY_ACTION_WORDS) for t in tokens)
+    return has_intent and has_action
+
+
 def detect_service(question: str) -> str | None:
     q = question.strip()
     if _is_informational(q):
         return None
+
+    # Pass 1: exact regex
     for service_id, pattern in _SERVICE_PATTERNS:
         if pattern.search(q):
             return service_id
+
+    # Pass 2: fuzzy fallback for pan_apply_indian only
+    if _fuzzy_detect_pan_apply(q):
+        return "pan_apply_indian"
+
     return None
 
 
