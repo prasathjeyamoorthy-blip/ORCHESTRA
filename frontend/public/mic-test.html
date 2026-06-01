@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head><title>Mic Test</title></head>
+<body style="font-family:monospace;padding:20px;background:#111;color:#eee">
+<h2>Mic Device Test</h2>
+<button onclick="listDevices()" style="padding:8px 16px;margin:4px">List Devices</button>
+<button onclick="testMic()" style="padding:8px 16px;margin:4px">Test getUserMedia</button>
+<pre id="out" style="background:#222;padding:12px;margin-top:12px;white-space:pre-wrap"></pre>
+<script>
+const out = document.getElementById('out')
+const log = s => { out.textContent += s + '\n' }
+
+async function listDevices() {
+  out.textContent = ''
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    log('All devices:')
+    devices.forEach(d => log(`  [${d.kind}] ${d.label || '(no label)'} — id: ${d.deviceId.slice(0,20)}...`))
+    const mics = devices.filter(d => d.kind === 'audioinput')
+    log(`\nFound ${mics.length} microphone(s)`)
+  } catch(e) {
+    log('Error: ' + e.message)
+  }
+}
+
+async function testMic() {
+  out.textContent = ''
+  log('Requesting getUserMedia({ audio: true })...')
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const tracks = stream.getAudioTracks()
+    log('SUCCESS!')
+    tracks.forEach(t => log(`  Track: ${t.label} — state: ${t.readyState}`))
+    setTimeout(() => { stream.getTracks().forEach(t => t.stop()); log('Stopped.') }, 2000)
+  } catch(e) {
+    log('FAILED: ' + e.name + ' — ' + e.message)
+  }
+}
+</script>
+</body>
+</html>
