@@ -1614,7 +1614,25 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                         else:
                             print(f"[DEBUG] ✗ All words filtered out for mother name")
                     else:
-                        print(f"[DEBUG] ✗ No mother name pattern matched")
+                        # No "mother" keyword — treat the whole input as the name
+                        # (agent just asked "What is your mother's name?" and user typed it directly)
+                        _FILTER = {'my', 'mother', "mother's", 'mothers', 'mom', "mom's",
+                                   'name', 'is', 'the', 'full', 'change', 'update', 'to', 'it'}
+                        words = user_input.strip().split()
+                        filtered_words = [w for w in words if w.lower() not in _FILTER]
+                        if filtered_words:
+                            candidate = ' '.join(filtered_words)
+                            print(f"[DEBUG] Mother name bare-input candidate: {candidate!r}")
+                            if _is_valid_name(candidate):
+                                flow.state["mother_name"] = candidate
+                                flow.state["pending_modification"] = None
+                                flow.save()
+                                print(f"[DEBUG] ✓ Updated mother_name (bare) to: {candidate!r}")
+                                return _build_confirmation(flow)
+                            else:
+                                print(f"[DEBUG] ✗ Mother name validation failed for bare input: {candidate!r}")
+                        else:
+                            print(f"[DEBUG] ✗ No mother name pattern matched")
                         
                 elif field == "email":
                     # Try to extract email
@@ -2099,6 +2117,24 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
                     print(f"[DEBUG _extract_details] ✓ mother_name = {candidate!r}")
                     break
 
+        # ── Step 3b: Bare-name fallback when agent specifically asked for mother name ──
+        # If full_name is already set but mother_name is still missing, and the entire
+        # input looks like a plain name (no salary/email/other keywords), treat it as
+        # the mother's name — the agent just asked "Please provide your mother's full name".
+        if not flow.state.get("mother_name") and flow.state.get("full_name"):
+            _has_other_keywords = re.search(
+                r'\b(salary|income|earn|email|mail|₹|rs\.?|inr|name\b|full\b)\b',
+                text, re.IGNORECASE
+            )
+            if not _has_other_keywords:
+                # The whole input is likely just the mother's name
+                candidate = _clean_name(text)
+                print(f"[DEBUG _extract_details] Mother bare-name fallback candidate: {candidate!r}")
+                if candidate and _is_valid_name(candidate) and not _is_keyword(candidate):
+                    flow.state["mother_name"] = candidate
+                    updated = True
+                    print(f"[DEBUG _extract_details] ✓ mother_name (bare fallback) = {candidate!r}")
+
     # ── Step 4: Extract full name ─────────────────────────────────
     if not flow.state.get("full_name"):
         for seg in segments:
@@ -2536,20 +2572,25 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
 
     elif field == "mother_name":
         # Extract mother's name - handle both "mother name is X" and just "X"
+        # Try to strip any leading command phrase first
+        _FILTER_WORDS = {'my', 'mother', "mother's", 'mothers', 'mom', "mom's", 'moms',
+                         'name', 'is', 'the', 'full', 'change', 'update', 'to', 'it', 'maa', 'amma'}
+        # Try explicit pattern first: "mother name is X" / "change to X"
         name_match = re.search(
-            r"(?:mother(?:'?s)?\s+name\s+(?:is|to)\s+|mom(?:'?s)?\s+name\s+(?:is|to)\s+|change\s+(?:to|it\s+to)\s+|update\s+(?:to|it\s+to)\s+)?([A-Za-z][A-Za-z\s]{1,50})$",
+            r"(?:mother(?:'?s)?\s+name\s+(?:is|to)\s+|mom(?:'?s)?\s+name\s+(?:is|to)\s+|"
+            r"change\s+(?:to|it\s+to)\s+|update\s+(?:to|it\s+to)\s+)([A-Za-z][A-Za-z\s]{0,50}?)(?:\s*$)",
             text, re.IGNORECASE
         )
         if name_match:
             candidate = name_match.group(1).strip()
         else:
-            candidate = text
-        
+            # No command prefix — treat entire input as the name after filtering keywords
+            candidate = text.strip()
+
         # Filter out common command words
         words = candidate.split()
-        _FILTER_WORDS = {'my', 'mother', 'mothers', 'mom', 'moms', 'name', 'is', 'the', 'full', 'change', 'update', 'to', 'it'}
         filtered_words = [w for w in words if w.lower() not in _FILTER_WORDS]
-        
+
         if filtered_words:
             candidate = ' '.join(filtered_words)  # Preserve original case
             if _is_valid_name(candidate):
@@ -2558,7 +2599,13 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
             else:
                 print(f"[DEBUG _apply_field_update] Invalid mother name: {candidate!r}")
         else:
-            print(f"[DEBUG _apply_field_update] Mother name filtered to empty")
+            # All words were filtered — the raw input IS the name (e.g. user typed just "Sunita")
+            candidate = text.strip()
+            if _is_valid_name(candidate):
+                flow.state["mother_name"] = candidate
+                print(f"[DEBUG _apply_field_update] Updated mother_name (raw) to: {candidate!r}")
+            else:
+                print(f"[DEBUG _apply_field_update] Mother name filtered to empty")
 
     elif field == "email":
         account_email = flow.state.get("_account_email")

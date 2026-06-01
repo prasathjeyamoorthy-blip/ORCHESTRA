@@ -8,3 +8,17 @@ wheels/
 
 # Virtual environments
 .venv
+
+# HuggingFace model cache (large model files — download on first run)
+hf_cache/
+D:\hf_cache/
+
+# Vector database (rebuilt from source documents)
+chroma_db/
+
+# User-uploaded documents (runtime data, not source code)
+storage/uploads/
+storage/sessions/
+
+# Environment secrets
+.env
