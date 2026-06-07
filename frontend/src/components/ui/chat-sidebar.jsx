@@ -1,7 +1,7 @@
 import { Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete, collapsed, onToggle }) {
+export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete, collapsed, onToggle, newDisabled = false }) {
   return (
     <>
       {/* Floating toggle — only shown when sidebar is collapsed */}
@@ -44,7 +44,14 @@ export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete, col
           </div>
           <button
             onClick={onNew}
-            className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white border border-white/[0.08] hover:border-white/20 px-2.5 py-1.5 rounded-lg transition-all"
+            disabled={newDisabled}
+            className={cn(
+              "flex items-center gap-1.5 text-xs border px-2.5 py-1.5 rounded-lg transition-all",
+              newDisabled
+                ? "text-white/20 border-white/[0.04] cursor-not-allowed"
+                : "text-white/50 hover:text-white border-white/[0.08] hover:border-white/20"
+            )}
+            title={newDisabled ? "Already on a new chat" : "New chat"}
           >
             <Plus size={12} /> New
           </button>

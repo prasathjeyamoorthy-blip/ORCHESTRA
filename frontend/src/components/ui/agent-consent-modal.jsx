@@ -6,12 +6,14 @@ import { useState } from 'react'
 import { ShieldAlert, Eye, EyeOff, Loader2, AlertCircle, FileText } from 'lucide-react'
 
 export function AgentConsentModal({ files, onConfirm, onCancel, error, loading }) {
-  const [password, setPassword] = useState('')
-  const [show,     setShow]     = useState(false)
+  const [password,   setPassword]   = useState('')
+  const [show,       setShow]       = useState(false)
+  const [submitted,  setSubmitted]  = useState(false)
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (!password) return
+    if (!password || submitted) return
+    setSubmitted(true)
     onConfirm(password)
   }
 
@@ -81,9 +83,9 @@ export function AgentConsentModal({ files, onConfirm, onCancel, error, loading }
               className="flex-1 h-9 rounded-lg border border-white/[0.1] text-white/50 hover:text-white hover:border-white/20 text-xs font-medium transition-all">
               Deny
             </button>
-            <button type="submit" disabled={loading || !password}
+            <button type="submit" disabled={loading || submitted || !password}
               className="flex-1 h-9 rounded-lg bg-amber-500 text-black text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-              {loading
+              {(loading || submitted)
                 ? <Loader2 size={13} className="animate-spin" />
                 : 'Authorize & Send'
               }

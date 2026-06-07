@@ -129,3 +129,29 @@ html, body, #root {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 }
+
+/* ── Custom scrollbar styling (hide scrollbars but keep functionality) ── */
+/* For Webkit browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+/* For IE and Edge (legacy) */
+body {
+  -ms-overflow-style: none;
+}

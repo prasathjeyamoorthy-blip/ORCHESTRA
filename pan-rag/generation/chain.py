@@ -931,6 +931,7 @@ class RAGChain:
                     "options"     : agent_response.get("options"),
                     "confirm_action": agent_response.get("confirm_action", False),
                     "flow_confirmed": agent_response.get("flow_confirmed", False),
+                    "confirmation_fields": agent_response.get("confirmation_fields"),
                 }
             # agent returned None — flow cancelled, fall through to RAG
 
@@ -1518,6 +1519,7 @@ class RAGChain:
                 "flow_confirmed": flow_confirmed,
                 "flow_data"     : flow_data,
                 "field_buttons" : agent_response.get("field_buttons"),  # Add field buttons for modification menu
+                "confirmation_fields": agent_response.get("confirmation_fields"),
             }
             yield _sse({"type": "meta", **result})
             yield _sse({"type": "token", "text": agent_response["answer"]})

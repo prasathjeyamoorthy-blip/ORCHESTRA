@@ -145,7 +145,7 @@ def _is_informational(question: str) -> bool:
 _SERVICE_PATTERNS = [
     # Only Indian citizen PAN application triggers the guided flow + upload panel
     ("pan_apply_indian", re.compile(
-        # Standard spellings — require whitespace/word boundary before "pan"
+        # ── Standard intent + action + pan ───────────────────────────────────
         r"i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have)\s.{0,15}\bpan\b"
         r"|i\s+(want|wanna|wana)\s+(to\s+)?(apply|register|get|create|make|obtain|have)\s+(for\s+)?(a\s+)?(new\s+)?\bpan\b"
         r"|i\s+need\s+to\s+(apply|register|get|create)\s.{0,15}\bpan\b"
@@ -161,13 +161,42 @@ _SERVICE_PATTERNS = [
         r"|new\s+pan\s*(card)?\b"
         r"|fresh\s+pan\b"
         r"|first\s+time\s+pan\b"
-        r"|pan\s+(card\s+)?(apply|application|registration)\b"
+        r"|pan\s+(card\s+)?(apply|application|registration|banao|banana|chahiye|venum|edukkanum|thaa|tharuvai)\b"
         r"|\bform\s*49\s*a\b(?!\s*a)"
         # "how to apply for pan"
         r"|how\s+(to|do\s+i|can\s+i|do\s+we|should\s+i)\s+(apply|register|get|create|obtain|start|begin)\s.{0,25}\bpan\b"
-        # Common typos of "apply" — still require space before pan
-        r"|i\s+(want|wanna|wana|wan)\s+(to\s+)?(aply|appply|appley|applay|aplly|applyy|applu|apli)\s.{0,15}\bpan\b"
-        r"|i\s+(wnat|watn|wan|wana|wnna|wannt|wwant)\s+(to\s+)?(apply|aply|appply)\s.{0,15}\bpan\b",
+        # ── Short / bare phrases ──────────────────────────────────────────────
+        # "pan card" alone, "pan card please", "need pan card", "want pan card"
+        r"|^pan\s+card\s*$"
+        r"|^pan\s*$"
+        r"|\bpan\s+card\s+(please|now|today|required|needed|thevai|venum|chahiye)\b"
+        r"|\b(need|want|require|need\s+a|want\s+a)\s+pan\s+card\b"
+        r"|\bgive\s+me\s+(a\s+)?pan\b"
+        r"|\bget\s+me\s+(a\s+)?pan\b"
+        r"|\bmake\s+(me\s+)?(a\s+)?pan\b"
+        r"|\bstart\s+pan\b"
+        r"|\bbegin\s+pan\b"
+        # ── Hindi ────────────────────────────────────────────────────────────
+        r"|\bpan\s+(banao|banana|chahiye|banaiye|bana\s+do|banana\s+hai|card\s+chahiye|apply\s+karna)\b"
+        r"|\b(mujhe|muje|mujhko)\s+pan\b"
+        r"|\bnaya\s+pan\b"
+        r"|\bpan\s+ke\s+liye\b"
+        # ── Tamil ────────────────────────────────────────────────────────────
+        # "venum" = want/need, "edukkanum" = need to take, "thaa" = give
+        # "pannanum" = need to do, "seiyanum" = need to do, "vendum" = need
+        r"|\bpan\s+(venum|vendum|edukkanum|thaa|tharuvai|seiyanum)\b"
+        r"|\bpan\s+card\s+(venum|vendum|edukkanum|thaa|pannanum|pnnanum|pananum|seiyanum)\b"
+        r"|\b(enakku|enikku|enaku|naa|naan|naanu)\s+pan\b"
+        r"|\bpan\s+(apply|register)\s+(pannanum|pnnanum|pananum|seiyanum)?\b"
+        r"|\bpan\s+card\s+(apply|register)\s*(pannanum|pnnanum|pananum|seiyanum)?\b"
+        r"|\bpan\s+card\s+\w{1,5}\s+(apply|register)\s*(pannanum|pnnanum|pananum)?\b"
+        r"|\bpan\s+card\s+la\s+register\b"
+        # ── Typos of "apply" — still require space before pan ────────────────
+        r"|i\s+(want|wanna|wana|wan)\s+(to\s+)?(aply|appply|appley|applay|aplly|applyy|applu|apli|pply|paly|appl|apliy)\s.{0,15}\bpan\b"
+        r"|i\s+(wnat|watn|wan|wana|wnna|wannt|wwant|wantt|wnt|wany|wann)\s+(to\s+)?(apply|aply|appply|pply|appl)\s.{0,15}\bpan\b"
+        # ── Typos of "pan" itself with action words ───────────────────────────
+        r"|i\s+(want|wanna|wana|wnat|watn)\s+(to\s+)?(apply|aply|pply|register|get)\s+(for\s+)?(a\s+)?(new\s+)?(oan|paan|pam|pn|pna)\b"
+        r"|(apply|aply|pply|register|get)\s+(for\s+)?(a\s+)?(new\s+)?(oan|paan|pam|pn|pna)\b",
         re.IGNORECASE
     )),
     ("pan_reprint", re.compile(
@@ -191,12 +220,19 @@ _SERVICE_PATTERNS = [
 # Maps common action words (with typos) to their canonical form
 _FUZZY_ACTION_WORDS = [
     "apply", "register", "get", "create", "obtain", "enroll", "make", "have",
+    "start", "begin", "open", "fill",
 ]
 _FUZZY_INTENT_WORDS = [
-    "want", "wanna", "need", "like", "wish",
+    "want", "wanna", "need", "like", "wish", "trying", "looking", "hoping", "planning",
+    "naa", "naan", "naanu", "enakku", "enikku", "enaku",  # Tamil: "I/for me" → intent
 ]
 
-def _fuzzy_correct_word(word: str, candidates: list[str], threshold: float = 0.75) -> str | None:
+# Common phonetic / keyboard typos of "pan" to catch directly
+_PAN_TYPOS = {
+    "oan", "pn", "paan", "pna", "apn", "nap", "pa", "pann", "ppan", "pam", "ban", "pan",
+}
+
+def _fuzzy_correct_word(word: str, candidates: list[str], threshold: float = 0.65) -> str | None:
     """Return the best matching candidate if similarity >= threshold, else None."""
     from difflib import SequenceMatcher
     best, best_score = None, 0.0
@@ -207,14 +243,30 @@ def _fuzzy_correct_word(word: str, candidates: list[str], threshold: float = 0.7
     return best if best_score >= threshold else None
 
 
+def _token_looks_like_pan(token: str) -> bool:
+    """Return True if the token is 'pan' or a close typo of it."""
+    t = token.lower()
+    if t in _PAN_TYPOS:
+        return True
+    # SequenceMatcher fallback for anything that's 2–4 chars and close to "pan"
+    if 2 <= len(t) <= 5:
+        from difflib import SequenceMatcher
+        score = SequenceMatcher(None, t, "pan").ratio()
+        if score >= 0.70:
+            return True
+    return False
+
+
 def _fuzzy_detect_pan_apply(question: str) -> bool:
     """
     Fuzzy fallback: tokenise the question and check if it contains
-    a near-match for an intent word + action word + 'pan'.
-    Catches typos like 'aply', 'wnat', 'appply', etc.
+    a near-match for an intent word + action word + 'pan' (or a typo of pan).
+    Catches typos like 'aply', 'wnat', 'oan', 'pply', etc.
     """
     tokens = re.findall(r"[a-z]+", question.lower())
-    if "pan" not in tokens:
+
+    has_pan = any(_token_looks_like_pan(t) for t in tokens)
+    if not has_pan:
         return False
 
     has_intent = any(_fuzzy_correct_word(t, _FUZZY_INTENT_WORDS) for t in tokens)

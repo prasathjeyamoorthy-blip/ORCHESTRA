@@ -1124,8 +1124,16 @@ router.get('/history/:sessionId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Session not found or access denied.' });
     }
     
-    const { history } = await loadHistory(userId, sessionId);
-    return res.json({ history });
+    // Load chat history and flow state in parallel
+    const [{ history }, flowStateResult] = await Promise.all([
+      loadHistory(userId, sessionId),
+      // Fetch flow state from Python RAG server (non-blocking — graceful degradation)
+      fetch(`${RAG_URL}/flow-state/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`)
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null),
+    ]);
+
+    return res.json({ history, flow_state: flowStateResult || null });
   } catch (err) {
     console.error('[history] GET error:', err);
     return res.status(500).json({ error: 'Failed to load history.' });
@@ -1351,7 +1359,7 @@ router.post('/', verifyToken, async (req, res) => {
         if (event.type === 'meta') {
           metaData = event;
           // Forward meta to frontend (strip internal type field)
-          res.write(`data: ${JSON.stringify({ type: 'meta', session_id: event.session_id, intent: event.intent, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload || false, form_data: event.form_data || null, options: event.options || null, confirm_action: event.confirm_action || false, flow_confirmed: event.flow_confirmed || false, flow_data: event.flow_data || null, field_buttons: event.field_buttons || null })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'meta', session_id: event.session_id, intent: event.intent, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload || false, form_data: event.form_data || null, options: event.options || null, confirm_action: event.confirm_action || false, flow_confirmed: event.flow_confirmed || false, flow_data: event.flow_data || null, field_buttons: event.field_buttons || null, confirmation_fields: event.confirmation_fields || null })}\n\n`);
 
         } else if (event.type === 'token') {
           fullAnswer += event.text;
@@ -1483,6 +1491,182 @@ router.get('/memory', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('[agent-memory] GET /memory error:', err);
     return res.status(500).json({ error: 'Failed to load memory.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VOICE ROUTE  — STT → full chat pipeline → TTS
+// Receives raw audio, returns WAV audio + transcript/reply in headers.
+// Runs through the SAME chat pipeline as text messages (session, context, flow).
+// ─────────────────────────────────────────────────────────────────────────────
+const multer = require('multer');
+const _voiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+router.post('/voice/speak', verifyToken, _voiceUpload.single('audio'), async (req, res) => {
+  const userId    = req.user.id;
+  const language  = req.body.language || 'en';
+  const sessionId = req.body.session_id || null;
+
+  if (!req.file || req.file.size < 500) {
+    return res.status(422).json({ error: 'Audio too short — please speak for at least 1 second.' });
+  }
+
+  try {
+    // ── Step 1: STT — send audio to RAG STT endpoint ──────────────────────
+    const sttForm = new (require('form-data'))();
+    sttForm.append('audio', req.file.buffer, {
+      filename: req.file.originalname || 'audio.webm',
+      contentType: req.file.mimetype || 'audio/webm',
+    });
+    sttForm.append('language', language);
+
+    const sttRes = await fetch(`${RAG_URL}/api/voice/stt`, {
+      method: 'POST',
+      body: sttForm,
+      headers: sttForm.getHeaders(),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!sttRes.ok) {
+      const err = await sttRes.json().catch(() => ({}));
+      return res.status(422).json({ error: err.detail || 'Could not transcribe audio.' });
+    }
+
+    const sttData = await sttRes.json();
+    const transcript = sttData.transcript?.trim();
+    if (!transcript) {
+      return res.status(422).json({ error: 'Could not hear speech — please speak clearly and try again.' });
+    }
+
+    console.log(`[voice] Transcript (${language}): ${transcript}`);
+
+    // ── Step 2: Chat — run transcript through full chat pipeline ──────────
+    // Use the same logic as the main POST / route to ensure session context,
+    // flow state, and profile are all properly applied.
+    let reply = '';
+    let activeSid = sessionId;
+
+    // Auto-create session if none provided
+    if (!activeSid) {
+      const { data: newSession, error: sessErr } = await supabase
+        .from('chat_sessions')
+        .insert({ user_id: userId, title: transcript.slice(0, 40) })
+        .select('id')
+        .single();
+      if (sessErr || !newSession) {
+        return res.status(500).json({ error: 'Could not create chat session.' });
+      }
+      activeSid = newSession.id;
+    }
+
+    // Load history + profile + agent memory in parallel
+    const [{ history, key: cacheKey }, profile, agentMemory] = await Promise.all([
+      loadHistory(userId, activeSid),
+      loadProfile(userId),
+      loadAgentMemory(userId),
+    ]);
+
+    const longTermMemory = _shouldSearchMemory(transcript)
+      ? await searchLongTermMemory(userId, transcript, activeSid)
+      : [];
+    const userContext = buildUserContext(profile, history, longTermMemory);
+
+    // Call RAG ask endpoint (non-streaming for voice — simpler)
+    const ragPayload = {
+      question:      transcript,
+      session_id:    activeSid,
+      user_id:       userId,
+      user_context:  userContext,
+      account_email: req.user.email || '',
+      language:      language,
+    };
+
+    const ragRes = await fetch(`${RAG_URL}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ragPayload),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!ragRes.ok) {
+      return res.status(502).json({ error: 'AI service error.' });
+    }
+
+    const ragData = await ragRes.json();
+    reply = ragData.answer || '';
+
+    // Persist the exchange
+    agentMemory.history.push({ role: 'user',      content: transcript, ts: new Date().toISOString() });
+    agentMemory.history.push({ role: 'assistant', content: reply,      ts: new Date().toISOString() });
+    saveAgentHistory(userId, agentMemory.history).catch(() => {});
+    await appendHistory(cacheKey, history, userId, activeSid, transcript, reply);
+    const isFirst = history.length === 2;
+    const title   = transcript.length > 40 ? transcript.slice(0, 40) + '…' : transcript;
+    await supabase.from('chat_sessions')
+      .update({ ...(isFirst && { title }), updated_at: new Date().toISOString() })
+      .eq('id', activeSid).eq('user_id', userId);
+
+    console.log(`[voice] Reply: ${reply.slice(0, 80)}...`);
+
+    // ── Step 3: TTS — synthesise reply to speech ──────────────────────────
+    const ttsForm = new (require('form-data'))();
+    ttsForm.append('text', reply);
+    ttsForm.append('language', language);
+
+    const ttsRes = await fetch(`${RAG_URL}/api/voice/tts`, {
+      method: 'POST',
+      body: ttsForm,
+      headers: ttsForm.getHeaders(),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!ttsRes.ok) {
+      // TTS failed — return JSON fallback so user still sees the text reply
+      return res.json({ transcript, reply, audio_available: false, session_id: activeSid });
+    }
+
+    const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
+
+    const { encodeURIComponent: enc } = require('url');
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Transcript', encodeURIComponent(transcript));
+    res.setHeader('X-Reply',      encodeURIComponent(reply));
+    res.setHeader('X-Session-Id', activeSid);
+    return res.send(audioBuffer);
+
+  } catch (err) {
+    const reason = err.name === 'TimeoutError' ? 'Voice request timed out.' : 'Voice processing failed.';
+    console.error('[voice]', err.message);
+    return res.status(500).json({ error: reason });
+  }
+});
+
+// ── TTS proxy — allows frontend to call /api/chat/voice/tts with auth ────────
+router.post('/voice/tts', verifyToken, _voiceUpload.none(), async (req, res) => {
+  const { text, language = 'en' } = req.body;
+  if (!text?.trim()) return res.status(400).json({ error: 'Text is required.' });
+
+  try {
+    const ttsForm = new (require('form-data'))();
+    ttsForm.append('text', text);
+    ttsForm.append('language', language);
+
+    const ttsRes = await fetch(`${RAG_URL}/api/voice/tts`, {
+      method: 'POST',
+      body: ttsForm,
+      headers: ttsForm.getHeaders(),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!ttsRes.ok) return res.status(503).json({ error: 'TTS service unavailable.' });
+
+    const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(audioBuffer);
+  } catch (err) {
+    return res.status(500).json({ error: 'TTS failed.' });
   }
 });
 

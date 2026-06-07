@@ -26,5 +26,6 @@ class AnswerResponse(BaseModel):
     close_form: Optional[bool] = False
     form_data: Optional[dict[str, Any]] = None
     options: Optional[dict[str, Any]] = None
-    field_buttons: Optional[list[dict[str, str]]] = None  # Add field buttons for modification menu
+    field_buttons: Optional[list[dict[str, str]]] = None
+    confirmation_fields: Optional[list[dict[str, Any]]] = None  # per-field edit cards at confirmation
     elapsed_ms: Optional[int] = None

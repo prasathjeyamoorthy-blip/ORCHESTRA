@@ -60,7 +60,7 @@ export function V0AIChat({ onSend, isLoading = false }: V0AIChatProps) {
 
   return (
     <div className="relative bg-neutral-900 rounded-xl border border-neutral-800 shadow-lg">
-      <div className="overflow-y-auto">
+      <div>
         <Textarea
           ref={textareaRef}
           value={value}

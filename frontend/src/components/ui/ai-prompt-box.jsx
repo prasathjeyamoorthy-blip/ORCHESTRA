@@ -300,7 +300,7 @@ function CustomDivider() {
 
 // ── PromptInputBox (main export) ──────────────────────────────────
 export const PromptInputBox = React.forwardRef((props, ref) => {
-  const { onSend = () => {}, onVoiceResponse = () => {}, isLoading = false, placeholder = "Type your message here...", className, sessionId = null, userContext = "", draftValue = "", onDraftChange = null } = props
+  const { onSend = () => {}, onVoiceResponse = () => {}, isLoading = false, placeholder = "Type your message here...", className, sessionId = null, userContext = "", draftValue = "", onDraftChange = null, language = "en" } = props
 
   const [input, setInput] = React.useState(draftValue)
 
@@ -491,6 +491,7 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
       const sendMime = mimeType || "audio/webm"
       const formData = new FormData()
       formData.append("audio", blob, `voice${ext}`)
+      formData.append("language", language)  // tell STT which language to use
 
       // ── Full pipeline: STT → RAG+LLM → TTS, returns audio/wav ──
       const res = await fetch("/api/voice/speak", {

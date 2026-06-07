@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, FolderLock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PromptInputBox } from './components/ui/ai-prompt-box'
@@ -117,15 +116,8 @@ function renderMarkdown(text) {
       out.push(<ul key={`ul${i}`} className="space-y-2 my-2 ml-1">{items}</ul>)
       continue
     } else if (/^\*\*[^*]+:\*\*/.test(line)) {
-      const key = line.match(/^\*\*([^*]+):\*\*/)?.[1]
-      const val = line.replace(/^\*\*[^*]+:\*\*\s*/, '')
       out.push(
-        <div key={i} className="flex flex-col sm:flex-row sm:gap-3 sm:items-baseline py-1.5 border-b border-white/[0.04]">
-          <span className="text-white/35 text-[10px] font-semibold uppercase tracking-widest sm:w-24 flex-shrink-0 mb-0.5 sm:mb-0">
-            {key}
-          </span>
-          <span className="text-white text-sm font-medium">{val}</span>
-        </div>
+        <p key={i} className="leading-7 text-sm" style={{ color: 'var(--text-muted)' }}>{inlineBold(line)}</p>
       )
     } else if (/^\|/.test(line) && line.trim().endsWith('|')) {
       // ── Markdown table ──────────────────────────────────────
@@ -433,7 +425,229 @@ function GuidedConfirm({ onYes, onNo }) {
   )
 }
 
-function Message({ msg, onFollowup }) {
+// ── Confirmation fields panel — all fields editable simultaneously ─────────
+function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
+  const isTamil = language === 'ta'
+
+  // Build initial state from current field values
+  const buildInitial = () => {
+    const s = {}
+    for (const f of fields) {
+      if (f.field_type === 'text') {
+        s[f.key] = f.display_value === '—' ? '' : (f.display_value || '')
+      } else if (f.field_type === 'radio') {
+        s[f.key] = f.value || ''
+      } else if (f.field_type === 'checkbox') {
+        s[f.key] = f.value ? f.value.split(',').map(v => v.trim()).filter(Boolean) : []
+      }
+    }
+    return s
+  }
+
+  const [vals, setVals] = React.useState(buildInitial)
+  const [saved, setSaved] = React.useState(false)
+
+  if (!fields || fields.length === 0) return null
+
+  const personalFields = fields.filter(f => f.section === 'personal')
+  const applicationFields = fields.filter(f => f.section === 'application')
+
+  // Get display choices (Tamil if available)
+  function getChoices(f) {
+    if (isTamil && f.choices_ta && f.choices_ta.length === (f.choices || []).length)
+      return f.choices_ta
+    return f.choices || []
+  }
+
+  // Map Tamil display value → English for backend
+  function toEnglish(f, displayVal) {
+    if (!isTamil || !f.choices_ta || !f.choices) return displayVal
+    const idx = f.choices_ta.indexOf(displayVal)
+    return idx >= 0 ? f.choices[idx] : displayVal
+  }
+
+  function handleRadio(key, displayVal) {
+    setVals(prev => ({ ...prev, [key]: displayVal }))
+  }
+
+  function handleCheckbox(f, displayVal) {
+    const englishVal = toEnglish(f, displayVal)
+    setVals(prev => {
+      const cur = prev[f.key] || []
+      const alreadySel = cur.includes(displayVal) || cur.includes(englishVal)
+      return {
+        ...prev,
+        [f.key]: alreadySel
+          ? cur.filter(x => x !== displayVal && x !== englishVal)
+          : [...cur, displayVal],
+      }
+    })
+  }
+
+  function handleText(key, val) {
+    setVals(prev => ({ ...prev, [key]: val }))
+  }
+
+  function handleSaveAll() {
+    if (saved || disabled) return
+
+    // Collect only fields whose value actually changed
+    const changes = []        // English commands for backend
+    const changesDisplay = [] // Tamil/display labels for user bubble
+
+    for (const f of fields) {
+      const cur = vals[f.key]
+      let englishVal = ''
+      let displayVal = ''
+
+      if (f.field_type === 'text') {
+        englishVal = (cur || '').trim()
+        if (!englishVal) continue
+        const orig = f.display_value === '—' ? '' : (f.display_value || '')
+        if (englishVal === orig) continue
+        displayVal = englishVal
+      } else if (f.field_type === 'radio') {
+        if (!cur) continue
+        englishVal = toEnglish(f, cur)
+        if (englishVal === f.value) continue
+        displayVal = cur // already the Tamil display value
+      } else if (f.field_type === 'checkbox') {
+        if (!cur || cur.length === 0) continue
+        englishVal = cur.map(v => toEnglish(f, v)).join(', ')
+        const origVal = f.value || ''
+        if (englishVal === origVal) continue
+        displayVal = cur.join(', ')
+      }
+
+      changes.push(`change ${f.label} to ${englishVal}`)
+      const displayLabel = isTamil && f.label_ta ? f.label_ta : f.label
+      changesDisplay.push(`${displayLabel}: ${displayVal}`)
+    }
+
+    if (changes.length === 0) return
+    setSaved(true)
+    // Build a Tamil display summary for the user bubble
+    const displayLines = changesDisplay.length > 0 ? changesDisplay : changes
+    const display = isTamil
+      ? `✏️ ${displayLines.join(' | ')}`
+      : changes.join(' | ')
+    // Send { command, display } so the backend gets English but the bubble shows Tamil
+    onUpdate({ command: changes.join(' | '), display })
+  }
+
+  function renderField(f) {
+    const label = isTamil && f.label_ta ? f.label_ta : f.label
+    const choices = getChoices(f)
+    const curVal = vals[f.key]
+
+    return (
+      <div key={f.key} className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5 space-y-2">
+        <p className="text-[10px] text-white/40 font-medium">{label}</p>
+
+        {f.field_type === 'text' && (
+          <input
+            type="text"
+            value={curVal || ''}
+            onChange={e => handleText(f.key, e.target.value)}
+            disabled={saved || disabled}
+            placeholder={isTamil ? 'புதிய மதிப்பை உள்ளிடுங்கள்…' : 'Enter value…'}
+            className="w-full bg-white/[0.05] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/25 focus:outline-none focus:border-purple-500/40 disabled:opacity-50"
+          />
+        )}
+
+        {f.field_type === 'radio' && (
+          <div className="flex flex-wrap gap-1.5">
+            {choices.map((c, i) => {
+              const isSelected = curVal === c || curVal === toEnglish(f, c)
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={saved || disabled}
+                  onClick={() => handleRadio(f.key, c)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-all disabled:opacity-50
+                    ${isSelected
+                      ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
+                      : 'border-white/15 text-white/50 hover:border-white/30 hover:text-white/80'
+                    }`}
+                >
+                  {c}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {f.field_type === 'checkbox' && (
+          <div className="flex flex-wrap gap-1.5">
+            {choices.map((c, i) => {
+              const englishVal = toEnglish(f, c)
+              const sel = (curVal || []).includes(c) || (curVal || []).includes(englishVal)
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={saved || disabled}
+                  onClick={() => handleCheckbox(f, c)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 disabled:opacity-50
+                    ${sel
+                      ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
+                      : 'border-white/15 text-white/50 hover:border-white/30 hover:text-white/80'
+                    }`}
+                >
+                  {sel && <span className="text-[9px] text-purple-300">✓</span>}
+                  {c}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderSection(title, sectionFields) {
+    if (sectionFields.length === 0) return null
+    return (
+      <div className="space-y-1.5">
+        <p className="text-[10px] uppercase tracking-widest text-white/25 font-semibold px-1 pt-1">{title}</p>
+        {sectionFields.map(renderField)}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3 space-y-3">
+      <p className="text-[11px] text-white/40 font-semibold">
+        {isTamil ? '📋 விவரங்களை திருத்தவும்' : '📋 Edit your details'}
+      </p>
+
+      {renderSection(isTamil ? 'விண்ணப்ப விவரங்கள்' : 'Application Details', applicationFields)}
+      {renderSection(isTamil ? 'தனிப்பட்ட விவரங்கள்' : 'Personal Details', personalFields)}
+
+      {/* ── Save All button ──────────────────────────────────────────── */}
+      {!disabled && (
+        <div className="pt-2 border-t border-white/[0.06]">
+          <button
+            type="button"
+            onClick={handleSaveAll}
+            disabled={saved}
+            className="w-full py-2 rounded-xl text-sm font-semibold transition-all
+              bg-purple-600/25 border border-purple-500/40 text-purple-200
+              hover:bg-purple-600/40 hover:border-purple-400/60
+              active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saved
+              ? (isTamil ? '✓ சேமிக்கப்பட்டது' : '✓ Saved')
+              : (isTamil ? '💾 அனைத்தையும் சேமி' : '💾 Save All Changes')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Message({ msg, onFollowup, language }) {
   const isUser = msg.role === 'user'
   const [usedFollowup, setUsedFollowup] = React.useState(null)
   const [checkedOptions, setCheckedOptions] = React.useState([])
@@ -446,6 +660,17 @@ function Message({ msg, onFollowup }) {
       <div className="flex justify-end px-2">
         <div className="max-w-[85%] sm:max-w-[70%] text-sm px-4 py-2.5 rounded-2xl rounded-br-sm leading-relaxed bg-neutral-800 text-white">
           {msg.content}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Resume banner — special styled card ────────────────────────────────────
+  if (msg._resumeBanner) {
+    return (
+      <div className="px-2 w-full max-w-2xl">
+        <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 space-y-1">
+          {renderMarkdown(msg.content)}
         </div>
       </div>
     )
@@ -484,7 +709,22 @@ function Message({ msg, onFollowup }) {
           <span className="inline-block w-2 h-4 ml-0.5 bg-white/60 rounded-sm animate-pulse align-middle" />
         )}
 
+        {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
+        {!msg.streaming && msg.confirmation_fields && (
+          <ConfirmationFieldsPanel
+            fields={msg.confirmation_fields}
+            language={language}
+            onUpdate={(updatePayload) => {
+              if (confirmUsed !== null) return
+              setConfirmUsed('save-all')
+              onFollowup(updatePayload, msg.id)
+            }}
+            disabled={confirmUsed !== null}
+          />
+        )}
+
         {/* ── Confirm action buttons (Yes, proceed / No, change something) ── */}
+        {/* Hidden when Save All was used — Save All goes directly to documents */}
         {!msg.streaming && msg.confirm_action && confirmUsed === null && (
           <div className="flex gap-3 pt-4">
             <button
@@ -657,9 +897,13 @@ export default function App() {
   const [docsOpen, setDocsOpen] = useState(false)
   const [agentConsent, setAgentConsent] = useState(null)
   const [consentError, setConsentError] = useState(null)
-  // Active guided question — shown as sliding panel, not in message list
-  const [guidedQuestion, setGuidedQuestion] = useState(null) // { id, content, options, confirm_action }
-  const [guidedDir, setGuidedDir] = useState(1) // 1 = slide in from right, -1 = from left
+  // Voice response toggle - when enabled, agent responds with voice even for text input
+  const [voiceResponseEnabled, setVoiceResponseEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('voice_response_enabled') === 'true'
+    }
+    return false
+  })
   // Language preference — persisted to localStorage
   const [language, setLanguage] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -677,6 +921,21 @@ export default function App() {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 4000)
   }
+  
+  function toggleVoiceResponse() {
+    const newValue = !voiceResponseEnabled
+    setVoiceResponseEnabled(newValue)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voice_response_enabled', newValue.toString())
+    }
+    showToast(
+      newValue 
+        ? 'Voice responses enabled - Agent will speak replies' 
+        : 'Voice responses disabled',
+      'success'
+    )
+  }
+  
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
@@ -703,6 +962,9 @@ export default function App() {
   }
 
   async function createNewSession() {
+    // If the current session is already empty (no messages sent), don't open another new chat
+    if (!started && messages.length === 0) return
+
     try {
       const res = await fetch('/api/chat/sessions', {
         method: 'POST', credentials: 'include',
@@ -715,7 +977,6 @@ export default function App() {
       setSessionId(data.session.id)
       sessionIdRef.current = data.session.id
       setMessages([])
-      setGuidedQuestion(null)
       setStarted(false)
       
       // Now update sessions list
@@ -728,7 +989,6 @@ export default function App() {
     setSessionId(id)
     sessionIdRef.current = id
     setMessages([])  // Clear immediately - this must happen before any async operations
-    setGuidedQuestion(null)
     setStarted(false)
     setLoading(false)
     
@@ -744,12 +1004,73 @@ export default function App() {
         return
       }
       
-      if (data.history?.length) {
+      const historyMsgs = (data.history || []).map((m, i) => ({
+        id: i, role: m.role === 'assistant' ? 'bot' : m.role,
+        content: m.content, sources: [], followups: [],
+      }))
+
+      // ── Resume banner: inject a synthetic bot message if flow is in progress ─
+      const fs = data.flow_state
+      if (fs?.active && fs.current_step && historyMsgs.length > 0) {
+        const isTa = (fs.language || language) === 'ta'
+        const stepLabel = isTa ? fs.step_labels?.ta : fs.step_labels?.en
+        const completedFields = fs.completed_fields || {}
+        const missingFields   = fs.missing_for_step || []
+
+        // Field display names bilingual
+        const FIELD_NAMES = {
+          applicant_type:    { en: 'Applicant Type',            ta: 'விண்ணப்பதாரர் வகை' },
+          submission_mode:   { en: 'Submission Mode',           ta: 'சமர்ப்பிக்கும் முறை' },
+          delivery_mode:     { en: 'PAN Delivery',              ta: 'விநியோக முறை' },
+          aadhaar_photo:     { en: 'Aadhaar Photo',             ta: 'ஆதார் புகைப்படம்' },
+          source_of_income:  { en: 'Source of Income',          ta: 'வருமான மூலம்' },
+          address_for_comm:  { en: 'Address for Communication', ta: 'தொடர்பு முகவரி' },
+          residential_status:{ en: 'Residential Status',        ta: 'குடியிருப்பு நிலை' },
+          rep_assessee:      { en: 'Representative Assessee',   ta: 'பிரதிநிதி நியமனம்' },
+          full_name:         { en: 'Full Name',                 ta: 'முழு பெயர்' },
+          mother_name:       { en: "Mother's Name",             ta: 'தாயின் பெயர்' },
+          email:             { en: 'Email',                     ta: 'மின்னஞ்சல்' },
+          salary:            { en: 'Annual Income',             ta: 'ஆண்டு வருமானம்' },
+        }
+        const fname = (k) => isTa ? (FIELD_NAMES[k]?.ta || k) : (FIELD_NAMES[k]?.en || k)
+
+        // Build filled fields summary
+        const doneLines = Object.entries(completedFields).map(([k, v]) => `✅ **${fname(k)}:** ${v}`)
+        const missLines = missingFields.map(k => `⬜ **${fname(k)}**`)
+
+        let resumeText
+        if (isTa) {
+          resumeText = [
+            `👋 **வரவேற்கிறோம்!** உங்கள் PAN விண்ணப்பம் **${stepLabel}** கட்டத்தில் உள்ளது.`,
+            '',
+            doneLines.length > 0 ? `**நிரப்பிய விவரங்கள்:**\n${doneLines.join('\n')}` : '',
+            missLines.length > 0 ? `\n**இன்னும் தேவையானவை:**\n${missLines.join('\n')}` : '',
+            '',
+            '_"தொடர்" என்று டைப் செய்து தொடரவும் அல்லது மேலே உள்ள புதுப்பி பொத்தான்களை கிளிக் செய்யவும்._',
+          ].filter(Boolean).join('\n')
+        } else {
+          resumeText = [
+            `👋 **Welcome back!** Your PAN application is in progress — you were on the **${stepLabel}** step.`,
+            '',
+            doneLines.length > 0 ? `**Filled so far:**\n${doneLines.join('\n')}` : '',
+            missLines.length > 0 ? `\n**Still needed:**\n${missLines.join('\n')}` : '',
+            '',
+            '_Type "continue" to pick up where you left off, or use the **Update** buttons above to change any field._',
+          ].filter(Boolean).join('\n')
+        }
+
+        const resumeMsg = {
+          id: -1,
+          role: 'bot',
+          content: resumeText,
+          sources: [], followups: [],
+          _resumeBanner: true,
+        }
         setStarted(true)
-        setMessages(data.history.map((m, i) => ({
-          id: i, role: m.role === 'assistant' ? 'bot' : m.role,
-          content: m.content, sources: [], followups: [],
-        })))
+        setMessages([...historyMsgs, resumeMsg])
+      } else if (historyMsgs.length > 0) {
+        setStarted(true)
+        setMessages(historyMsgs)
       } else {
         // Explicitly set empty array for new sessions with no history
         setMessages([])
@@ -809,7 +1130,7 @@ export default function App() {
   // ── TTS playback for voice replies ─────────────────────────────
   async function speakReply(text) {
     if (!text?.trim()) return
-    // Strip markdown so Kokoro reads clean prose
+    // Strip markdown so TTS reads clean prose
     const clean = text
       .replace(/<think>[\s\S]*?<\/think>/g, '')
       .replace(/\*\*/g, '').replace(/\*/g, '')
@@ -824,6 +1145,7 @@ export default function App() {
     try {
       const form = new FormData()
       form.append('text', clean)
+      form.append('language', language) // Use current language setting
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
         credentials: 'include',
@@ -834,13 +1156,14 @@ export default function App() {
       const url = URL.createObjectURL(blob)
       if (audioPlayerRef.current) {
         audioPlayerRef.current.src = url
+        audioPlayerRef.current.onended = () => URL.revokeObjectURL(url)
         audioPlayerRef.current.play().catch(() => {})
       }
     } catch { /* silent — TTS is optional */ }
   }
 
   // ── Messaging ───────────────────────────────────────────────────
-  async function sendMessage(question, { fromVoice = false } = {}) {
+  async function sendMessage(question, { fromVoice = false, displayText = null } = {}) {
     if (!question.trim() || loading) return
 
     // Auto-create session if none active
@@ -867,7 +1190,8 @@ export default function App() {
 
     if (!started) setStarted(true)
     const userMsgId = nextId()
-    setMessages(prev => [...prev, { id: userMsgId, role: 'user', content: question, _sid: requestSid }])
+    // Show displayText in the bubble if provided (e.g. Tamil summary), send question to backend
+    setMessages(prev => [...prev, { id: userMsgId, role: 'user', content: displayText || question, _sid: requestSid }])
     setLoading(true)
 
     // Add a placeholder bot message that we'll stream into
@@ -908,9 +1232,10 @@ export default function App() {
         const reply = data.answer || data.reply || data.error || 'Something went wrong.'
         if (data.title) setSessions(prev => prev.map(s => s.id === requestSid ? { ...s, title: data.title } : s))
         setMessages(prev => prev.map(m =>
-          m.id === botId ? { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: !!(data.options || data.confirm_action), streaming: false, elapsed_ms: data.elapsed_ms } : m
+          m.id === botId ? { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: data.guided === true && !!(data.options || data.confirm_action), streaming: false, elapsed_ms: data.elapsed_ms, confirmation_fields: data.confirmation_fields || null } : m
         ))
-        if (fromVoice && reply) speakReply(reply)
+        // Play voice response if enabled or if input was voice
+        if ((voiceResponseEnabled || fromVoice) && reply) speakReply(reply)
         return
       }
 
@@ -942,7 +1267,7 @@ export default function App() {
             const isGuided = !!(event.options || event.confirm_action)
             setMessages(prev => prev.map(m =>
               m.id === botId
-                ? { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided }
+                ? { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: event.confirmation_fields || null }
                 : m
             ))
 
@@ -972,17 +1297,12 @@ export default function App() {
             ))
 
           } else if (event.type === 'done') {
-            // Route guided messages to the sliding panel
-            setMessages(prev => {
-              const msg = prev.find(m => m.id === botId)
-              if (msg && msg.guided && msg.options) {
-                setGuidedDir(1)
-                setGuidedQuestion({ id: msg.id, content: msg.content, options: msg.options, confirm_action: msg.confirm_action || false })
-                return prev.filter(m => m.id !== botId)
-              }
-              return prev.map(m => m.id === botId ? { ...m, streaming: false, elapsed_ms: event.elapsed_ms } : m)
-            })
-            if (fromVoice && fullText) speakReply(fullText)
+            // Keep guided messages in the normal chat flow — no overlay
+            setMessages(prev => prev.map(m =>
+              m.id === botId ? { ...m, streaming: false, elapsed_ms: event.elapsed_ms } : m
+            ))
+            // Play voice response if enabled or if input was voice
+            if ((voiceResponseEnabled || fromVoice) && fullText) speakReply(fullText)
           }
         }
       }
@@ -1105,6 +1425,7 @@ export default function App() {
               onDelete={deleteSession}
               collapsed={!sidebarOpen}
               onToggle={() => setSidebarOpen(p => !p)}
+              newDisabled={!started && messages.length === 0}
             />
 
             {/* Toast */}
@@ -1127,60 +1448,108 @@ export default function App() {
 
               {/* Top bar */}
               <div className={cn(
-                'fixed top-0 right-0 z-30 flex items-center px-4 sm:px-6 py-4 transition-all duration-200',
+                'fixed top-0 right-0 z-30 flex items-center justify-between gap-2 px-3 sm:px-4 py-3 bg-[#050508]/80 backdrop-blur-md border-b border-white/[0.06] transition-all duration-200',
                 sidebarOpen ? 'md:left-60 left-0' : 'left-0'
               )}>
-                <span className="text-white/70 text-sm font-semibold tracking-widest uppercase mr-auto ml-8">PAN Assistant</span>
+                {/* Left: Title */}
+                <span className="text-white/70 text-xs sm:text-sm font-semibold tracking-widest uppercase whitespace-nowrap ml-8 sm:ml-0">
+                  PAN Assistant
+                </span>
 
-                {/* ── Language switcher ─────────────────────────────── */}
-                <div className="flex items-center gap-0.5 mr-3 bg-white/[0.04] border border-white/[0.08] rounded-lg p-0.5">
-                  {[
-                    { code: 'en', label: 'EN' },
-                    { code: 'hi', label: 'हिं' },
-                    { code: 'ta', label: 'தமி' },
-                  ].map(({ code, label }) => (
-                    <button
-                      key={code}
-                      onClick={() => {
-                        setLanguage(code)
-                        if (typeof window !== 'undefined') localStorage.setItem('pan_lang', code)
-                      }}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-xs font-semibold transition-all',
-                        language === code
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'text-white/40 hover:text-white/70'
-                      )}
-                      title={code === 'en' ? 'English' : code === 'hi' ? 'Hindi' : 'Tamil'}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {user && (
-                  <div className="flex items-center gap-3">
-                    <span className="text-white/60 text-sm hidden sm:block">
-                      {user.display_name || user.email}
-                    </span>
-                    <button
-                      onClick={() => setDocsOpen(true)}
-                      className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white border border-white/[0.1] hover:border-white/30 px-3 py-1.5 rounded-lg transition-all"
-                      title="My encrypted documents"
-                    >
-                      <FolderLock size={13} />
-                      <span className="hidden sm:inline">Documents</span>
-                    </button>
-                    <button onClick={handleLogout}
-                      className="text-sm text-white/60 hover:text-white border border-white/20 hover:border-white/40 px-4 py-1.5 rounded-lg transition-all">
-                      Sign out
-                    </button>
+                {/* Right: Controls */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* ── Language switcher ─────────────────────────────── */}
+                  <div className="flex items-center gap-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg p-0.5">
+                    {[
+                      { code: 'en', label: 'EN' },
+                      { code: 'hi', label: 'हिं' },
+                      { code: 'ta', label: 'தமி' },
+                    ].map(({ code, label }) => (
+                      <button
+                        key={code}
+                        onClick={() => {
+                          setLanguage(code)
+                          if (typeof window !== 'undefined') localStorage.setItem('pan_lang', code)
+                        }}
+                        className={cn(
+                          'px-2 sm:px-2.5 py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all whitespace-nowrap',
+                          language === code
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-white/40 hover:text-white/70'
+                        )}
+                        title={code === 'en' ? 'English' : code === 'hi' ? 'Hindi' : 'Tamil'}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                )}
+
+                  {/* ── Voice Response Toggle ─────────────────────────── */}
+                  <button
+                    onClick={toggleVoiceResponse}
+                    className={cn(
+                      'flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-semibold transition-all whitespace-nowrap',
+                      voiceResponseEnabled
+                        ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30'
+                        : 'bg-white/[0.04] border border-white/[0.08] text-white/40 hover:text-white/70 hover:border-white/20'
+                    )}
+                    title={voiceResponseEnabled ? 'Voice responses enabled - Click to disable' : 'Voice responses disabled - Click to enable'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                      {voiceResponseEnabled ? (
+                        <>
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                          <line x1="12" y1="19" x2="12" y2="22"/>
+                        </>
+                      ) : (
+                        <>
+                          <line x1="2" y1="2" x2="22" y2="22"/>
+                          <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/>
+                          <path d="M5 10v2a7 7 0 0 0 12 5"/>
+                          <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/>
+                          <path d="M9 9v3a3 3 0 0 0 5.12 2.12"/>
+                          <line x1="12" y1="19" x2="12" y2="22"/>
+                        </>
+                      )}
+                    </svg>
+                    <span className="hidden md:inline">
+                      {voiceResponseEnabled ? 'Voice On' : 'Voice Off'}
+                    </span>
+                  </button>
+
+                  {user && (
+                    <>
+                      {/* User email - hidden on small screens */}
+                      <span className="text-white/60 text-xs hidden lg:block max-w-[120px] truncate">
+                        {user.display_name || user.email}
+                      </span>
+                      
+                      {/* Documents button */}
+                      <button
+                        onClick={() => setDocsOpen(true)}
+                        className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-white/50 hover:text-white border border-white/[0.1] hover:border-white/30 px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap"
+                        title="My encrypted documents"
+                      >
+                        <FolderLock size={12} className="flex-shrink-0" />
+                        <span className="hidden md:inline">Docs</span>
+                      </button>
+                      
+                      {/* Sign out button */}
+                      <button 
+                        onClick={handleLogout}
+                        className="text-[10px] sm:text-xs text-white/60 hover:text-white border border-white/20 hover:border-white/40 px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap"
+                      >
+                        <span className="hidden sm:inline">Sign out</span>
+                        <span className="sm:hidden">Out</span>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Scrollable messages */}
-              <div className="flex flex-col flex-1 pt-16 pb-40 px-4 sm:px-6">
+              <div className="flex flex-col flex-1 pt-20 pb-40 px-4 sm:px-6">
                 <div className="w-full max-w-2xl mx-auto flex flex-col flex-1">
 
                   {/* Landing */}
@@ -1204,60 +1573,20 @@ export default function App() {
                   {/* Messages */}
                   <div className="space-y-5 sm:space-y-6">
                     {messages.map(msg => (
-                      <Message key={msg.id} msg={msg} onFollowup={(q, msgId) => {
+                      <Message key={msg.id} msg={msg} language={language} onFollowup={(q, msgId) => {
                         if (msgId) setMessages(prev => prev.map(m => m.id === msgId ? { ...m, followupUsed: true } : m))
-                        sendMessage(q)
+                        // q can be a string or { command, display } object from Save All
+                        if (q && typeof q === 'object' && q.command) {
+                          sendMessage(q.command, { displayText: q.display })
+                        } else {
+                          sendMessage(q)
+                        }
                       }} />
                     ))}
                     <div ref={bottomRef} />
                   </div>
                 </div>
               </div>
-
-              {/* Guided flow panel — slides horizontally between questions */}
-              <AnimatePresence mode="wait">
-                {guidedQuestion && (
-                  <div
-                    className={cn(
-                      'fixed bottom-0 right-0 z-25 flex justify-center px-4 sm:px-6 pb-36 sm:pb-40 transition-all duration-200',
-                      sidebarOpen ? 'md:left-60 left-0' : 'left-0'
-                    )}
-                  >
-                    <div className="w-full max-w-2xl overflow-hidden">
-                      <motion.div
-                        key={guidedQuestion.id}
-                        initial={{ x: guidedDir * 60, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{ x: guidedDir * -60, opacity: 0 }}
-                        transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                        className="bg-[#0f0f18]/95 border border-white/[0.08] rounded-2xl px-5 py-4 backdrop-blur-sm shadow-2xl"
-                      >
-                        <div className="text-sm text-white/90 mb-3 leading-relaxed">
-                          {renderMarkdown(guidedQuestion.content)}
-                        </div>
-                        {guidedQuestion.options && guidedQuestion.options.type === 'email_confirm' && (
-                          <EmailConfirmOptions
-                            opts={guidedQuestion.options}
-                            onSelect={(val) => { setGuidedDir(1); setGuidedQuestion(null); sendMessage(val) }}
-                          />
-                        )}
-                        {guidedQuestion.options && guidedQuestion.options.type !== 'email_confirm' && (
-                          <GuidedOptions
-                            opts={guidedQuestion.options}
-                            onSelect={(val) => { setGuidedDir(1); setGuidedQuestion(null); sendMessage(val) }}
-                          />
-                        )}
-                        {guidedQuestion.confirm_action && (
-                          <GuidedConfirm
-                            onYes={() => { setGuidedDir(1); setGuidedQuestion(null); sendMessage('Yes, proceed') }}
-                            onNo={() => { setGuidedDir(1); setGuidedQuestion(null); sendMessage('No, I need to change something') }}
-                          />
-                        )}
-                      </motion.div>
-                    </div>
-                  </div>
-                )}
-              </AnimatePresence>
 
               {/* Fixed input — anchored to main area */}
               <div
@@ -1304,6 +1633,7 @@ export default function App() {
                     onDraftChange={(val) =>
                       setDrafts(prev => ({ ...prev, [sessionId]: val }))
                     }
+                    language={language}
                   />
                 </div>
               </div>

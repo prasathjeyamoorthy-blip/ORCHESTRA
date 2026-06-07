@@ -100,7 +100,8 @@ class _IndicTrans2Engine:
             self._available = True
             print(f"[translator] IndicTrans2 ready on {device} ✅")
         except Exception as e:
-            print(f"[translator] IndicTrans2 not available ({e}). Falling back to deep-translator.")
+            # Silently fall back to deep-translator (which works well for Tamil/Hindi)
+            # To enable IndicTrans2: pip install transformers torch
             self._available = False
 
     # IndicTrans2 language codes
@@ -283,10 +284,21 @@ def translate_response(text: str, target_lang: str) -> str:
 
 
 def translate_followups(followups: list, target_lang: str) -> list:
-    """Translate followup suggestion chips (short phrases)."""
+    """
+    Translate followup suggestion chips (short phrases).
+    These are the button texts shown to users.
+    """
     if target_lang == "en" or not followups:
         return followups
-    return [translate_response(f, target_lang) for f in followups]
+    
+    print(f"[translator] Translating {len(followups)} followups to {target_lang}")
+    translated = []
+    for f in followups:
+        translated_f = translate_response(f, target_lang)
+        print(f"[translator]   '{f}' → '{translated_f}'")
+        translated.append(translated_f)
+    
+    return translated
 
 
 def translate_options(options: dict, target_lang: str) -> dict:

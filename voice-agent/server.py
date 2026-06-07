@@ -33,6 +33,7 @@ async def startup():
     import asyncio
     from faster_whisper import WhisperModel
     from core.tts import TextToSpeech
+    from core.voice_receptionist import VoiceReceptionist
 
     print("  Loading faster-whisper (base.en)...")
     # Load in thread pool so it doesn't block the event loop
@@ -44,6 +45,8 @@ async def startup():
     app.state.tts = await loop.run_in_executor(None, TextToSpeech)
     app.state.llm = OllamaLLM()
     app.state.rag = RAGRetriever()
+    app.state.receptionist = VoiceReceptionist()
+    print("  ✅ Voice receptionist ready")
 
 
 app.add_middleware(
@@ -203,13 +206,22 @@ async def speech_to_text(audio: UploadFile = File(...)):
 
 
 @app.post("/api/voice/speak")
-async def voice_speak(audio: UploadFile = File(...)):
+async def voice_speak(
+    audio: UploadFile = File(...),
+    user_id: str = "voice_user",
+    session_id: str = None
+):
     """
-    Full pipeline: audio blob → STT → RAG+LLM → TTS → audio/wav response.
+    Full pipeline: audio blob → STT → PAN Flow / RAG+LLM → TTS → audio/wav response.
     """
     data = await audio.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio file")
+
+    # Generate session_id if not provided
+    if not session_id:
+        import time
+        session_id = f"voice_{user_id}_{int(time.time())}"
 
     # 1. STT — opus direct path, no quality loss
     transcript = _transcribe_upload(data, audio.content_type or "")
@@ -218,9 +230,21 @@ async def voice_speak(audio: UploadFile = File(...)):
     if transcript == "HALLUCINATION":
         raise HTTPException(status_code=422, detail="Couldn't make out what you said. Please speak clearly into the mic.")
 
-    # 2. RAG + LLM
-    context = app.state.rag.get_context(transcript)
-    reply = app.state.llm.chat(transcript, context=context)
+    # 2. Try PAN registration flow first
+    guided_response = app.state.receptionist.process_voice_query(
+        user_text=transcript,
+        session_id=session_id,
+        user_id=user_id,
+        conversation_history=[]
+    )
+
+    if guided_response and guided_response.get("guided"):
+        # Guided flow response
+        reply = guided_response["text"]
+    else:
+        # Standard RAG + LLM
+        context = app.state.rag.get_context(transcript)
+        reply = app.state.llm.chat(transcript, context=context)
 
     # 3. TTS
     all_pcm = app.state.tts.synthesise_full(reply)
@@ -234,6 +258,7 @@ async def voice_speak(audio: UploadFile = File(...)):
             "transcript": transcript,
             "reply": reply,
             "tts_failed": True,
+            "session_id": session_id,
         })
 
     wav_bytes = _pcm_to_wav_bytes(all_pcm, sample_rate=config.TTS_SAMPLE_RATE)
@@ -244,6 +269,7 @@ async def voice_speak(audio: UploadFile = File(...)):
         headers={
             "X-Transcript": urllib.parse.quote(transcript),
             "X-Reply":      urllib.parse.quote(reply),
-            "Access-Control-Expose-Headers": "X-Transcript, X-Reply",
+            "X-Session-Id": session_id,
+            "Access-Control-Expose-Headers": "X-Transcript, X-Reply, X-Session-Id",
         },
     )

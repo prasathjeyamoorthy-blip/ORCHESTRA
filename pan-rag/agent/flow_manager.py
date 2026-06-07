@@ -62,6 +62,10 @@ class FlowManager:
             # Confirmation flow
             "details_confirmed"  : False,  # True once user confirms the summary
             "pending_modification": None,  # field name user wants to change
+            # Mid-flow sequential update queue
+            "_mid_flow_queue"    : [],     # list of field names to update one by one
+            "_mid_flow_pending_field": None,  # legacy single-field compat
+            "_mid_flow_return_step": None,
             "doc_confirmation_pending": False,
         }
 
@@ -149,13 +153,62 @@ class FlowManager:
         return self.state["current_step"]
 
     def advance_step(self):
+        """
+        Advance to the next step in the flow.
+        If the next step is already answered, skip it automatically.
+        """
         service = get_service(self.state["service_id"])
         steps   = service["steps"]
         current = self.state["current_step"]
+        
+        # Helper to check if a step is already answered
+        def _is_answered(step: str) -> bool:
+            s = self.state
+            if step == "applicant_type":
+                return bool(s.get("applicant_type"))
+            if step == "submission_mode":
+                return bool(s.get("submission_mode"))
+            if step == "delivery_mode":
+                return bool(s.get("delivery_mode"))
+            if step == "aadhaar_photo":
+                return s.get("aadhaar_photo") is not None
+            if step == "source_of_income":
+                return bool(s.get("source_of_income"))
+            if step == "address_for_comm":
+                return bool(s.get("address_for_comm"))
+            if step == "residential_status":
+                return bool(s.get("residential_status"))
+            if step == "rep_assessee":
+                return s.get("rep_assessee") is not None
+            if step == "details_collection":
+                # Check if all required details are collected
+                required = ["full_name", "mother_name", "email", "salary"]
+                return all(s.get(field) for field in required)
+            # confirmation, documents, summary — never skip
+            return False
+        
         if current in steps:
             idx = steps.index(current)
+            # Move to next step
             if idx + 1 < len(steps):
-                self.state["current_step"] = steps[idx + 1]
+                next_idx = idx + 1
+                # Skip steps that are already answered
+                while next_idx < len(steps):
+                    next_step = steps[next_idx]
+                    # Always stop at confirmation, documents, summary
+                    if next_step in ("confirmation", "documents", "summary"):
+                        self.state["current_step"] = next_step
+                        break
+                    # If step is not answered, stop here
+                    if not _is_answered(next_step):
+                        self.state["current_step"] = next_step
+                        break
+                    # Step is already answered, skip to next
+                    print(f"[FlowManager] Skipping already answered step: {next_step}")
+                    next_idx += 1
+                else:
+                    # Reached end of steps
+                    self.state["complete"] = True
             else:
                 self.state["complete"] = True
         self.save()

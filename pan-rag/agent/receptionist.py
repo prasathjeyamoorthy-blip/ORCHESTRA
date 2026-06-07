@@ -4,6 +4,8 @@ from agent.service_flows import detect_service, get_service, SERVICES
 from agent.flow_manager import FlowManager
 from agent.user_profile import prefill_flow_from_profile, save_flow_to_profile
 from agent.document_access import request_document_access, verify_document_access
+from intent.language_detector import detect_language_with_confidence, get_language_name
+from generation.multilingual_templates import get_template
 
 
 # ── Off-topic detector ────────────────────────────────────────────
@@ -244,13 +246,15 @@ def _build_individual_preferences_review_prompt(saved_answers: dict) -> str:
     return "\n".join(lines)
 
 
-def _display_user_profile(user_id: str, flow: FlowManager, account_email: str = "", session_id: str = "") -> dict:
+def _display_user_profile(user_id: str, flow: FlowManager, account_email: str = "", session_id: str = "", language: str = "en") -> dict:
     """
     Display all information collected about the user from profile, current flow, and recent conversations.
     """
     from agent.user_profile import get_user_profile
     from memory.memory_manager import MemoryManager
-    
+
+    ta = language == "ta"
+
     # Collect information from multiple sources
     profile = get_user_profile(user_id) if user_id else None
     flow_state = flow.state
@@ -260,103 +264,114 @@ def _display_user_profile(user_id: str, flow: FlowManager, account_email: str = 
     recent_context = memory.get_cached_context(session_id, user_id) if session_id else ""
     
     # Build the display
-    lines = ["Here's what I know about you so far: 📋", ""]
+    header = "இதுவரை நான் உங்களைப் பற்றி அறிந்தவை: 📋" if ta else "Here's what I know about you so far: 📋"
+    lines = [header, ""]
     has_info = False
     
     # Personal Details
     personal_details = []
     
-    # Full name (from flow or profile)
     full_name = flow_state.get("full_name") or (profile.get("full_name") if profile else None)
     if full_name:
-        personal_details.append(f"**Full name:** {full_name}")
+        lbl = "**முழு பெயர்:**" if ta else "**Full name:**"
+        personal_details.append(f"{lbl} {full_name}")
         has_info = True
     
-    # Mother's name (from flow or profile)
     mother_name = flow_state.get("mother_name") or (profile.get("mother_name") if profile else None)
     if mother_name:
-        personal_details.append(f"**Mother's name:** {mother_name}")
+        lbl = "**தாயின் பெயர்:**" if ta else "**Mother's name:**"
+        personal_details.append(f"{lbl} {mother_name}")
         has_info = True
     
-    # Email (from flow, profile, or account)
     email = flow_state.get("email") or (profile.get("email") if profile else None) or account_email
     if email:
-        personal_details.append(f"**Email:** {email}")
+        lbl = "**மின்னஞ்சல்:**" if ta else "**Email:**"
+        personal_details.append(f"{lbl} {email}")
         has_info = True
     
-    # Phone (from flow or profile)
     phone = flow_state.get("phone") or (profile.get("phone") if profile else None)
     if phone:
-        personal_details.append(f"**Phone:** {phone}")
+        lbl = "**தொலைபேசி:**" if ta else "**Phone:**"
+        personal_details.append(f"{lbl} {phone}")
         has_info = True
     
-    # Annual income (from flow or profile)
     salary = flow_state.get("salary") or (profile.get("annual_income") if profile else None)
     if salary:
-        personal_details.append(f"**Annual income:** {salary}")
+        lbl = "**ஆண்டு வருமானம்:**" if ta else "**Annual income:**"
+        personal_details.append(f"{lbl} {salary}")
         has_info = True
     
     if personal_details:
-        lines.append("**Personal Details:**")
+        sec_hdr = "**தனிப்பட்ட விவரங்கள்:**" if ta else "**Personal Details:**"
+        lines.append(sec_hdr)
         lines.extend(personal_details)
         lines.append("")
     
     # PAN Application Preferences
     pan_prefs = []
     
-    # Get preferences from flow or profile
     pan_preferences = profile.get("pan_preferences", {}) if profile else {}
     if isinstance(pan_preferences, str):
         try:
             import json
             pan_preferences = json.loads(pan_preferences)
-        except:
+        except Exception:
             pan_preferences = {}
     
     submission_mode = flow_state.get("submission_mode") or pan_preferences.get("submission_mode")
     if submission_mode:
-        pan_prefs.append(f"**Submission mode:** {submission_mode}")
+        lbl = "**சமர்ப்பிக்கும் முறை:**" if ta else "**Submission mode:**"
+        pan_prefs.append(f"{lbl} {submission_mode}")
         has_info = True
     
     delivery_mode = flow_state.get("delivery_mode") or pan_preferences.get("delivery_mode")
     if delivery_mode:
         delivery_text = "Physical + e-PAN" if delivery_mode == "physical_and_soft" else "e-PAN only" if delivery_mode == "soft_only" else delivery_mode
-        pan_prefs.append(f"**PAN delivery:** {delivery_text}")
+        lbl = "**PAN விநியோகம்:**" if ta else "**PAN delivery:**"
+        pan_prefs.append(f"{lbl} {delivery_text}")
         has_info = True
     
     aadhaar_photo = flow_state.get("aadhaar_photo")
     if aadhaar_photo is None and pan_preferences:
         aadhaar_photo = pan_preferences.get("aadhaar_photo")
     if aadhaar_photo is not None:
-        pan_prefs.append(f"**Aadhaar photo on PAN:** {'Yes' if aadhaar_photo else 'No'}")
+        lbl = "**ஆதார் புகைப்படம்:**" if ta else "**Aadhaar photo on PAN:**"
+        val = ("ஆம்" if aadhaar_photo else "இல்லை") if ta else ("Yes" if aadhaar_photo else "No")
+        pan_prefs.append(f"{lbl} {val}")
         has_info = True
     
     source_of_income = flow_state.get("source_of_income") or pan_preferences.get("source_of_income")
     if source_of_income:
         if isinstance(source_of_income, list):
             source_of_income = ", ".join(source_of_income)
-        pan_prefs.append(f"**Source of income:** {source_of_income}")
+        lbl = "**வருமான மூலம்:**" if ta else "**Source of income:**"
+        pan_prefs.append(f"{lbl} {source_of_income}")
         has_info = True
     
     address_for_comm = flow_state.get("address_for_comm") or pan_preferences.get("address_for_comm")
     if address_for_comm:
-        pan_prefs.append(f"**Address for communication:** {address_for_comm}")
+        lbl = "**தொடர்பு முகவரி:**" if ta else "**Address for communication:**"
+        pan_prefs.append(f"{lbl} {address_for_comm}")
         has_info = True
     
     residential_status = flow_state.get("residential_status") or pan_preferences.get("residential_status")
     if residential_status:
-        pan_prefs.append(f"**Residential status:** {residential_status}")
+        lbl = "**குடியிருப்பு நிலை:**" if ta else "**Residential status:**"
+        pan_prefs.append(f"{lbl} {residential_status}")
         has_info = True
     
     rep_assessee = flow_state.get("rep_assessee")
     if rep_assessee is None and pan_preferences:
         rep_assessee = pan_preferences.get("rep_assessee")
     if rep_assessee is not None:
-        pan_prefs.append(f"**Representative Assessee:** {'Yes' if rep_assessee else 'No'}")
+        lbl = "**பிரதிநிதி நியமனம்:**" if ta else "**Representative Assessee:**"
+        val = ("ஆம்" if rep_assessee else "இல்லை") if ta else ("Yes" if rep_assessee else "No")
+        pan_prefs.append(f"{lbl} {val}")
         has_info = True
     
     if pan_prefs:
-        lines.append("**PAN Application Preferences:**")
+        sec_hdr = "**விண்ணப்ப விவரங்கள்:**" if ta else "**PAN Application Preferences:**"
+        lines.append(sec_hdr)
         lines.extend(pan_prefs)
         lines.append("")
     
@@ -365,38 +380,48 @@ def _display_user_profile(user_id: str, flow: FlowManager, account_email: str = 
         current_step = flow.get_current_step()
         service_id = flow_state.get("service_id")
         if service_id:
-            lines.append("**Current Application Status:**")
-            lines.append(f"You have an in-progress application at step: **{current_step}**")
+            if ta:
+                lines.append("**தற்போதைய விண்ணப்ப நிலை:**")
+                lines.append(f"உங்கள் விண்ணப்பம் தொடர்கிறது: **{current_step}**")
+            else:
+                lines.append("**Current Application Status:**")
+                lines.append(f"You have an in-progress application at step: **{current_step}**")
             lines.append("")
             has_info = True
     
     # If no information found
     if not has_info:
-        # Check if there's any conversation history
         if recent_context and len(recent_context) > 50:
-            return {
-                "answer": "I can see we've chatted before, but I don't have any saved details yet. As we continue our conversation and you share information, I'll remember it to help you better.\n\nWould you like to start a PAN application or ask me anything about PAN services?",
-                "sources": [],
-                "followups": ["Apply for new PAN", "Check PAN status", "Link Aadhaar with PAN"],
-                "guided": False,
-            }
+            msg = ("முன்பு நாம் பேசியிருக்கிறோம், ஆனால் இன்னும் விவரங்கள் சேமிக்கப்படவில்லை. தொடர்ந்து பேசும்போது நினைவில் வைப்பேன்.\n\nPAN விண்ணப்பம் தொடங்கவா?"
+                   if ta else
+                   "I can see we've chatted before, but I don't have any saved details yet. As we continue our conversation and you share information, I'll remember it to help you better.\n\nWould you like to start a PAN application or ask me anything about PAN services?")
         else:
-            return {
-                "answer": "I don't have any information about you yet. As we chat and you share details, I'll remember them to make our conversations more helpful.\n\nWould you like to start a PAN application or ask me anything about PAN services?",
-                "sources": [],
-                "followups": ["Apply for new PAN", "Check PAN status", "Link Aadhaar with PAN"],
-                "guided": False,
-            }
+            msg = ("இன்னும் உங்களைப் பற்றி தகவல்கள் இல்லை. நீங்கள் பகிரும்போது நினைவில் வைப்பேன்.\n\nPAN விண்ணப்பம் தொடங்கவா?"
+                   if ta else
+                   "I don't have any information about you yet. As we chat and you share details, I'll remember them to make our conversations more helpful.\n\nWould you like to start a PAN application or ask me anything about PAN services?")
+        return {
+            "answer": msg,
+            "sources": [],
+            "followups": ["Apply for new PAN", "Check PAN status", "Link Aadhaar with PAN"],
+            "guided": False,
+        }
     
     # Add footer
     lines.append("---")
-    lines.append("This information is saved securely and will be used to help you with PAN services.")
-    lines.append("\nWould you like to continue with your application or start a new one?")
+    if ta:
+        lines.append("இந்த தகவல்கள் பாதுகாப்பாக சேமிக்கப்பட்டுள்ளன.")
+        lines.append("\nதொடர்ந்து விண்ணப்பிக்கவா அல்லது புதுதாக தொடங்கவா?")
+    else:
+        lines.append("This information is saved securely and will be used to help you with PAN services.")
+        lines.append("\nWould you like to continue with your application or start a new one?")
     
+    followups = (["விண்ணப்பத்தை தொடரவும்", "புதிய விண்ணப்பம்", "PAN நிலையை சரிபார்க்கவும்"]
+                 if ta else
+                 ["Continue application", "Start new application", "Check PAN status"])
     return {
         "answer": "\n".join(lines),
         "sources": [],
-        "followups": ["Continue application", "Start new application", "Check PAN status"],
+        "followups": followups,
         "guided": False,
     }
 
@@ -412,6 +437,36 @@ def handle_message(
     user_id: str = None,
 ) -> dict | None:
     flow = FlowManager(session_id, user_id or "anonymous")
+    
+    # ── Detect language from user input ──────────────────────────────────────────
+    # Priority: explicit UI selection > stored preference > detected from text
+    
+    if language and language in ("ta", "hi", "en"):
+        # User explicitly selected language from UI - respect that choice!
+        print(f"[Language] Using explicit selection: {get_language_name(language)}")
+        # Update stored preference
+        flow.state["preferred_language"] = language
+        flow.save()
+    elif flow.state.get("preferred_language"):
+        # Use previously stored language preference
+        language = flow.state["preferred_language"]
+        print(f"[Language] Using stored preference: {get_language_name(language)}")
+    else:
+        # No explicit choice - detect from user's text
+        detected_lang, confidence = detect_language_with_confidence(question)
+        if confidence > 0.3:  # Use detected language if confidence is high enough
+            language = detected_lang
+            flow.state["preferred_language"] = language
+            flow.save()
+            print(f"[Language] Detected {get_language_name(language)} (confidence: {confidence:.2%})")
+        else:
+            # Default to English if no detection
+            language = "en"
+            print(f"[Language] Defaulting to English")
+    
+    # Always store current language in flow state for use by other functions
+    flow.state["_current_language"] = language
+    flow.save()
     
     # ── ALWAYS prefill from user_context if provided (most up-to-date source) ──────
     # Node sends this on EVERY request with latest profile data from Supabase
@@ -448,9 +503,16 @@ def handle_message(
             flow.save()
 
     # ── Handle "show me what you know about me" query ────────────
+    # Matches English and Tamil (romanized) patterns
     _show_profile = re.compile(
         r"\b(show|tell|what|display|list)\s+(me\s+)?(what|everything|all|info|information|details|data)\s+"
-        r"(you\s+)?(know|have|collected|saved|stored|remember)\s+(about\s+me|on\s+me|for\s+me)",
+        r"(you\s+)?(know|have|collected|saved|stored|remember)\s+(about\s+me|on\s+me|for\s+me)"
+        # Tamil romanized patterns: "enna details koduthen", "na enna details lam koduthen"
+        # "koduthen" = I gave, "solren" = I told, "share panninen" = I shared
+        r"|\b(enna|yenna)\s+(details?|info|thakaval|thevayal|visarangal)\s*(lam|ellam|all)?\s*"
+        r"(koduthen|solren|sonnein|share\s*panninen|kuduthen|seithen|ketkiren)\b"
+        r"|\b(naan|naa)\s+(enna|yenna)\s+(details?|thakaval|visarangal)\s*(koduthen|solren|seithen)\b"
+        r"|\b(enna|yenna)\s+(details?|info)\s+(irukku|iruku|irukkira)\b",
         re.IGNORECASE
     )
     if _show_profile.search(question):
@@ -912,7 +974,7 @@ def _advance_after_answer(flow: FlowManager, user_id: str = None) -> dict:
         return _ask_step(flow)
 
 
-def _ask_step(flow: FlowManager) -> dict:
+def _ask_step(flow: FlowManager, language: str = 'en') -> dict:
     """Return the question + options for the current step."""
     step = flow.get_current_step()
 
@@ -1051,6 +1113,317 @@ def _ask_step(flow: FlowManager) -> dict:
 def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: str = None) -> dict:
     step = flow.get_current_step()
     inp  = user_input.strip()
+    
+    # ── TANGLISH DETECTION & CONVERSION ───────────────────────────────────────
+    # If Tamil mode, check for Tanglish (Tamil written in English) and convert
+    if language == "ta":
+        from agent.transliterator import normalize_for_field_detection
+        inp = normalize_for_field_detection(inp, language)
+        print(f"[DEBUG] After Tanglish normalization: {inp}")
+
+    # ── INLINE FIELD UPDATE INTERCEPT (any step) ──────────────────────────────
+    # Catches messages from the confirmation-panel's inline edit buttons, e.g.
+    #   "change Source of Income to Capital Gains, Income from Business / Profession"
+    #   "change Aadhaar Photo on PAN to Yes"
+    #   "change Annual Income to 50000"
+    # Also handles batched save-all messages joined by " | ", e.g.
+    #   "change Source of Income to Salary | change Aadhaar Photo on PAN to No | ..."
+    # These always use the exact English field label sent by FieldEditor in App.jsx.
+    # We intercept before step-specific logic so the current step doesn't interfere.
+    _INLINE_EDIT_RE = re.compile(
+        r"^change\s+(Source of Income|Submission Mode|PAN Delivery|Aadhaar Photo on PAN"
+        r"|Address for Communication|Residential Status|Representative Assessee"
+        r"|Full Name \(as in Aadhaar\)|Full Name|Mother's Name|Annual Income|Email)\s+to\s+(.+)$",
+        re.IGNORECASE,
+    )
+    _LABEL_TO_KEY = {
+        "source of income":          "source_of_income",
+        "submission mode":           "submission_mode",
+        "pan delivery":              "delivery_mode",
+        "aadhaar photo on pan":      "aadhaar_photo",
+        "address for communication": "address_for_comm",
+        "residential status":        "residential_status",
+        "representative assessee":   "rep_assessee",
+        "full name (as in aadhaar)": "full_name",
+        "full name":                 "full_name",
+        "mother's name":             "mother_name",
+        "annual income":             "salary",
+        "email":                     "email",
+    }
+
+    # Check if this is a batched save-all message ("change X to Y | change A to B | ...")
+    _parts = [p.strip() for p in inp.split(" | ") if p.strip()]
+    _all_inline = _parts and all(_INLINE_EDIT_RE.match(p) for p in _parts)
+
+    # Also handle single inline edit
+    _single_inline = not _all_inline and _INLINE_EDIT_RE.match(inp)
+
+    if _all_inline or _single_inline:
+        items = _parts if _all_inline else [inp]
+        any_updated = False
+        for item in items:
+            m = _INLINE_EDIT_RE.match(item)
+            if not m:
+                continue
+            _field_label = m.group(1).strip()
+            _field_value = m.group(2).strip()
+            _field_key = _LABEL_TO_KEY.get(_field_label.lower())
+            if _field_key:
+                print(f"[DEBUG] Inline edit intercept: {_field_key} = {_field_value!r}")
+                _apply_field_update(flow, _field_key, _field_value, _field_value)
+                any_updated = True
+
+        if any_updated:
+            flow.state["pending_modification"] = None
+            flow.state["details_confirmed"] = True
+
+            # ── Batched Save-All (multiple fields joined by " | "): go straight to documents ──
+            # Single-field edits go back to confirmation for review first.
+            is_batch = _all_inline and len(items) > 1
+            if is_batch or step in ("confirmation", "documents", "summary"):
+                # Advance to documents step and confirm
+                if step not in ("documents", "summary"):
+                    flow.advance_step()
+                flow.save()
+                try:
+                    if user_id:
+                        save_flow_to_profile(user_id, flow.state)
+                except Exception:
+                    pass
+                current_language = flow.state.get("_current_language", language)
+                doc_text = _ask_for_documents(flow, current_language)
+                return {
+                    "answer": doc_text,
+                    "sources": [], "followups": [], "guided": True,
+                    "step": "documents",
+                    "flow_confirmed": True,
+                    "flow_data": {
+                        "full_name":          flow.state.get("full_name"),
+                        "mother_name":        flow.state.get("mother_name"),
+                        "email":              flow.state.get("email"),
+                        "salary":             flow.state.get("salary"),
+                        "applicant_type":     flow.state.get("applicant_type"),
+                        "submission_mode":    flow.state.get("submission_mode"),
+                        "delivery_mode":      flow.state.get("delivery_mode"),
+                        "aadhaar_photo":      flow.state.get("aadhaar_photo"),
+                        "source_of_income":   flow.state.get("source_of_income"),
+                        "address_for_comm":   flow.state.get("address_for_comm"),
+                        "residential_status": flow.state.get("residential_status"),
+                        "rep_assessee":       flow.state.get("rep_assessee"),
+                    },
+                }
+
+            # ── Single-field edit at a non-confirmation step: resume that step ──
+            flow.save()
+            resp = _ask_step(flow)
+            if resp:
+                resp["answer"] = "✓ Details updated.\n\n" + resp["answer"]
+            return resp or _build_confirmation(flow)
+
+    # ── GLOBAL MID-FLOW UPDATE INTERCEPT ──────────────────────────────────────
+    # Handles field update requests at any collection step, with a sequential queue.
+    # "update address for communication and pan delivery"
+    #   → shows address options → user picks → shows pan delivery options → user picks → resumes
+    _COLLECTION_STEPS = {
+        "submission_mode", "delivery_mode", "aadhaar_photo", "source_of_income",
+        "address_for_comm", "residential_status", "rep_assessee",
+        "details_collection", "documents", "confirmation",
+    }
+
+    def _field_is_set(field: str) -> bool:
+        v = flow.state.get(field)
+        return v is not None
+
+    # Field keyword patterns for detecting mentioned-but-no-value fields
+    # English + Tamil patterns
+    _FIELD_KEYWORDS = {
+        "full_name":          r"\b(full\s+name|my\s+name|name\s+on\s+aadhaar|^name$|பெயர்|முழு\s*பெயர்|என்\s*பெயர்)\b",
+        "mother_name":        r"\b(mother|mom|mum|தாய்|அம்மா|தாயின்\s*பெயர்)\b",
+        "email":              r"\b(email|mail|gmail|மின்னஞ்சல்|மெயில்)\b",
+        "salary":             r"\b(salary|annual\s+income|சம்பளம்|வருமானம்|ஆண்டு\s*வருமானம்)\b",
+        "submission_mode":    r"\b(submission\s+mode|submit\s+mode|சமர்ப்பிப்பு\s*முறை|சமர்ப்பிக்கும்\s*முறை)\b",
+        "delivery_mode":      r"\b(pan\s+delivery|delivery\s+mode|card\s+delivery|விநியோக\s*முறை|பான்\s*விநியோகம்)\b",
+        "aadhaar_photo":      r"\b(aadhaar\s+photo|photo\s+on\s+pan|ஆதார்\s*புகைப்படம்|புகைப்படம்)\b",
+        "source_of_income":   r"\b(source\s+of\s+income|income\s+source|வருமான\s*ஆதாரம்|வருமானம்\s*வகை)\b",
+        "address_for_comm":   r"\b(address\s+for\s+comm(unication)?|communication\s+address|தொடர்பு\s*முகவரி|முகவரி)\b",
+        "residential_status": r"\b(residential\s+status|residency|குடியிருப்பு\s*நிலை|வசிப்பிட\s*நிலை)\b",
+        "rep_assessee":       r"\b(representative\s+assessee|rep\s+assessee|பிரதிநிதி|பிரதிநிதி\s*மதிப்பீட்டாளர்)\b",
+    }
+    _ALL_TRACKED = list(_FIELD_KEYWORDS.keys())
+
+    def _build_queue_from_message(inp: str, fields_already_updated: set) -> list:
+        """Return ordered list of fields mentioned in the message that have no inline value."""
+        queue = []
+        for f in _ALL_TRACKED:
+            if f in fields_already_updated:
+                continue
+            pat = _FIELD_KEYWORDS.get(f)
+            if pat and re.search(pat, inp, re.IGNORECASE) and _field_is_set(f):
+                queue.append(f)
+        return queue
+
+    # ── Handle active queue — user is answering one field at a time ───────────
+    if flow.state.get("_mid_flow_queue"):
+        queue = flow.state["_mid_flow_queue"]
+        current_field = queue[0]
+
+        # Check for affirmative — skip this field and continue
+        _yes_re = re.compile(
+            r"^(yes|y|yeah|yep|yup|sure|ok|okay|proceed|skip|continue|next"
+            r"|done|all\s+set|good\s+to\s+go|move\s+on).*$",
+            re.IGNORECASE
+        )
+        if _yes_re.match(inp):
+            # Pop current field and move to next
+            queue.pop(0)
+            flow.state["_mid_flow_queue"] = queue
+            flow.save()
+        else:
+            # Apply the user's answer to the current field
+            _apply_field_update(flow, current_field, inp, user_input)
+            queue.pop(0)
+            flow.state["_mid_flow_queue"] = queue
+            flow.save()
+
+        # If more fields in queue, ask the next one
+        if queue:
+            next_field = queue[0]
+            field_prompt = _ask_for_field(flow, next_field)
+            label = current_field.replace('_', ' ').title()
+            field_prompt["answer"] = f"✓ **{label}** updated.\n\n" + field_prompt["answer"]
+            return field_prompt
+
+        # Queue exhausted — resume normal flow
+        resp = _ask_step(flow)
+        if resp:
+            resp["answer"] = "✓ All updates applied. Continuing from where we left off.\n\n" + resp["answer"]
+        return resp or _build_confirmation(flow)
+
+    # ── New update request — build the queue ─────────────────────────────────
+    if step in _COLLECTION_STEPS:
+        # English + Tamil change intent patterns
+        # Tamil: மாற்று (change), புதுப்பி (update), திருத்து (edit/correct)
+        _change_intent = re.search(
+            r"\b(change|update|modify|edit|fix|correct|i\s+want\s+to|can\s+i|let\s+me|"
+            r"மாற்று|மாற்றவும்|புதுப்பி|புதுப்பிக்க|திருத்து|திருத்தவும்|சரி\s*செய்|"
+            r"நான்\s+விரும்புகிறேன்|எனக்கு\s+வேண்டும்)\b",
+            inp, re.IGNORECASE
+        )
+
+        # ── Case 1: Explicit change intent ────────────────────────────────────
+        if _change_intent:
+            # Apply all inline value updates (fields with values in the message)
+            state_before = {k: flow.state.get(k) for k in _ALL_TRACKED}
+            updates_made = _extract_multiple_field_updates(flow, inp, user_input)
+            if updates_made:
+                flow.save()
+            state_after  = {k: flow.state.get(k) for k in _ALL_TRACKED}
+            fields_updated = {k for k in _ALL_TRACKED if state_before[k] != state_after[k]}
+
+            # Build queue of fields mentioned but without values
+            queue = _build_queue_from_message(inp, fields_updated)
+
+            if queue:
+                # Start the queue
+                flow.state["_mid_flow_queue"] = queue
+                flow.save()
+                first_field = queue[0]
+                field_prompt = _ask_for_field(flow, first_field)
+                if updates_made:
+                    resp = _ask_step(flow)
+                    base = resp["answer"] if resp else ""
+                    prefix = "✓ Updated inline fields. " + (base + "\n\n---\n\n" if base else "")
+                    field_prompt["answer"] = prefix + field_prompt["answer"]
+                return field_prompt
+
+            # No queued fields — just inline updates, resume
+            if updates_made:
+                resp = _ask_step(flow)
+                if resp:
+                    resp["answer"] = "✓ Updated. Continuing from where we left off.\n\n" + resp["answer"]
+                return resp or _build_confirmation(flow)
+
+            # No inline updates either — single field ask
+            field = _detect_modification_field(inp)
+            if field and _field_is_set(field):
+                flow.state["_mid_flow_queue"] = [field]
+                flow.save()
+                return _ask_for_field(flow, field)
+
+        # ── Case 2: Bare field label ───────────────────────────────────────────
+        else:
+            # English + Tamil bare labels
+            _BARE_LABELS = {
+                # English
+                "submission mode", "pan delivery", "aadhaar photo on pan",
+                "source of income", "address for communication",
+                "residential status", "representative assessee",
+                "full name", "annual income", "mother name", "mothers name", "email",
+                "name", "salary",
+                # Tamil
+                "சமர்ப்பிப்பு முறை", "பான் விநியோகம்", "ஆதார் புகைப்படம்",
+                "வருமான ஆதாரம்", "தொடர்பு முகவரி",
+                "குடியிருப்பு நிலை", "பிரதிநிதி மதிப்பீட்டாளர்",
+                "முழு பெயர்", "ஆண்டு வருமானம்", "தாயின் பெயர்", "மின்னஞ்சல்",
+                "பெயர்", "சம்பளம்",
+            }
+            bare = inp.strip().lower()
+            if bare in _BARE_LABELS:
+                field = _detect_modification_field(inp)
+                if field and _field_is_set(field):
+                    flow.state["_mid_flow_queue"] = [field]
+                    flow.save()
+                    return _ask_for_field(flow, field)
+
+            # ── Case 3: Inline multi-field with no "change" keyword ───────────
+            # English + Tamil inline patterns
+            # Tamil patterns: என் பெயர் (my name), பெயர் (name is), etc.
+            # Also catches Tanglish: "ennodiya per X", "en per X", "amma per X"
+            elif re.search(
+                r"\b(my\s+name|name\s+is|name\s+to|salary\s+is|salary\s+to"
+                r"|mother\s+name|email\s+is|email\s+to|"
+                r"என்\s*பெயர்|பெயர்.*என்று|சம்பளம்.*என்று|தாயின்\s*பெயர்|மின்னஞ்சல்.*என்று|"
+                r"(?:ennodiya|ennoda|en|naan|naanu)\s+(?:peyar|per)\b|"
+                r"(?:amma|thaayin|thaay)\s+(?:peyar|per)\b)\b",
+                inp, re.IGNORECASE
+            ):
+                updates_made = _extract_multiple_field_updates(flow, inp, user_input)
+                if updates_made:
+                    flow.save()
+                    resp = _ask_step(flow)
+                    if resp:
+                        resp["answer"] = "✓ Updated. Continuing from where we left off.\n\n" + resp["answer"]
+                    return resp or _build_confirmation(flow)
+
+    # ── Universal field-update fallback — any step, any format ───────────────
+    # If nothing above matched but _extract_multiple_field_updates finds something,
+    # apply it and resume the current step. Catches Tanglish like "ennodiya per X"
+    # that slip through the intent/bare-label/inline checks above.
+    if step in _COLLECTION_STEPS:
+        _fallback_updates = _extract_multiple_field_updates(flow, inp, user_input)
+        if _fallback_updates:
+            flow.save()
+            resp = _ask_step(flow)
+            if resp:
+                resp["answer"] = "✓ Updated. Continuing.\n\n" + resp["answer"]
+            return resp or _build_confirmation(flow)
+
+    # ── Legacy single-field handler (backward compat) ─────────────────────────
+    if flow.state.get("_mid_flow_pending_field"):
+        field = flow.state["_mid_flow_pending_field"]
+        _yes_re = re.compile(
+            r"^(yes|y|yeah|yep|yup|sure|ok|okay|proceed|skip|continue|next"
+            r"|done|all\s+set|good\s+to\s+go|move\s+on).*$", re.IGNORECASE
+        )
+        if not _yes_re.match(inp):
+            _apply_field_update(flow, field, inp, user_input)
+        flow.state["_mid_flow_pending_field"] = None
+        flow.state["_mid_flow_return_step"] = None
+        flow.save()
+        resp = _ask_step(flow)
+        if resp:
+            resp["answer"] = f"✓ **{field.replace('_',' ').title()}** updated. Continuing.\n\n" + resp["answer"]
+        return resp if resp else _build_confirmation(flow)
 
     # ── Handle preferences reuse check ────────────────────────────
     if flow.state.get("_pending_preferences_reuse"):
@@ -1231,21 +1604,45 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
 
     # ── Applicant type ───────────────────────────────────────────
     if step == "applicant_type":
-        _foreign = re.compile(r"\b(3|three|foreign|nri|non.?resident|overseas|oci|pio|abroad|expat|us\s+citizen|uk\s+citizen)\b", re.IGNORECASE)
-        _entity  = re.compile(r"\b(2|two|company|huf|firm|llp|trust|partnership|hindu\s+undivided|corporate)\b", re.IGNORECASE)
-        _indian  = re.compile(r"\b(1|one|indian\s+citizen|indian|india|individual)\b", re.IGNORECASE)
-
-        if _foreign.search(inp):
-            flow.state["service_id"] = None; flow.state["complete"] = True; flow.save()
-            return None
-        elif _entity.search(inp):
-            flow.state["service_id"] = None; flow.state["complete"] = True; flow.save()
-            return None
-        elif _indian.search(inp):
+        # Match keywords within full Tamil/Hindi/English sentences
+        # Tamil: "இந்திய குடிமகன்", "இந்திய காம்pany / HUF / நிறுவனம்", "வெளிநாட்டு குடிமகன் / NRI / வெளிநாடு"
+        
+        inp_lower = inp.lower()
+        
+        # Check for Indian Citizen (most common, check first)
+        if re.search(r"(இந்திய\s*குடிமகன்|indian\s*citizen|குடிமகன்|भारतीय\s*नागरिक)", inp_lower, re.IGNORECASE):
             flow.state["applicant_type"] = "indian_citizen"
             flow.advance_step()
             flow.save()
             return _ask_step(flow)
+        
+        # Check for Foreign/NRI/Overseas
+        elif re.search(r"(வெளிநாட்டு|வெளிநாடு|foreign|nri|overseas|विदेशी|प्रवासी)", inp_lower, re.IGNORECASE):
+            flow.state["service_id"] = None
+            flow.state["complete"] = True
+            flow.save()
+            return None
+        
+        # Check for Company/Entity
+        elif re.search(r"(நிறுவனம்|காம்pany|company|huf|firm|कंपनी)", inp_lower, re.IGNORECASE):
+            flow.state["service_id"] = None
+            flow.state["complete"] = True
+            flow.save()
+            return None
+        
+        # Fallback: number choice
+        elif inp.strip() in ("1", "2", "3"):
+            if inp.strip() == "1":
+                flow.state["applicant_type"] = "indian_citizen"
+                flow.advance_step()
+                flow.save()
+                return _ask_step(flow)
+            else:
+                flow.state["service_id"] = None
+                flow.state["complete"] = True
+                flow.save()
+                return None
+        
         else:
             opts = {"type": "radio", "label": "Applicant type", "field": "applicant_type",
                     "choices": ["Indian Citizen", "Indian Company / HUF / Firm", "Foreign Citizen / NRI / Overseas"]}
@@ -1253,153 +1650,458 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
 
     # ── Submission mode (Q2) ─────────────────────────────────────
     elif step == "submission_mode":
-        _map = {
-            "1": "Aadhaar-based Online (eKYC)",
-            "aadhaar": "Aadhaar-based Online (eKYC)",
-            "ekyc": "Aadhaar-based Online (eKYC)",
-            "2": "Upload scanned docs & eSign",
-            "upload": "Upload scanned docs & eSign",
-            "scan": "Upload scanned docs & eSign",
-            "esign": "Upload scanned docs & eSign",
-            "3": "Fill online + courier physical form",
-            "courier": "Fill online + courier physical form",
-            "physical": "Fill online + courier physical form",
-            "post": "Fill online + courier physical form",
+        # Match keywords within full Tamil/Hindi/English sentences
+        # Tamil option 1: "Aadhaar-அடிப்படையிலான ஆன்லைன் (eKYC)"
+        # Tamil option 2: "ஸ்கேன் செய்யப்பட்ட ஆவணங்களைப் பதிவேற்றவும் & eSign"
+        # Tamil option 3: "ஆன்லைன் + கூரியர் உடல் படிவத்தை நிரப்பவும்"
+        
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        # FIRST: Check for EXACT match with option labels (when user clicks in UI)
+        option_map = {
+            "aadhaar-based online (ekyc)": "Aadhaar-based Online (eKYC)",
+            "upload scanned docs & esign": "Upload scanned docs & eSign",
+            "fill online + courier physical form": "Fill online + courier physical form",
         }
-        key = inp.lower().split()[0] if inp else ""
-        matched = _map.get(key) or next((v for k, v in _map.items() if k in inp.lower()), None)
-        if matched:
-            flow.state["submission_mode"] = matched
-            # Save this answer for future reuse
-            flow.state["_saved_submission_mode"] = matched
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match:
+            print(f"[DEBUG submission_mode] Exact match found: {exact_match}")
+            flow.state["submission_mode"] = exact_match
+            flow.state["_saved_submission_mode"] = exact_match
+            flow.save()
+            print(f"[DEBUG submission_mode] Saved to flow.state: {flow.state['submission_mode']}")
             return _advance_after_answer(flow, user_id)
-        opts = {"type": "radio", "label": "Submission mode", "field": "submission_mode",
-                "choices": ["Aadhaar-based Online (eKYC)", "Upload scanned docs & eSign", "Fill online + courier physical form"]}
-        return {"answer": "Please select one of the submission modes:", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+        
+        # Option 1: Aadhaar-based eKYC
+        if re.search(r"(aadhaar|ஆதார்|आधार|ekyc|அடிப்படையிலான)", inp_lower, re.IGNORECASE) and not re.search(r"(courier|கூரியர்|upload|பதிவேற்|scan|ஸ்கேன்)", inp_lower, re.IGNORECASE):
+            flow.state["submission_mode"] = "Aadhaar-based Online (eKYC)"
+            flow.state["_saved_submission_mode"] = "Aadhaar-based Online (eKYC)"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        # Option 2: Upload scanned docs & eSign
+        elif re.search(r"(upload|scan|ஸ்கேன்|பதிவேற்|செய்யப்பட்ட|ஆவணங்கள்|esign|स्कैन|अपलोड)", inp_lower, re.IGNORECASE):
+            flow.state["submission_mode"] = "Upload scanned docs & eSign"
+            flow.state["_saved_submission_mode"] = "Upload scanned docs & eSign"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        # Option 3: Fill online + courier physical form
+        elif re.search(r"(courier|கூரியர்|நிரப்|படிவம்|உடல்|physical|fill|कूरियर|फॉर्म)", inp_lower, re.IGNORECASE):
+            flow.state["submission_mode"] = "Fill online + courier physical form"
+            flow.state["_saved_submission_mode"] = "Fill online + courier physical form"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        # Fallback: number choice
+        elif inp.strip() in ("1", "2", "3"):
+            choices = ["Aadhaar-based Online (eKYC)", "Upload scanned docs & eSign", "Fill online + courier physical form"]
+            flow.state["submission_mode"] = choices[int(inp.strip()) - 1]
+            flow.state["_saved_submission_mode"] = flow.state["submission_mode"]
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        else:
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                # Tamil + English bilingual options
+                opts = {"type": "radio", "label": "Submission mode", "field": "submission_mode",
+                        "choices": [
+                            "Aadhaar-based Online (eKYC) | ஆதார் அடிப்படையிலான ஆன்லைன்",
+                            "Upload scanned docs & eSign | ஸ்கேன் செய்யப்பட்ட ஆவணங்களைப் பதிவேற்றவும் & eSign",
+                            "Fill online + courier physical form | ஆன்லைனில் நிரப்பவும் + கூரியர் உடல் படிவம்"
+                        ]}
+                return {"answer": "**உங்கள் PAN விண்ணப்ப ஆவணங்களை எவ்வாறு சமர்ப்பிக்க விரும்புகிறீர்கள்?**\n\n*How do you want to submit your PAN application documents?*", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            else:
+                opts = {"type": "radio", "label": "Submission mode", "field": "submission_mode",
+                        "choices": ["Aadhaar-based Online (eKYC)", "Upload scanned docs & eSign", "Fill online + courier physical form"]}
+                return {"answer": "**How do you want to submit your PAN application documents?**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Delivery mode (Q2b) ──────────────────────────────────────
     elif step == "delivery_mode":
-        _physical = re.compile(r"\b(1|physical|home|both|hard\s*copy)\b", re.IGNORECASE)
-        _soft     = re.compile(r"\b(2|soft|email|only\s+soft|e.?pan|digital)\b", re.IGNORECASE)
-
-        if _physical.search(inp):
-            flow.state["delivery_mode"] = "physical_and_soft"
-            # Save this answer for future reuse
-            flow.state["_saved_delivery_mode"] = "Physical copy to home + soft copy on email (Fees applicable)"
-            next_q = _advance_after_answer(flow)
-            # Show fee table for physical+soft
-            next_q["answer"] = _FEE_PHYSICAL.strip() + "\n\n---\n\n" + next_q["answer"]
-            return next_q
-        elif _soft.search(inp):
+        # Match English, Tamil, and Hindi keywords within the full response text
+        # Tamil Option 1: "வீட்டிற்கு நகல் + மின்னஞ்சலில் மென்மையான நகல் (கட்டணம் பொருந்தும்)"
+        # Tamil Option 2: "மின்னஞ்சலில் மென்மையான நகல் மட்டும் (கட்டணம் பொருந்தும்)"
+        # English Option 1: "Physical copy to home + soft copy on email (Fees applicable)"
+        # English Option 2: "Only soft copy on email (Fees applicable)"
+        
+        print(f"[DEBUG delivery_mode] Received input: {inp!r}")
+        
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        # FIRST: Check for EXACT match with option labels (when user clicks in UI)
+        option_map = {
+            "physical copy to home + soft copy on email (fees applicable)": "physical_and_soft",
+            "only soft copy on email (fees applicable)": "soft_only",
+        }
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match:
+            print(f"[DEBUG delivery_mode] Exact match found: {exact_match}")
+            flow.state["delivery_mode"] = exact_match
+            if exact_match == "physical_and_soft":
+                flow.state["_saved_delivery_mode"] = "Physical copy to home + soft copy on email (Fees applicable)"
+                flow.save()
+                next_q = _advance_after_answer(flow, user_id)
+                next_q["answer"] = _FEE_PHYSICAL.strip() + "\n\n---\n\n" + next_q["answer"]
+                return next_q
+            else:
+                flow.state["_saved_delivery_mode"] = "Only soft copy on email (Fees applicable)"
+                flow.save()
+                next_q = _advance_after_answer(flow, user_id)
+                next_q["answer"] = _FEE_SOFT.strip() + "\n\n---\n\n" + next_q["answer"]
+                return next_q
+        
+        # Key distinction: Option 1 has "வீட்டிற்கு" (home) OR "+", Option 2 has "மட்டும்" (only)
+        has_home_or_plus = re.search(r"(வீடு|வீட்டிற்கு|home|physical|இல்லம்|घर|\+)", inp, re.IGNORECASE)
+        has_only = re.search(r"(மட்டும்|only|केवल)", inp, re.IGNORECASE)
+        
+        print(f"[DEBUG delivery_mode] has_home_or_plus={bool(has_home_or_plus)}, has_only={bool(has_only)}")
+        
+        # If response contains "மட்டும்" (only), it's soft-only option (Option 2)
+        if has_only:
+            print(f"[DEBUG delivery_mode] Matched: soft_only (has 'மட்டும்')")
             flow.state["delivery_mode"] = "soft_only"
-            # Save this answer for future reuse
             flow.state["_saved_delivery_mode"] = "Only soft copy on email (Fees applicable)"
-            next_q = _advance_after_answer(flow)
+            flow.save()
+            next_q = _advance_after_answer(flow, user_id)
             next_q["answer"] = _FEE_SOFT.strip() + "\n\n---\n\n" + next_q["answer"]
             return next_q
+        # If response contains "வீட்டிற்கு" or "+", it's physical+soft option (Option 1)
+        elif has_home_or_plus:
+            print(f"[DEBUG delivery_mode] Matched: physical_and_soft (has 'வீட்டிற்கு' or '+')")
+            flow.state["delivery_mode"] = "physical_and_soft"
+            flow.state["_saved_delivery_mode"] = "Physical copy to home + soft copy on email (Fees applicable)"
+            flow.save()
+            next_q = _advance_after_answer(flow, user_id)
+            next_q["answer"] = _FEE_PHYSICAL.strip() + "\n\n---\n\n" + next_q["answer"]
+            return next_q
+        # Fallback: number choice
+        elif inp.strip() in ("1", "2"):
+            print(f"[DEBUG delivery_mode] Matched: number choice {inp.strip()}")
+            if inp.strip() == "1":
+                flow.state["delivery_mode"] = "physical_and_soft"
+                flow.state["_saved_delivery_mode"] = "Physical copy to home + soft copy on email (Fees applicable)"
+                flow.save()
+                next_q = _advance_after_answer(flow, user_id)
+                next_q["answer"] = _FEE_PHYSICAL.strip() + "\n\n---\n\n" + next_q["answer"]
+                return next_q
+            else:
+                flow.state["delivery_mode"] = "soft_only"
+                flow.state["_saved_delivery_mode"] = "Only soft copy on email (Fees applicable)"
+                flow.save()
+                next_q = _advance_after_answer(flow, user_id)
+                next_q["answer"] = _FEE_SOFT.strip() + "\n\n---\n\n" + next_q["answer"]
+                return next_q
         else:
-            opts = {"type": "radio", "label": "PAN delivery", "field": "delivery_mode",
-                    "choices": ["Physical copy to home + soft copy on email (Fees applicable)", "Only soft copy on email (Fees applicable)"]}
-            return {"answer": "**How do you want your PAN card to be delivered?**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            print(f"[DEBUG delivery_mode] NO MATCH - returning options again")
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                opts = {"type": "radio", "label": "PAN delivery", "field": "delivery_mode",
+                        "choices": [
+                            "Physical copy to home + soft copy on email (Fees applicable) | வீட்டிற்கு நகல் + மின்னஞ்சலில் மென்மையான நகல்",
+                            "Only soft copy on email (Fees applicable) | மின்னஞ்சலில் மென்மையான நகல் மட்டும்"
+                        ]}
+                return {"answer": "**உங்கள் PAN கார்டு எவ்வாறு டெலிவரி செய்ய வேண்டும்?**\n\n*How do you want your PAN card to be delivered?*", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            else:
+                opts = {"type": "radio", "label": "PAN delivery", "field": "delivery_mode",
+                        "choices": ["Physical copy to home + soft copy on email (Fees applicable)", "Only soft copy on email (Fees applicable)"]}
+                return {"answer": "**How do you want your PAN card to be delivered?**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Aadhaar photo consent (Q3) ───────────────────────────────
     elif step == "aadhaar_photo":
-        _yes = re.compile(r"^(yes|y|yeah|yep|agree|ok|okay|sure)$", re.IGNORECASE)
-        _no  = re.compile(r"^(no|nope|nah|disagree|decline)$", re.IGNORECASE)
+        # Match Yes/No in English, Tamil, and Hindi
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        # FIRST: Check for EXACT match with option labels
+        option_map = {
+            "yes": True,
+            "no": False,
+            "ஆம்": True,
+            "இல்லை": False,
+        }
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match is not None:
+            print(f"[DEBUG aadhaar_photo] Exact match found: {exact_match}")
+            flow.state["aadhaar_photo"] = exact_match
+            flow.state["_saved_aadhaar_photo"] = exact_match
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        _yes = re.compile(r"^(yes|y|yeah|yep|agree|ok|okay|sure|aam|ஆம்|हाँ|हां)$", re.IGNORECASE)
+        _no  = re.compile(r"^(no|nope|nah|disagree|decline|illa|illai|இல்லை|नहीं)$", re.IGNORECASE)
         if _yes.match(inp):
             flow.state["aadhaar_photo"] = True
-            # Save this answer for future reuse
             flow.state["_saved_aadhaar_photo"] = True
+            flow.save()
             return _advance_after_answer(flow, user_id)
         elif _no.match(inp):
             flow.state["aadhaar_photo"] = False
-            # Save this answer for future reuse
             flow.state["_saved_aadhaar_photo"] = False
+            flow.save()
             return _advance_after_answer(flow, user_id)
         else:
-            opts = {"type": "radio", "label": "Aadhaar photo consent", "field": "aadhaar_photo", "choices": ["Yes", "No"]}
-            return {"answer": "Please select **Yes** or **No** for Aadhaar photo on PAN card:", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                opts = {"type": "radio", "label": "Aadhaar photo consent", "field": "aadhaar_photo", 
+                        "choices": ["Yes | ஆம்", "No | இல்லை"]}
+                return {
+                    "answer": "**என் PAN கார்டில் என் ஆதார் புகைப்படத்தை அச்சிட நான் ஒப்புக்கொள்கிறேன்.**\n\n*I hereby agree to have my Aadhaar photo printed on my PAN Card.*\n\n> குறிப்பு: உங்கள் ஆதார் புகைப்படத்தைப் பயன்படுத்த விரும்பவில்லை என்றால், தனி புகைப்படத்துடன் PAN விண்ணப்பிக்கலாம்.\n\n> *Note: If you do not wish to use your Aadhaar photo, you may apply for a PAN with a separate photograph.*",
+                    "sources": [], "followups": [], "guided": True, "step": step, "options": opts
+                }
+            else:
+                opts = {"type": "radio", "label": "Aadhaar photo consent", "field": "aadhaar_photo", "choices": ["Yes", "No"]}
+                return {"answer": "**I hereby agree to have my Aadhaar photo printed on my PAN Card.**\n\n> Note: If you do not wish to use your Aadhaar photo, you may apply for a PAN with a separate photograph.", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Source of income (Q4) ────────────────────────────────────
     elif step == "source_of_income":
+        # Match English, Tamil, and Hindi keywords (without word boundaries for Tamil)
+        # Tamil translations: சம்பளம், தொழில், வணிகம், வீட்டு சொத்து, பிற மூலங்கள், மூலதன ஆதாயம், வருமானம் இல்லை
+        
+        print(f"[DEBUG source_of_income] Received input: {inp!r}")
+        
         _SOI = [
-            (re.compile(r"\b(salary|salaried|1)\b", re.IGNORECASE),                          "Salary"),
-            (re.compile(r"\b(business|profession|self.?employed|freelanc|2)\b", re.IGNORECASE), "Income from Business / Profession"),
-            (re.compile(r"\b(house\s+property|rental|rent|3)\b", re.IGNORECASE),              "Income from House property"),
-            (re.compile(r"\b(other\s+sources?|4)\b", re.IGNORECASE),                          "Income from Other sources"),
-            (re.compile(r"\b(capital\s+gains?|5)\b", re.IGNORECASE),                          "Capital Gains"),
-            (re.compile(r"\b(no\s+income|unemployed|student|homemaker|housewife|retired|fresher|6)\b", re.IGNORECASE), "No income"),
+            (re.compile(r"(salary|salaried|1|சம்பளம்|वेतन|तनख्वाह)", re.IGNORECASE), "Salary"),
+            (re.compile(r"(business|profession|self.?employed|freelanc|2|வணிகம்|தொழில்|வியாபாரம்|व्यवसाय|व्यापार|पेशा)", re.IGNORECASE), "Income from Business / Profession"),
+            (re.compile(r"(house\s+property|rental|rent|3|வீட்டு|சொத்து|வாடகை|संपत्ति|किराया|मकान)", re.IGNORECASE), "Income from House property"),
+            (re.compile(r"(other\s+sources?|4|பிற|மூலங்கள்|अन्य|स्रोत)", re.IGNORECASE), "Income from Other sources"),
+            (re.compile(r"(capital\s+gains?|5|மூலதன|ஆதாயம்|ஆதாயங்கள்|पूंजीगत|लाभ|पूंजी)", re.IGNORECASE), "Capital Gains"),
+            (re.compile(r"(no\s+income|unemployed|student|homemaker|housewife|retired|fresher|6|வருமானம்\s*இல்லை|இல்லை|மாணவர்|வேலை\s*இல்லை|गृहिणी|छात्र|कोई\s*आय\s*नहीं)", re.IGNORECASE), "No income"),
         ]
         matched = []
         for pat, label in _SOI:
             if pat.search(inp):
                 matched.append(label)
+                print(f"[DEBUG source_of_income] Matched: {label}")
+        
         if matched:
+            print(f"[DEBUG source_of_income] All matched: {matched}")
             flow.state["source_of_income"] = ", ".join(matched)
-            # Save this answer for future reuse
             flow.state["_saved_source_of_income"] = matched  # Save as list
+            flow.save()
             return _advance_after_answer(flow, user_id)
-        opts = {"type": "checkbox", "label": "Source of Income", "field": "source_of_income",
-                "choices": ["Salary", "Income from Business / Profession", "Income from House property",
-                            "Income from Other sources", "Capital Gains", "No income"]}
-        return {"answer": "**Please select your Source of Income:**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+        else:
+            print(f"[DEBUG source_of_income] NO MATCH - returning options")
+        
+        # Get current language for bilingual options
+        current_language = flow.state.get("_current_language", language)
+        
+        if current_language == "ta":
+            opts = {"type": "checkbox", "label": "Source of Income", "field": "source_of_income",
+                    "choices": [
+                        "Salary | சம்பளம்",
+                        "Income from Business / Profession | வணிகம் / தொழில் வருமானம்",
+                        "Income from House property | வீட்டு சொத்து வருமானம்",
+                        "Income from Other sources | பிற ஆதாரங்களிலிருந்து வருமானம்",
+                        "Capital Gains | மூலதன ஆதாயங்கள்",
+                        "No income | வருமானம் இல்லை"
+                    ]}
+            return {"answer": "**உங்கள் வருமான மூலத்தைத் தேர்ந்தெடுக்கவும்** (பொருந்தும் அனைத்தையும் தேர்ந்தெடுக்கவும்)\n\n*Please select your Source of Income (select all that apply)*", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+        else:
+            opts = {"type": "checkbox", "label": "Source of Income", "field": "source_of_income",
+                    "choices": ["Salary", "Income from Business / Profession", "Income from House property",
+                                "Income from Other sources", "Capital Gains", "No income"]}
+            return {"answer": "**Please select your Source of Income** (select all that apply):", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Address for communication (Q5) ───────────────────────────
     elif step == "address_for_comm":
-        _map = {
-            "residence": "Residence", "home": "Residence", "1": "Residence",
-            "office": "Office", "work": "Office", "2": "Office",
-            "representative": "Representative Assessee (RA)", "ra": "Representative Assessee (RA)", "3": "Representative Assessee (RA)",
+        # Match keywords within full Tamil/Hindi/English sentences
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        # FIRST: Check for EXACT match with option labels
+        option_map = {
+            "residence": "Residence",
+            "office": "Office",
+            "representative assessee (ra)": "Representative Assessee (RA)",
+            "வீடு": "Residence",
+            "அலுவலகம்": "Office",
         }
-        key = inp.lower().strip()
-        matched = _map.get(key) or next((v for k, v in _map.items() if k in key), None)
-        if matched:
-            flow.state["address_for_comm"] = matched
-            # Save this answer for future reuse
-            flow.state["_saved_address_for_comm"] = matched
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match:
+            print(f"[DEBUG address_for_comm] Exact match found: {exact_match}")
+            flow.state["address_for_comm"] = exact_match
+            flow.state["_saved_address_for_comm"] = exact_match
+            flow.save()
             return _advance_after_answer(flow, user_id)
-        hint = "**Important instructions for e-KYC (Individual):**\n1. Address from Aadhaar card will be used as residence address.\n2. PAN card dispatched to Aadhaar address.\n3. If Aadhaar address exceeds IT Dept length limit, e-KYC won't be available."
-        opts = {"type": "radio", "label": "Address for Communication", "field": "address_for_comm",
-                "choices": ["Residence", "Office", "Representative Assessee (RA)"], "hint": hint}
-        return {"answer": "**Address for Communication** — Please tick as applicable:", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+        
+        # Check for keywords in the response
+        if re.search(r"(குடியிருப்பு|வீடு|இல்லம்|residence|home|निवास|घर)", inp_lower, re.IGNORECASE):
+            flow.state["address_for_comm"] = "Residence"
+            flow.state["_saved_address_for_comm"] = "Residence"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        elif re.search(r"(அலுவலகம்|வேலை|office|work|कार्यालय|दफ्तर)", inp_lower, re.IGNORECASE):
+            flow.state["address_for_comm"] = "Office"
+            flow.state["_saved_address_for_comm"] = "Office"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        elif re.search(r"(பிரதிநிதி|representative|प्रतिनिधि)", inp_lower, re.IGNORECASE):
+            flow.state["address_for_comm"] = "Representative Assessee (RA)"
+            flow.state["_saved_address_for_comm"] = "Representative Assessee (RA)"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        elif inp.strip() in ("1", "2", "3"):
+            choices = ["Residence", "Office", "Representative Assessee (RA)"]
+            flow.state["address_for_comm"] = choices[int(inp.strip()) - 1]
+            flow.state["_saved_address_for_comm"] = flow.state["address_for_comm"]
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        else:
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                hint = "**காகிதமற்ற PAN விண்ணப்பத்திற்கான முக்கிய வழிமுறைகள் (eKYC):**\n1. ஆதார் அட்டையில் உள்ள முகவரி வசிப்பிட முகவரியாக பயன்படுத்தப்படும்.\n2. PAN கார்டு ஆதார் முகவரிக்கு அனுப்பப்படும்.\n3. ஆதார் முகவரி நீளம் வரி துறை வரம்பை மீறினால், eKYC கிடைக்காது.\n\n*Important instructions for e-KYC (Individual): Address from Aadhaar will be used as residence address.*"
+                opts = {"type": "radio", "label": "Address for Communication", "field": "address_for_comm",
+                        "choices": ["Residence | வீடு", "Office | அலுவலகம்", "Representative Assessee (RA) | பிரதிநிதி மதிப்பீட்டாளர்"], "hint": hint}
+                return {"answer": "**தொடர்புக்கான முகவரி** — தயவுசெய்து பொருந்தும் ஒன்றைத் தேர்ந்தெடுக்கவும்:\n\n*Address for Communication — Please tick as applicable:*", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            else:
+                hint = "**Important instructions for e-KYC (Individual):**\n1. Address from Aadhaar card will be used as residence address.\n2. PAN card dispatched to Aadhaar address.\n3. If Aadhaar address exceeds IT Dept length limit, e-KYC won't be available."
+                opts = {"type": "radio", "label": "Address for Communication", "field": "address_for_comm",
+                        "choices": ["Residence", "Office", "Representative Assessee (RA)"], "hint": hint}
+                return {"answer": "**Address for Communication** — Please tick as applicable:", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Residential status (Q6) ──────────────────────────────────
     elif step == "residential_status":
-        _map = {
-            "resident": "Resident", "1": "Resident",
-            "non-resident": "Non-resident", "non resident": "Non-resident", "nri": "Non-resident", "2": "Non-resident",
-            "not ordinarily": "Resident but not ordinarily resident",
-            "rnor": "Resident but not ordinarily resident", "3": "Resident but not ordinarily resident",
+        # Match keywords within full Tamil/Hindi/English sentences
+        # Tamil translations: "குடியிருப்பாளர்", "குடியுரிமை இல்லாதவர்", "குடியிருப்பாளர் ஆனால் சாதாரணமாக வசிப்பவர் அல்ல"
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        print(f"[DEBUG residential_status] Received input: {inp!r}")
+        
+        # FIRST: Check for EXACT match with option labels
+        option_map = {
+            "resident": "Resident",
+            "non-resident": "Non-resident",
+            "resident but not ordinarily resident": "Resident but not ordinarily resident",
+            "குடியிருப்பாளர்": "Resident",
+            "குடியுரிமை இல்லாதவர்": "Non-resident",
         }
-        key = inp.lower().strip()
-        matched = _map.get(key) or next((v for k, v in _map.items() if k in key), None)
-        if matched:
-            flow.state["residential_status"] = matched
-            # Save this answer for future reuse
-            flow.state["_saved_residential_status"] = matched
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match:
+            print(f"[DEBUG residential_status] Exact match found: {exact_match}")
+            flow.state["residential_status"] = exact_match
+            flow.state["_saved_residential_status"] = exact_match
+            flow.save()
             return _advance_after_answer(flow, user_id)
-        opts = {"type": "radio", "label": "Residential Status", "field": "residential_status",
-                "choices": ["Resident", "Non-resident", "Resident but not ordinarily resident"]}
-        return {"answer": "**What is your Residential Status?**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+        
+        # Check for "resident but not ordinarily resident" first (most specific)
+        # Tamil: "குடியிருப்பாளர் ஆனால் சாதாரணமாக வசிப்பவர் அல்ல" contains "ஆனால்" (but) and "சாதாரணமாக" (ordinarily)
+        if re.search(r"(ஆனால்|சாதாரணமாக|வசிப்பவர்|not\s*ordinarily|rnor|सामान्य\s*निवासी\s*नहीं)", inp, re.IGNORECASE):
+            print(f"[DEBUG residential_status] Matched: Resident but not ordinarily resident")
+            flow.state["residential_status"] = "Resident but not ordinarily resident"
+            flow.state["_saved_residential_status"] = "Resident but not ordinarily resident"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        # Check for non-resident
+        # Tamil: "குடியுரிமை இல்லாதவர்" contains "இல்லாதவர்" (without) or "குடியுரிமை" (citizenship)
+        elif re.search(r"(இல்லாதவர்|வெளிநாட்டவர்|வெளிநாட்டு|non.?resident|nri|अनिवासी|गैर)", inp, re.IGNORECASE):
+            print(f"[DEBUG residential_status] Matched: Non-resident")
+            flow.state["residential_status"] = "Non-resident"
+            flow.state["_saved_residential_status"] = "Non-resident"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        # Check for resident (check last as it's least specific)
+        # Tamil: "குடியிருப்பாளர்" contains "குடியிருப்பாளர்" or "குடிமகன்"
+        elif re.search(r"(குடியிருப்பாளர்|குடிமகன்|resident|निवासी|स्थायी)", inp, re.IGNORECASE):
+            print(f"[DEBUG residential_status] Matched: Resident")
+            flow.state["residential_status"] = "Resident"
+            flow.state["_saved_residential_status"] = "Resident"
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        # Fallback: number choice
+        elif inp.strip() in ("1", "2", "3"):
+            choices = ["Resident", "Non-resident", "Resident but not ordinarily resident"]
+            flow.state["residential_status"] = choices[int(inp.strip()) - 1]
+            flow.state["_saved_residential_status"] = flow.state["residential_status"]
+            flow.save()
+            print(f"[DEBUG residential_status] Matched: number choice {inp.strip()}")
+            return _advance_after_answer(flow, user_id)
+        else:
+            print(f"[DEBUG residential_status] NO MATCH - returning options")
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                opts = {"type": "radio", "label": "Residential Status", "field": "residential_status",
+                        "choices": [
+                            "Resident | குடியிருப்பாளர்",
+                            "Non-resident | குடியுரிமை இல்லாதவர்",
+                            "Resident but not ordinarily resident | குடியிருப்பாளர் ஆனால் சாதாரணமாக வசிப்பவர் அல்ல"
+                        ]}
+                return {"answer": "**உங்கள் குடியிருப்பு நிலை என்ன?**\n\n*What is your Residential Status?*", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            else:
+                opts = {"type": "radio", "label": "Residential Status", "field": "residential_status",
+                        "choices": ["Resident", "Non-resident", "Resident but not ordinarily resident"]}
+                return {"answer": "**What is your Residential Status?**", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
 
     # ── Representative Assessee (Q7) ─────────────────────────────
     elif step == "rep_assessee":
-        _yes = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay)$", re.IGNORECASE)
-        _no  = re.compile(r"^(no|nope|nah|n)$", re.IGNORECASE)
+        # Match Yes/No in English, Tamil, and Hindi
+        inp_lower = inp.lower()
+        inp_stripped = inp.strip()
+        
+        # FIRST: Check for EXACT match with option labels
+        option_map = {
+            "yes": True,
+            "no": False,
+            "ஆம்": True,
+            "இல்லை": False,
+        }
+        
+        exact_match = option_map.get(inp_lower)
+        if exact_match is not None:
+            print(f"[DEBUG rep_assessee] Exact match found: {exact_match}")
+            flow.state["rep_assessee"] = exact_match
+            flow.state["_saved_rep_assessee"] = exact_match
+            flow.save()
+            return _advance_after_answer(flow, user_id)
+        
+        _yes = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay|aam|ஆம்|हाँ|हां)$", re.IGNORECASE)
+        _no  = re.compile(r"^(no|nope|nah|n|illa|illai|இல்லை|नहीं)$", re.IGNORECASE)
         if _yes.match(inp):
             flow.state["rep_assessee"] = True
-            # Save this answer for future reuse
             flow.state["_saved_rep_assessee"] = True
+            flow.save()
             return _advance_after_answer(flow, user_id)
         elif _no.match(inp):
             flow.state["rep_assessee"] = False
-            # Save this answer for future reuse
             flow.state["_saved_rep_assessee"] = False
+            flow.save()
             return _advance_after_answer(flow, user_id)
         else:
-            opts = {"type": "radio", "label": "Representative Assessee", "field": "rep_assessee",
-                    "choices": ["Yes", "No"]}
-            return {"answer": "Please select **Yes** or **No** — are you appointing a Representative Assessee?", "sources": [], "followups": [], "guided": True, "step": step, "options": opts}
+            # Get current language for bilingual options
+            current_language = flow.state.get("_current_language", language)
+            
+            if current_language == "ta":
+                opts = {"type": "radio", "label": "Representative Assessee", "field": "rep_assessee",
+                        "choices": ["Yes | ஆம்", "No | இல்லை"]}
+                return {
+                    "answer": "**பிரதிநிதி மதிப்பீட்டாளரை நியமிக்கிறீர்களா?**\n\n*Appointing Representative Assessee?*\n\n> பிரதிநிதி மதிப்பீட்டாளர் என்பது மற்றொரு நபரின் சார்பாக வரி கடமைகளை நிர்வகிக்கும் ஒருவர் (எ.கா. சிறியவருக்கு பாதுகாவலர், அல்லது இறந்தவருக்கு சட்ட வாரிசு). மற்றொருவர் சார்பாக நீங்கள் விண்ணப்பிக்கும் பட்சத்தில் மட்டும் **ஆம்** என்பதைத் தேர்ந்தெடுக்கவும்.\n\n> *A Representative Assessee manages tax obligations on behalf of another person (e.g. guardian for a minor, or legal heir for deceased). Select **Yes** only if applying on behalf of someone else.*",
+                    "sources": [], "followups": [], "guided": True, "step": step, "options": opts
+                }
+            else:
+                opts = {"type": "radio", "label": "Representative Assessee", "field": "rep_assessee",
+                        "choices": ["Yes", "No"]}
+                return {
+                    "answer": "**Appointing Representative Assessee?**\n\n> A Representative Assessee is someone who manages tax obligations on behalf of another person (e.g. a guardian for a minor, or a legal heir for a deceased person). Select **Yes** only if you are applying on behalf of someone else.",
+                    "sources": [], "followups": [], "guided": True, "step": step, "options": opts
+                }
 
     # ── Details collection (Q8) ───────────────────────────────────
     elif step == "details_collection":
@@ -1513,7 +2215,10 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
         
         _yes = re.compile(
             r"^(yes|y|yeah|yep|yup|sure|ok|okay|proceed|confirm|looks\s+good|correct|all\s+good|go\s+ahead"
-            r"|yes,?\s*proceed)$",
+            r"|yes,?\s*proceed|yeah\s+proceed|yes\s+please|all\s+set|next|done|good\s+to\s+go|let'?s\s+go"
+            r"|move\s+on|continue|next\s+step|proceed\s+please|that'?s\s+(?:correct|right|good|fine)"
+            r"|everything'?s?\s+(?:correct|right|good|fine|ok|okay)|looks\s+(?:correct|right|fine)"
+            r"|ஆம்|ஆம்,?\s*தொடரவும்|हाँ|हां).*$",
             re.IGNORECASE
         )
         _no = re.compile(
@@ -1521,7 +2226,12 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
             r"|no,?\s*i\s+need\s+to\s+change\s+something"
             r"|change\s+something"
             r"|i\s+want\s+to\s+change"
-            r"|i\s+need\s+to\s+change).*$",
+            r"|i\s+need\s+to\s+change"
+            r"|i\s+wanna\s+change"
+            r"|want\s+to\s+change"
+            r"|need\s+to\s+change"
+            r"|ஏதாவது\s+மாற்றவும்"
+            r"|மாற்ற\s+வேண்டும்).*$",
             re.IGNORECASE
         )
 
@@ -1529,6 +2239,64 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
         # This must be checked BEFORE _no.match() to avoid "No" being treated as "change something"
         if flow.state.get("pending_modification") and flow.state["pending_modification"] != "__awaiting__":
             field = flow.state["pending_modification"]
+
+            # ── If user says yes/proceed while a field is pending, they're satisfied — advance ──
+            if _yes.match(inp):
+                flow.state["details_confirmed"] = True
+                flow.state["pending_modification"] = None
+                flow.advance_step(); flow.save()
+                try:
+                    if user_id:
+                        save_flow_to_profile(user_id, flow.state)
+                except Exception as e:
+                    print(f"[ERROR] Failed to save profile: {e}")
+                current_language = flow.state.get("_current_language", language)
+                doc_text = _ask_for_documents(flow, current_language)
+                return {
+                    "answer": doc_text,
+                    "sources": [], "followups": [], "guided": True,
+                    "step": "documents",
+                    "flow_confirmed": True,
+                    "flow_data": {
+                        "full_name":          flow.state.get("full_name"),
+                        "mother_name":        flow.state.get("mother_name"),
+                        "email":              flow.state.get("email"),
+                        "salary":             flow.state.get("salary"),
+                        "applicant_type":     flow.state.get("applicant_type"),
+                        "submission_mode":    flow.state.get("submission_mode"),
+                        "delivery_mode":      flow.state.get("delivery_mode"),
+                        "aadhaar_photo":      flow.state.get("aadhaar_photo"),
+                        "source_of_income":   flow.state.get("source_of_income"),
+                        "address_for_comm":   flow.state.get("address_for_comm"),
+                        "residential_status": flow.state.get("residential_status"),
+                        "rep_assessee":       flow.state.get("rep_assessee"),
+                    },
+                }
+
+            # ── If user is asking to change a DIFFERENT field, switch to it ──────────────
+            # e.g. pending=address_for_comm but user says "i want to update pan delivery"
+            requested_field = _detect_modification_field(inp)
+            if requested_field and requested_field != field:
+                # Check that the message looks like a field request, not a value
+                # (has "change/update/want" prefix OR is just the field name)
+                _is_field_request = re.search(
+                    r"\b(change|update|modify|edit|fix|want\s+to\s+update|want\s+to\s+change"
+                    r"|need\s+to\s+change|i\s+want|i\s+need|can\s+i\s+change)\b",
+                    inp, re.IGNORECASE
+                )
+                # Also treat as field request if the entire input is just the field label
+                _FIELD_LABELS = {
+                    "submission mode", "pan delivery", "aadhaar photo on pan",
+                    "source of income", "address for communication",
+                    "residential status", "representative assessee",
+                    "full name", "annual income", "mother name", "mothers name", "email",
+                }
+                _is_bare_label = inp.strip().lower() in _FIELD_LABELS
+                if _is_field_request or _is_bare_label:
+                    flow.state["pending_modification"] = requested_field
+                    flow.save()
+                    return _ask_for_field(flow, requested_field)
+
             print(f"[DEBUG] Applying field update: field={field}, inp={inp!r}, user_input={user_input!r}")
             print(f"[DEBUG] Before update: {field}={flow.state.get(field)}")
             _apply_field_update(flow, field, inp, user_input)
@@ -1537,7 +2305,7 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
             flow.save()
             print(f"[DEBUG] Saved flow state, building confirmation...")
 
-            # ── For delivery_mode: show the fee table before the confirmation ──
+            # ── For delivery_mode: show the fee table before the confirmation + re-show options ──
             if field == "delivery_mode":
                 confirmation = _build_confirmation(flow)
                 new_mode = flow.state.get("delivery_mode")
@@ -1547,15 +2315,47 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                     fee_block = _FEE_SOFT.strip()
                 else:
                     fee_block = ""
+                field_prompt = _ask_for_field(flow, field)
+                combined = confirmation["answer"]
                 if fee_block:
-                    confirmation["answer"] = fee_block + "\n\n---\n\n" + confirmation["answer"]
-                return confirmation
+                    combined = fee_block + "\n\n---\n\n" + combined
+                combined += "\n\n---\n\n" + field_prompt["answer"]
+                # Keep pending so next radio click updates this field
+                flow.state["pending_modification"] = field
+                flow.save()
+                return {
+                    "answer": combined,
+                    "sources": [],
+                    "followups": [],
+                    "guided": field_prompt.get("guided", True),
+                    "step": "confirmation",
+                    "options": field_prompt.get("options"),
+                }
 
+            # ── Build confirmation + re-show the field options so user can change again ──
             confirmation = _build_confirmation(flow)
-            print(f"[DEBUG] Confirmation built, checking if aadhaar_photo is in answer...")
-            if "Aadhaar photo on PAN" in confirmation.get("answer", ""):
-                print(f"[DEBUG] Confirmation contains aadhaar_photo line")
-            return confirmation
+            field_prompt = _ask_for_field(flow, field)
+
+            # Fields with interactive options (radio/checkbox) — keep pending so next click updates
+            _INTERACTIVE_FIELDS = {
+                "submission_mode", "delivery_mode", "aadhaar_photo",
+                "source_of_income", "address_for_comm", "residential_status", "rep_assessee",
+            }
+            if field in _INTERACTIVE_FIELDS and field_prompt.get("options"):
+                flow.state["pending_modification"] = field
+                flow.save()
+            # Text fields (full_name, mother_name, email, salary): pending_modification stays None
+            # — confirmation is shown and they can type a new value or proceed
+
+            combined_answer = confirmation["answer"] + "\n\n---\n\n" + field_prompt["answer"]
+            return {
+                "answer": combined_answer,
+                "sources": [],
+                "followups": [],
+                "guided": field_prompt.get("guided", True),
+                "step": "confirmation",
+                "options": field_prompt.get("options"),
+            }
 
         # ── PRIORITY 2: User confirmed — advance and show document list immediately ──
         elif _yes.match(inp):
@@ -1571,8 +2371,11 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
             except Exception as e:
                 print(f"[ERROR] Failed to save profile: {e}")
             
+            # Get current language from flow state
+            current_language = flow.state.get("_current_language", language)
+            
             # Build the document list response directly (skip the "reply Yes" prompt)
-            doc_text = _ask_for_documents(flow)
+            doc_text = _ask_for_documents(flow, current_language)
             return {
                 "answer": doc_text,
                 "sources": [], "followups": [], "guided": True,
@@ -1596,9 +2399,26 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                 },
             }
 
+        # ── PRIORITY 2.5: User typed a field name or inline update without clicking "Change something" ──
+        # e.g. "name to Ravi and salary to 5 lakh", "email to ravi@gmail.com", "Source of income", "residential status"
+        elif not _yes.match(inp) and not _no.match(inp) and not flow.state.get("pending_modification"):
+            # First try: extract inline value updates ("name to X", "salary 5 lakh", etc.)
+            updates_made = _extract_multiple_field_updates(flow, inp, user_input)
+            if updates_made:
+                flow.state["pending_modification"] = None
+                flow.save()
+                return _build_confirmation(flow)
+
+            # Second try: user named a field they want to change ("Source of income", "residential status", etc.)
+            field = _detect_modification_field(inp)
+            if field:
+                flow.state["pending_modification"] = field
+                flow.save()
+                return _ask_for_field(flow, field)
+            # Nothing matched — fall through to generic response
+
         # ── PRIORITY 3: User clicked "Change something" or said what to change ──
         elif _no.match(inp):
-            # NEW: Try to extract multiple field updates from a single message
             # e.g., "change my name to John and mother name to Mary and salary to 5 lakh"
             updates_made = _extract_multiple_field_updates(flow, inp, user_input)
             
@@ -1629,21 +2449,53 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                 lines.append(f"- **Address for communication** — currently: *{s.get('address_for_comm', '—')}*")
                 lines.append(f"- **Residential status** — currently: *{s.get('residential_status', '—')}*")
                 lines.append(f"- **Representative Assessee** — currently: *{'Yes' if s.get('rep_assessee') else 'No' if s.get('rep_assessee') is not None else '—'}*")
-                lines.append("\n**You can change multiple fields at once!**")
-                lines.append("Examples:")
-                lines.append("- *\"change my name to John and salary to 5 lakh\"*")
-                lines.append("- *\"update email to john@example.com and mother name to Mary\"*")
-                lines.append("- Or just tell me one field: *\"change my name\"*")
+                lines.append("\nYou can update multiple fields at once — just say something like:")
+                lines.append('*"name to John and salary to 5 lakh"*')
+                lines.append('*"email to john@example.com and mother name to Mary"*')
+                lines.append("Or tell me just one field: *\"change my name\"*")
                 flow.state["pending_modification"] = "__awaiting__"
                 flow.save()
                 return {
                     "answer": "\n".join(lines),
-                    "sources": [], "followups": [], "guided": True, "step": step,
+                    "sources": [], "followups": [], "guided": False, "step": step,
                 }
 
         # ── PRIORITY 4: User is responding to "what to change" prompt ──────────
         elif flow.state.get("pending_modification") == "__awaiting__":
-            # NEW: Try to extract multiple field updates from a single message
+            # ── Check for affirmative first — user changed their mind and wants to proceed ──
+            if _yes.match(inp):
+                flow.state["details_confirmed"] = True
+                flow.state["pending_modification"] = None
+                flow.advance_step(); flow.save()
+                try:
+                    if user_id:
+                        save_flow_to_profile(user_id, flow.state)
+                except Exception as e:
+                    print(f"[ERROR] Failed to save profile: {e}")
+                current_language = flow.state.get("_current_language", language)
+                doc_text = _ask_for_documents(flow, current_language)
+                return {
+                    "answer": doc_text,
+                    "sources": [], "followups": [], "guided": True,
+                    "step": "documents",
+                    "flow_confirmed": True,
+                    "flow_data": {
+                        "full_name":          flow.state.get("full_name"),
+                        "mother_name":        flow.state.get("mother_name"),
+                        "email":              flow.state.get("email"),
+                        "salary":             flow.state.get("salary"),
+                        "applicant_type":     flow.state.get("applicant_type"),
+                        "submission_mode":    flow.state.get("submission_mode"),
+                        "delivery_mode":      flow.state.get("delivery_mode"),
+                        "aadhaar_photo":      flow.state.get("aadhaar_photo"),
+                        "source_of_income":   flow.state.get("source_of_income"),
+                        "address_for_comm":   flow.state.get("address_for_comm"),
+                        "residential_status": flow.state.get("residential_status"),
+                        "rep_assessee":       flow.state.get("rep_assessee"),
+                    },
+                }
+
+            # Try to extract multiple field updates from a single message
             updates_made = _extract_multiple_field_updates(flow, inp, user_input)
             
             if updates_made:
@@ -1756,32 +2608,15 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                         return _build_confirmation(flow)
                         
                 elif field == "salary":
-                    # Try to extract salary - handle typos in units
-                    salary_match = re.search(
-                        r"(?:salary|income|earn(?:ing)?s?|annual|per\s+year|p\.?a\.?)\s*(?:is\s*)?[:\-]?\s*"
-                        r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(lakh|laksh|laks|lakhs|laakh|lac|lacs|l\b|k\b|thousand|crore|cr\b)?",
-                        inp.lower()
-                    )
-                    if salary_match:
-                        raw_num = salary_match.group(1).replace(",", "")
-                        unit_str = (salary_match.group(2) or "").lower().strip() if salary_match.lastindex and salary_match.lastindex >= 2 else ""
-                        try:
-                            num = float(raw_num)
-                            # Normalize unit typos
-                            if unit_str in ("lakh", "laksh", "laks", "lakhs", "laakh", "lac", "lacs", "l"):
-                                num *= 100_000
-                            elif unit_str in ("k", "thousand"):
-                                num *= 1_000
-                            elif unit_str in ("crore", "cr"):
-                                num *= 10_000_000
-                            formatted = f"₹{num:,.0f}" if num >= 100_000 else f"₹{int(num):,}"
-                            flow.state["salary"] = formatted
-                            flow.state["pending_modification"] = None
-                            flow.save()
-                            print(f"[DEBUG] ✓ Updated salary to: {formatted}")
-                            return _build_confirmation(flow)
-                        except ValueError:
-                            print(f"[DEBUG] ✗ Salary parsing failed")
+                    result = _parse_salary(user_input)
+                    if result:
+                        flow.state["salary"] = result
+                        flow.state["pending_modification"] = None
+                        flow.save()
+                        print(f"[DEBUG] ✓ Updated salary to: {result!r}")
+                        return _build_confirmation(flow)
+                    else:
+                        print(f"[DEBUG] ✗ Salary parsing failed for: {user_input!r}")
                 
                 # If value not found in message, ask for it
                 print(f"[DEBUG] Value not extracted inline, asking for field: {field}")
@@ -1792,7 +2627,7 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
                 print(f"[DEBUG] No field detected from input")
                 return {
                     "answer": "I didn't catch that. Which field would you like to change? (e.g. *\"name\"*, *\"email\"*, *\"salary\"*, *\"mother's name\"*)",
-                    "sources": [], "followups": [], "guided": True, "step": step,
+                    "sources": [], "followups": [], "guided": False, "step": step,
                 }
 
         # Fallback — re-show confirmation
@@ -1801,10 +2636,31 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
     # ── Documents ────────────────────────────────────────────────
     elif step == "documents":
         if _is_off_topic_during_flow(inp): return None
-        _confirm = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay|ready|let'?s\s+go|proceed|go\s+ahead|upload\s+now)$", re.IGNORECASE)
+        language = flow.state.get("_current_language", "en")
+        _confirm = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay|ready|let'?s\s+go|proceed|go\s+ahead|upload\s+now|aam|haan)$", re.IGNORECASE)
         if _confirm.match(inp):
-            return {"answer": "Great! The upload panel is now open. Please upload your documents one at a time.", "sources": [], "followups": [], "guided": True, "step": step, "open_upload": True}
-        return {"answer": "Whenever you're ready, reply **Yes** and I'll open the upload panel.\n\n" + _ask_for_documents(flow), "sources": [], "followups": [], "guided": True, "step": step}
+            upload_msg = get_template("upload_now", language)
+            return {"answer": upload_msg, "sources": [], "followups": [], "guided": True, "step": step, "open_upload": True}
+
+        # ── Field update at documents step: user corrects a detail while uploading ──
+        # "ennodiya per devaprasath", "my name is Ravi", "salary 5 lakh", etc.
+        updates_made = _extract_multiple_field_updates(flow, inp, user_input)
+        if updates_made:
+            flow.save()
+            try:
+                if user_id:
+                    save_flow_to_profile(user_id, flow.state)
+            except Exception:
+                pass
+            doc_text = _ask_for_documents(flow, language)
+            if language == "ta":
+                prefix = "✓ விவரங்கள் புதுப்பிக்கப்பட்டன.\n\n"
+            else:
+                prefix = "✓ Details updated.\n\n"
+            return {"answer": prefix + doc_text, "sources": [], "followups": [], "guided": True, "step": step}
+
+        ready_msg = get_template("ready_to_upload", language)
+        return {"answer": ready_msg + "\n\n" + _ask_for_documents(flow, language), "sources": [], "followups": [], "guided": True, "step": step}
 
     # ── PAN number ───────────────────────────────────────────────
     elif step == "pan_number":
@@ -1850,32 +2706,110 @@ def handle_document_upload(session_id: str, filename: str, doc_type: str) -> dic
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _ask_for_documents(flow: FlowManager) -> str:
+def _ask_for_documents(flow: FlowManager, language: str = None) -> str:
+    # Get language from flow state if not provided
+    if language is None:
+        language = flow.state.get("_current_language", "en")
+    
     pending = flow.get_pending_docs()
     if not pending:
-        return "All documents are in — you're good to go!"
+        return get_template("all_docs_received", language)
 
     DOC_WHY = {
-        "aadhaar":          "Used for eKYC and Aadhaar-based identity verification.",
-        "driving_license":  "Accepted as proof of identity and address.",
-        "photograph":       "Printed on your physical PAN card for visual identity verification.",
-        "identity_proof":   "Mandatory KYC — confirms who you are.",
-        "address_proof":    "Your address is permanently recorded on the PAN database.",
-        "dob_proof":        "Your date of birth is permanently linked to your PAN.",
-        "correction_proof": "Required to verify the change and prevent fraud.",
+        "aadhaar":          "Used for eKYC and Aadhaar-based identity verification." if language == 'en' else 
+                           "eKYC மற்றும் ஆதார் அடிப்படையிலான அடையாள சரிபார்ப்புக்கு பயன்படுத்தப்படுகிறது." if language == 'ta' else
+                           "eKYC और आधार-आधारित पहचान सत्यापन के लिए उपयोग किया जाता है।",
+        "driving_license":  "Accepted as proof of identity and address." if language == 'en' else
+                           "அடையாளம் மற்றும் முகவரி சான்றாக ஏற்றுக்கொள்ளப்படுகிறது." if language == 'ta' else
+                           "पहचान और पते के प्रमाण के रूप में स्वीकार किया जाता है।",
+        "photograph":       "Printed on your physical PAN card for visual identity verification." if language == 'en' else
+                           "காட்சி அடையாள சரிபார்ப்புக்காக உங்கள் உடல் PAN அட்டையில் அச்சிடப்பட்டுள்ளது." if language == 'ta' else
+                           "दृश्य पहचान सत्यापन के लिए आपके भौतिक PAN कार्ड पर मुद्रित।",
+        "identity_proof":   "Mandatory KYC — confirms who you are." if language == 'en' else
+                           "கட்டாய KYC — நீங்கள் யார் என்பதை உறுதிப்படுத்துகிறது." if language == 'ta' else
+                           "अनिवार्य KYC — आप कौन हैं इसकी पुष्टि करता है।",
+        "address_proof":    "Your address is permanently recorded on the PAN database." if language == 'en' else
+                           "உங்கள் முகவரி PAN தரவுத்தளத்தில் நிரந்தரமாக பதிவு செய்யப்பட்டுள்ளது." if language == 'ta' else
+                           "आपका पता PAN डेटाबेस में स्थायी रूप से दर्ज है।",
+        "dob_proof":        "Your date of birth is permanently linked to your PAN." if language == 'en' else
+                           "உங்கள் பிறந்த தேதி உங்கள் PAN உடன் நிரந்தரமாக இணைக்கப்பட்டுள்ளது." if language == 'ta' else
+                           "आपकी जन्म तिथि आपके PAN से स्थायी रूप से जुड़ी हुई है।",
+        "correction_proof": "Required to verify the change and prevent fraud." if language == 'en' else
+                           "மாற்றத்தை சரிபார்க்கவும் மோசடியைத் தடுக்கவும் தேவை." if language == 'ta' else
+                           "परिवर्तन को सत्यापित करने और धोखाधड़ी को रोकने के लिए आवश्यक।",
+    }
+    
+    # Document label translations
+    DOC_LABELS = {
+        "aadhaar": {
+            "en": "Aadhaar Card",
+            "ta": "ஆதார் அட்டை",
+            "hi": "आधार कार्ड"
+        },
+        "driving_license": {
+            "en": "Driving License",
+            "ta": "ஓட்டுநர் உரிமம்",
+            "hi": "ड्राइविंग लाइसेंस"
+        },
+        "photograph": {
+            "en": "Applicant Photograph",
+            "ta": "விண்ணப்பதாரர் புகைப்படம்",
+            "hi": "आवेदक का फोटोग्राफ"
+        },
+        "identity_proof": {
+            "en": "Proof of Identity",
+            "ta": "அடையாள சான்று",
+            "hi": "पहचान प्रमाण"
+        },
+        "address_proof": {
+            "en": "Address Proof",
+            "ta": "முகவரி சான்று",
+            "hi": "पता प्रमाण"
+        },
+        "address_proof_foreign": {
+            "en": "Proof of Foreign Address",
+            "ta": "வெளிநாட்டு முகவரி சான்று",
+            "hi": "विदेशी पते का प्रमाण"
+        },
+        "address_proof_india": {
+            "en": "Proof of Indian Address (if any)",
+            "ta": "இந்திய முகவரி சான்று (ஏதேனும் இருந்தால்)",
+            "hi": "भारतीय पते का प्रमाण (यदि कोई हो)"
+        },
+        "dob_proof": {
+            "en": "Date of Birth Proof",
+            "ta": "பிறந்த தேதி சான்று",
+            "hi": "जन्म तिथि प्रमाण"
+        },
+        "correction_proof": {
+            "en": "Proof supporting correction",
+            "ta": "திருத்தத்தை ஆதரிக்கும் சான்று",
+            "hi": "सुधार का समर्थन करने वाला प्रमाण"
+        }
     }
 
-    lines = ["Here's what I need from you:\n"]
+    lines = [get_template("documents_needed", language) + "\n"]
     for i, doc in enumerate(pending, 1):
-        optional = " *(optional)*" if doc.get("optional") else ""
+        optional_text = f" *({get_template('optional', language)})*" if doc.get("optional") else ""
         options  = ", ".join(doc["options"])
-        why      = DOC_WHY.get(doc["key"], "Required for your PAN application.")
-        lines.append(f"### {i}. {doc['label']}{optional}")
+        why      = DOC_WHY.get(doc["key"], "Required for your PAN application." if language == 'en' else 
+                              "உங்கள் PAN விண்ணப்பத்திற்கு தேவை." if language == 'ta' else
+                              "आपके PAN आवेदन के लिए आवश्यक।")
+        
+        # Translate document label
+        doc_key = doc.get('key', '')
+        if doc_key in DOC_LABELS and language in DOC_LABELS[doc_key]:
+            doc_label = DOC_LABELS[doc_key][language]
+        else:
+            doc_label = doc.get('label', doc_key.replace('_', ' ').title())
+        
+        lines.append(f"### {i}. {doc_label}{optional_text}")
         lines.append(f"> {why}")
-        lines.append(f"Accepted: {options}\n")
+        accepted_label = get_template("accepted", language) if language != 'en' else "Accepted"
+        lines.append(f"{accepted_label}: {options}\n")
 
     lines.append("---")
-    lines.append("Ready to upload? Reply **Yes** and I'll open the upload panel.")
+    lines.append(get_template("ready_to_upload", language))
     return "\n".join(lines)
 
 
@@ -2019,37 +2953,40 @@ def _ask_details_collection(flow: FlowManager) -> dict:
 def _extract_multiple_field_updates(flow: FlowManager, inp: str, raw: str) -> bool:
     """
     Extract multiple field updates from a single message.
-    Handles inputs like: "change my name to John and mother name to Mary and salary to 5 lakh"
+    Handles inputs like:
+      "change my name to John and mother name to Mary and salary to 5 lakh"
+      "name to Ravi and email to ravi@gmail.com"
+      "name Ravi, salary 5 lakh"
     Returns True if at least one field was updated.
     """
     updated = False
     text = raw.strip()
     lower = text.lower()
-    
+
     print(f"[DEBUG _extract_multiple_field_updates] Input: {text!r}")
-    
+
     # ── Extract full name ─────────────────────────────────────────
-    # Patterns: "name to X", "name is X", "my name X"
-    # CRITICAL: Must NOT match "mother name" or "mom name"
+    # Flexible: "name to/is/as X", "change name X", "my name X"
+    # CRITICAL: Must NOT match "mother name"
     name_patterns = [
-        r"(?<!mother\s)(?<!mom\s)(?<!mother's\s)(?<!mom's\s)(?:my\s+)?(?:full\s+)?name\s+(?:to|is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
-        r"(?:change|update)\s+(?:my\s+)?(?:full\s+)?name\s+(?:to\s+)?([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        # "... name to/is/as <value>" — preceded by optional "full", but NOT "mother/mom"
+        r"(?<!\bmother\s)(?<!\bmom\s)(?<!\bmother's\s)(?<!\bmom's\s)"
+        r"(?:my\s+)?(?:full\s+)?name\s+(?:to|is|as|:)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        r"(?:change|update|correct)\s+(?:my\s+)?(?:full\s+)?name\s+(?:to\s+|as\s+|:?\s*)?([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        # Tanglish: "ennodiya per deva" / "en per ravi" / "naan per kumar"
+        r"(?:ennoda|ennodiya|en|naan|naanu)\s+(?:peyar|per)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s*,|\s+amma\b|\s+salary\b|\s+sambalam\b|\s*$)",
     ]
     for pattern in name_patterns:
         name_match = re.search(pattern, text, re.IGNORECASE)
         if name_match:
-            # Double-check: make sure this isn't actually a mother name
-            # Check if "mother" or "mom" appears before the match
             match_start = name_match.start()
             preceding_text = text[:match_start].lower()
             if re.search(r'\b(mother|mom|mum|maa|amma)\b', preceding_text[-20:] if len(preceding_text) > 20 else preceding_text):
                 print(f"[DEBUG] Skipping full_name match - detected mother/mom keyword before it")
                 continue
-            
             candidate = name_match.group(1).strip()
-            # Filter out common words
             words = candidate.split()
-            filtered_words = [w for w in words if w.lower() not in ('my', 'name', 'is', 'to', 'the', 'full', 'and')]
+            filtered_words = [w for w in words if w.lower() not in ('my', 'name', 'is', 'to', 'the', 'full', 'and', 'per', 'peyar')]
             if filtered_words:
                 candidate = ' '.join(filtered_words)
                 if _is_valid_name(candidate):
@@ -2057,20 +2994,22 @@ def _extract_multiple_field_updates(flow: FlowManager, inp: str, raw: str) -> bo
                     updated = True
                     print(f"[DEBUG] ✓ Updated full_name to: {candidate!r}")
                     break
-    
+
     # ── Extract mother's name ─────────────────────────────────────
-    # Patterns: "mother name to X", "mother name is X", "mom name X"
     mother_patterns = [
-        r"(?:my\s+)?(?:mother|mom)(?:'?s)?\s+name\s+(?:to|is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
-        r"(?:change|update)\s+(?:my\s+)?(?:mother|mom)(?:'?s)?\s+name\s+(?:to\s+)?([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        r"(?:my\s+)?(?:mother|mom|mum|maa|amma)(?:'?s)?\s+name\s+(?:to|is|as|:)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        r"(?:change|update|correct)\s+(?:my\s+)?(?:mother|mom|mum)(?:'?s)?\s+name\s+(?:to\s+|as\s+|:?\s*)?([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        # bare: "mother name Sunitha" or "mother Sunitha" or "mother as Sunitha"
+        r"(?:mother|mom|mum)(?:'?s)?\s+(?:name\s+)?(?:to\s+|is\s+|as\s+|:?\s*)([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s+and\b|\s*,|\s*$)",
+        # Tanglish: "amma per nabina" / "thaayin per meena" / "amma peyar priya"
+        r"(?:amma|thaayin|thaay|ammaa)\s+(?:peyar|per)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)*?)(?=\s*,|\s+salary\b|\s+sambalam\b|\s*$)",
     ]
     for pattern in mother_patterns:
         mom_match = re.search(pattern, text, re.IGNORECASE)
         if mom_match:
             candidate = mom_match.group(1).strip()
-            # Filter out common words
             words = candidate.split()
-            filtered_words = [w for w in words if w.lower() not in ('my', 'mother', 'mom', 'name', 'is', 'to', 'the', 'and')]
+            filtered_words = [w for w in words if w.lower() not in ('my', 'mother', 'mom', 'name', 'is', 'to', 'the', 'and', 'per', 'peyar', 'amma', 'thaayin')]
             if filtered_words:
                 candidate = ' '.join(filtered_words)
                 if _is_valid_name(candidate):
@@ -2078,82 +3017,142 @@ def _extract_multiple_field_updates(flow: FlowManager, inp: str, raw: str) -> bo
                     updated = True
                     print(f"[DEBUG] ✓ Updated mother_name to: {candidate!r}")
                     break
-    
+
     # ── Extract email ─────────────────────────────────────────────
-    # Pattern: any valid email address
     email_match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text)
     if email_match:
         flow.state["email"] = email_match.group(0).lower()
         flow.state["email_source"] = "new"
         updated = True
         print(f"[DEBUG] ✓ Updated email to: {flow.state['email']!r}")
-    
+
     # ── Extract salary ────────────────────────────────────────────
-    # Patterns: "salary to 5 lakh", "salary is 500000", "income 5,00,000"
-    salary_patterns = [
-        r"(?:salary|income|annual)\s+(?:to|is)\s+(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(lakh|laksh|laks|lakhs|laakh|lac|lacs|lkahs|lkah|lkhs|lahks|lahk|lakss|l\b|k\b|thousand|crore|cr\b)?",
-        r"(?:change|update)\s+(?:my\s+)?(?:salary|income)\s+(?:to\s+)?(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(lakh|laksh|laks|lakhs|laakh|lac|lacs|lkahs|lkah|lkhs|lahks|lahk|lakss|l\b|k\b|thousand|crore|cr\b)?",
-    ]
-    for pattern in salary_patterns:
-        salary_match = re.search(pattern, text, re.IGNORECASE)
-        if salary_match:
-            raw_num = salary_match.group(1).replace(",", "")
-            unit_str = (salary_match.group(2) or "").lower().strip() if salary_match.lastindex >= 2 else ""
-            try:
-                num = float(raw_num)
-                # Normalize unit (including common typos)
-                if unit_str in ("lakh", "laksh", "laks", "lakhs", "laakh", "lac", "lacs", "lkahs", "lkah", "lkhs", "lahks", "lahk", "lakss", "l"):
-                    num *= 100_000
-                elif unit_str in ("k", "thousand"):
-                    num *= 1_000
-                elif unit_str in ("crore", "cr"):
-                    num *= 10_000_000
-                formatted = f"₹{num:,.0f}" if num >= 100_000 else f"₹{int(num):,}"
-                flow.state["salary"] = formatted
-                updated = True
-                print(f"[DEBUG] ✓ Updated salary to: {formatted!r}")
-                break
-            except ValueError:
-                pass
-    
+    salary_result = _parse_salary(text)
+    if salary_result:
+        flow.state["salary"] = salary_result
+        updated = True
+        print(f"[DEBUG] ✓ Updated salary to: {salary_result!r}")
+
     # ── Extract submission mode ───────────────────────────────────
-    submission_keywords = {
+    _SUBMISSION_MAP = {
         "aadhaar": "Aadhaar-based Online (eKYC)",
         "ekyc": "Aadhaar-based Online (eKYC)",
         "online": "Aadhaar-based Online (eKYC)",
+        "ekc": "Aadhaar-based Online (eKYC)",
         "upload": "Upload scanned docs & eSign",
         "scan": "Upload scanned docs & eSign",
         "esign": "Upload scanned docs & eSign",
+        "scanned": "Upload scanned docs & eSign",
         "courier": "Fill online + courier physical form",
-        "physical": "Fill online + courier physical form",
+        "physical form": "Fill online + courier physical form",
         "post": "Fill online + courier physical form",
+        "speed post": "Fill online + courier physical form",
     }
-    submission_match = re.search(r"(?:submission|submit)\s+(?:mode\s+)?(?:to|is)\s+(\w+)", text, re.IGNORECASE)
-    if submission_match:
-        keyword = submission_match.group(1).lower()
-        if keyword in submission_keywords:
-            flow.state["submission_mode"] = submission_keywords[keyword]
+    # Match: "submission mode to/is/: aadhaar" or "change submission to ekyc"
+    _sub_m = re.search(
+        r"(?:submission\s+mode?|submit\s+mode?|how\s+to\s+submit)\s*(?:to|is|as|:|-|→)?\s*([a-zA-Z\s]+?)(?:\s+and\b|\s*,|\s*$)",
+        text, re.IGNORECASE
+    )
+    if _sub_m:
+        kw = _sub_m.group(1).strip().lower()
+        matched_mode = next((v for k, v in _SUBMISSION_MAP.items() if k in kw), None)
+        if matched_mode:
+            flow.state["submission_mode"] = matched_mode
             updated = True
-            print(f"[DEBUG] ✓ Updated submission_mode to: {flow.state['submission_mode']!r}")
-    
+            print(f"[DEBUG] ✓ Updated submission_mode to: {matched_mode!r}")
+    # Also match bare keyword after "change/update" near submission context
+    if not flow.state.get("submission_mode") or not updated:
+        for kw, mode in _SUBMISSION_MAP.items():
+            if re.search(rf"\b{re.escape(kw)}\b", lower):
+                if re.search(r"\b(submission|submit|mode)\b", lower):
+                    flow.state["submission_mode"] = mode
+                    updated = True
+                    print(f"[DEBUG] ✓ Updated submission_mode (keyword) to: {mode!r}")
+                    break
+
     # ── Extract delivery mode ─────────────────────────────────────
-    if re.search(r"(?:delivery|pan\s+delivery)\s+(?:to|is)\s+(?:physical|both|hard)", text, re.IGNORECASE):
+    if re.search(r"(?:delivery|pan\s+delivery)\s*(?:to|is|as|:)?\s*(?:physical|both|hard|home)", text, re.IGNORECASE):
         flow.state["delivery_mode"] = "physical_and_soft"
         updated = True
         print(f"[DEBUG] ✓ Updated delivery_mode to: physical_and_soft")
-    elif re.search(r"(?:delivery|pan\s+delivery)\s+(?:to|is)\s+(?:soft|email|digital|e-?pan)", text, re.IGNORECASE):
+    elif re.search(r"(?:delivery|pan\s+delivery)\s*(?:to|is|as|:)?\s*(?:soft|email|digital|e-?pan|only)", text, re.IGNORECASE):
         flow.state["delivery_mode"] = "soft_only"
         updated = True
         print(f"[DEBUG] ✓ Updated delivery_mode to: soft_only")
-    
+
     # ── Extract aadhaar photo ─────────────────────────────────────
-    aadhaar_photo_match = re.search(r"(?:aadhaar|aadhar)\s+photo\s+(?:to|is)\s+(yes|no)", text, re.IGNORECASE)
-    if aadhaar_photo_match:
-        value = aadhaar_photo_match.group(1).lower()
-        flow.state["aadhaar_photo"] = (value == "yes")
-        updated = True
-        print(f"[DEBUG] ✓ Updated aadhaar_photo to: {flow.state['aadhaar_photo']}")
-    
+    _aadhar_photo_ctx = re.search(r"\b(aa?dh?a+r\s+photo|photo\s+on\s+pan|photo\s+consent)\b", lower)
+    if _aadhar_photo_ctx:
+        if re.search(r"\b(yes|agree|consent|allow|ok|okay)\b", lower):
+            flow.state["aadhaar_photo"] = True
+            updated = True
+            print(f"[DEBUG] ✓ Updated aadhaar_photo to: True")
+        elif re.search(r"\b(no|decline|disagree|don'?t|not)\b", lower):
+            flow.state["aadhaar_photo"] = False
+            updated = True
+            print(f"[DEBUG] ✓ Updated aadhaar_photo to: False")
+
+    # ── Extract source of income ─────────────────────────────────
+    _SOI_CONTEXT = re.search(r"\b(source\s+of\s+income|income\s+source|income\s+type)\b", lower)
+    if _SOI_CONTEXT:
+        _SOI_MAP = [
+            (re.compile(r"\b(salary|salaried)\b", re.IGNORECASE), "Salary"),
+            (re.compile(r"\b(business|profession|self.?employed|freelanc)\b", re.IGNORECASE), "Income from Business / Profession"),
+            (re.compile(r"\b(house\s+property|rental|rent)\b", re.IGNORECASE), "Income from House property"),
+            (re.compile(r"\b(other\s+source|other)\b", re.IGNORECASE), "Income from Other sources"),
+            (re.compile(r"\b(capital\s+gain)\b", re.IGNORECASE), "Capital Gains"),
+            (re.compile(r"\b(no\s+income|unemployed|student|homemaker)\b", re.IGNORECASE), "No income"),
+        ]
+        matched_soi = [label for pat, label in _SOI_MAP if pat.search(text)]
+        if matched_soi:
+            flow.state["source_of_income"] = ", ".join(matched_soi)
+            updated = True
+            print(f"[DEBUG] ✓ Updated source_of_income to: {flow.state['source_of_income']!r}")
+
+    # ── Extract address for communication ────────────────────────
+    _ADDR_CONTEXT = re.search(r"\b(address\s+for\s+comm(unication)?|communication\s+address)\b", lower)
+    if _ADDR_CONTEXT:
+        if re.search(r"\b(residence|home|residential)\b", lower):
+            flow.state["address_for_comm"] = "Residence"
+            updated = True
+            print(f"[DEBUG] ✓ Updated address_for_comm to: Residence")
+        elif re.search(r"\b(office|work|workplace)\b", lower):
+            flow.state["address_for_comm"] = "Office"
+            updated = True
+            print(f"[DEBUG] ✓ Updated address_for_comm to: Office")
+        elif re.search(r"\b(representative|ra\b|assessee)\b", lower):
+            flow.state["address_for_comm"] = "Representative Assessee (RA)"
+            updated = True
+            print(f"[DEBUG] ✓ Updated address_for_comm to: Representative Assessee (RA)")
+
+    # ── Extract residential status ───────────────────────────────
+    _RES_CONTEXT = re.search(r"\b(residential\s+status|residency|resident\s+status)\b", lower)
+    if _RES_CONTEXT:
+        if re.search(r"\b(non.?resident|nri)\b", lower):
+            flow.state["residential_status"] = "Non-resident"
+            updated = True
+            print(f"[DEBUG] ✓ Updated residential_status to: Non-resident")
+        elif re.search(r"\b(rnor|not\s+ordinarily)\b", lower):
+            flow.state["residential_status"] = "Resident but not ordinarily resident"
+            updated = True
+            print(f"[DEBUG] ✓ Updated residential_status to: RNOR")
+        elif re.search(r"\bresident\b", lower):
+            flow.state["residential_status"] = "Resident"
+            updated = True
+            print(f"[DEBUG] ✓ Updated residential_status to: Resident")
+
+    # ── Extract representative assessee ─────────────────────────
+    _RA_CONTEXT = re.search(r"\b(representative\s+assessee|rep\s+assessee)\b", lower)
+    if _RA_CONTEXT:
+        if re.search(r"\b(yes|yeah|yep|true|appoint|need)\b", lower):
+            flow.state["rep_assessee"] = True
+            updated = True
+            print(f"[DEBUG] ✓ Updated rep_assessee to: True")
+        elif re.search(r"\b(no|nope|nah|false|not)\b", lower):
+            flow.state["rep_assessee"] = False
+            updated = True
+            print(f"[DEBUG] ✓ Updated rep_assessee to: False")
+
     print(f"[DEBUG _extract_multiple_field_updates] Updated: {updated}")
     return updated
 
@@ -2187,6 +3186,26 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
         (r'\blkahs\b',  'lakh'),   (r'\blkah\b',   'lakh'),    # Common typos
         (r'\blkhs\b',   'lakh'),   (r'\blahks\b',  'lakh'),
         (r'\blahk\b',   'lakh'),   (r'\blakss\b',  'lakh'),
+        # Romanized Tamil numbers
+        (r'\bonnu\b',   '1'),      (r'\boṉṉu\b',   '1'),
+        (r'\brendu\b',  '2'),      (r'\breṇṭu\b',  '2'),
+        (r'\bmoonu\b',  '3'),      (r'\bmūṉṟu\b',  '3'),
+        (r'\bnaalu\b',  '4'),      (r'\bnāṉku\b',  '4'),
+        (r'\banju\b',   '5'),      (r'\baintu\b',  '5'),      (r'\bainthu\b', '5'),
+        (r'\baaru\b',   '6'),      (r'\bāṟu\b',    '6'),
+        (r'\bezu\b',    '7'),      (r'\belu\b',    '7'),      (r'\bēḻu\b',    '7'),
+        (r'\bettu\b',   '8'),      (r'\beṭṭu\b',   '8'),
+        (r'\bombodu\b', '9'),      (r'\bonpathu\b','9'),      (r'\bonbathu\b','9'),
+        (r'\bpathu\b',  '10'),     (r'\bpatthu\b', '10'),     (r'\bpattu\b',  '10'),
+        # Romanized Tamil "lakh" variations
+        (r'\blatcham\b',    'lakh'), (r'\blaksham\b',   'lakh'),
+        (r'\blacham\b',     'lakh'), (r'\blakṣam\b',    'lakh'),
+        # Romanized Tamil keywords
+        (r'\bperu\b',       'name'),     (r'\bpeeru\b',     'name'),
+        (r'\bvanthu\b',     'is'),       (r'\bvandu\b',     'is'),
+        (r'\bennodiya\b',   'my'),       (r'\bennode\b',    'my'),
+        (r'\bennoda\b',     'my'),
+        (r'\bsambalam\b',   'salary'),   (r'\bsambhalam\b', 'salary'),
     ]
     for pat, repl in _KW_TYPOS:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
@@ -2209,6 +3228,8 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
         'my', 'name', 'is', 'the', 'full', 'and', 'a', 'an', 'her', 'his', 'their', 'no',
         'mother', 'mothers', 'mom', 'moms', 'maa', 'amma',
         'salary', 'income', 'email', 'mail', 'annual', 'per', 'year',
+        # Romanized Tamil stop words
+        'peru', 'peeru', 'ennodiya', 'ennode', 'ennoda', 'vanthu', 'vandu',
     }
 
     def _clean_name(raw_name: str) -> str:
@@ -2220,20 +3241,22 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
     if not flow.state.get("mother_name"):
         for seg in segments:
             # Patterns: "mother name is X", "mother's name X", "mom name X", "her name is X"
+            # Also handle romanized Tamil: "amma per X", "amma peru X"
+            # NOTE: "amma" is normalised to "mother" in Step 1, so match both
             m = re.match(
-                r"(?:my\s+|her\s+|his\s+|their\s+)?(?:mother(?:'?s)?|mom(?:'?s)?|maa|amma)\s+(?:full\s+)?name\s*(?:is\s*)?[:\-]?\s*(.+)",
+                r"(?:my\s+|her\s+|his\s+|their\s+)?(?:mother(?:'?s)?|mom(?:'?s)?|maa|amma)\s+(?:full\s+)?(?:name|per|peru)\s*(?:is\s*)?[:\-]?\s*(.+)",
                 seg, re.IGNORECASE
             )
             if not m:
                 # Also catch: "her name is X" (when context is about mother)
                 m = re.match(
-                    r"(?:her|his|their)\s+name\s*(?:is\s*)?[:\-]?\s*(.+)",
+                    r"(?:her|his|their)\s+(?:name|per|peru)\s*(?:is\s*)?[:\-]?\s*(.+)",
                     seg, re.IGNORECASE
                 )
             if not m:
                 # Also catch: "mother X Y" (no "name" keyword)
                 m = re.match(
-                    r"(?:my\s+|her\s+|his\s+)?(?:mother(?:'?s)?|mom(?:'?s)?)\s+(?!name\b)(.+)",
+                    r"(?:my\s+|her\s+|his\s+)?(?:mother(?:'?s)?|mom(?:'?s)?|amma)\s+(?!name|per|peru\b)(.+)",
                     seg, re.IGNORECASE
                 )
             if m:
@@ -2274,8 +3297,9 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
                 continue
 
             # Pattern: "my name is X" / "name is X" / "name: X"
+            # Also handle romanized Tamil: "my per X", "ennodiya per X"
             m = re.match(
-                r"(?:my\s+)?(?:full\s+)?name\s*(?:is\s*)?[:\-]?\s*(.+)",
+                r"(?:my\s+)?(?:full\s+)?(?:name|per|peru)\s*(?:is\s*)?[:\-]?\s*(.+)",
                 seg, re.IGNORECASE
             )
             if m:
@@ -2293,13 +3317,13 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
         if not flow.state.get("full_name"):
             search_text = text
             # Truncate at first mother/salary keyword
-            cut = re.search(r'\b(mother|mom|salary|income|email)\b', text, re.IGNORECASE)
+            cut = re.search(r'\b(mother|mom|amma|salary|income|email)\b', text, re.IGNORECASE)
             if cut:
                 search_text = text[:cut.start()]
 
-            # Look for "name is X" pattern anywhere
+            # Look for "name is X" or "per X" pattern anywhere
             m = re.search(
-                r"(?:my\s+)?(?:full\s+)?name\s*(?:is\s*)?[:\-]?\s*([A-Za-z][A-Za-z\s]{1,40}?)(?:\s*$|\s*,|\s+and\b)",
+                r"(?:my\s+)?(?:full\s+)?(?:name|per|peru)\s*(?:is\s*)?[:\-]?\s*([A-Za-z][A-Za-z\s]{1,40}?)(?:\s*$|\s*,|\s+and\b)",
                 search_text, re.IGNORECASE
             )
             if m:
@@ -2334,83 +3358,166 @@ def _extract_details(flow: FlowManager, inp: str, raw: str) -> bool:
 
     # ── Step 6: Extract salary / annual income ────────────────────
     if not flow.state.get("salary"):
-        # Try each segment independently for salary
         salary_found = False
-
-        # Helper: parse Indian number format (5,00,000 → 500000)
-        def _parse_indian_num(s: str) -> float:
-            return float(s.replace(",", ""))
-
         for seg in segments:
-            # Pattern A: keyword + number + optional unit
-            # Handles: "salary is 6 lakh", "income 5,00,000", "annual 5,00,000"
-            m = re.search(
-                r"(?:salary|income|earn(?:ing)?s?|annual|per\s+year|p\.?a\.?)\s*(?:is\s*)?[:\-]?\s*"
-                r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(lakh|lac|l\b|k\b|thousand|crore|cr\b)?",
-                seg, re.IGNORECASE
-            )
-            if not m:
-                # Pattern B: currency symbol + number + optional unit
-                m = re.search(
-                    r"(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d+)?)\s*(lakh|lac|l\b|k\b|thousand|crore|cr\b)?",
-                    seg, re.IGNORECASE
-                )
-            if not m:
-                # Pattern C: bare number + unit (e.g. "6 lakh", "500000")
-                m = re.search(
-                    r"\b([\d,]+(?:\.\d+)?)\s*(lakh|lac|l\b|k\b|thousand|crore|cr\b)\b",
-                    seg, re.IGNORECASE
-                )
-            if m:
-                raw_num_str = m.group(1)
-                unit_str = (m.group(2) or "").lower().strip()
-                print(f"[DEBUG _extract_details] Salary match in {seg!r}: num={raw_num_str!r}, unit={unit_str!r}")
-                try:
-                    num = _parse_indian_num(raw_num_str)
-                    if unit_str in ("lakh", "lac", "l"):
-                        num *= 100_000
-                    elif unit_str in ("k", "thousand"):
-                        num *= 1_000
-                    elif unit_str in ("crore", "cr"):
-                        num *= 10_000_000
-                    formatted = f"₹{num:,.0f}"
-                    flow.state["salary"] = formatted
-                    updated = True
-                    salary_found = True
-                    print(f"[DEBUG _extract_details] ✓ salary = {formatted!r}")
-                    break
-                except ValueError as e:
-                    print(f"[DEBUG _extract_details] ✗ Salary parse error: {e}")
-
+            result = _parse_salary(seg)
+            if result:
+                flow.state["salary"] = result
+                updated = True
+                salary_found = True
+                print(f"[DEBUG _extract_details] ✓ salary = {result!r}")
+                break
         if not salary_found:
             # Final fallback: search entire normalised text
-            m = re.search(
-                r"(?:salary|income|earn(?:ing)?s?|annual)\s*(?:is\s*)?[:\-]?\s*"
-                r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(lakh|lac|l\b|k\b|thousand|crore|cr\b)?",
-                text, re.IGNORECASE
-            )
-            if m:
-                raw_num_str = m.group(1)
-                unit_str = (m.group(2) or "").lower().strip()
-                try:
-                    num = _parse_indian_num(raw_num_str)
-                    if unit_str in ("lakh", "lac", "l"):
-                        num *= 100_000
-                    elif unit_str in ("k", "thousand"):
-                        num *= 1_000
-                    elif unit_str in ("crore", "cr"):
-                        num *= 10_000_000
-                    formatted = f"₹{num:,.0f}"
-                    flow.state["salary"] = formatted
-                    updated = True
-                    print(f"[DEBUG _extract_details] ✓ salary (fallback) = {formatted!r}")
-                except ValueError:
-                    pass
+            result = _parse_salary(text)
+            if result:
+                flow.state["salary"] = result
+                updated = True
+                print(f"[DEBUG _extract_details] ✓ salary (fallback) = {result!r}")
 
     print(f"[DEBUG _extract_details] Final: full_name={flow.state.get('full_name')!r}, "
           f"mother_name={flow.state.get('mother_name')!r}, salary={flow.state.get('salary')!r}, "
           f"updated={updated}")
     return updated
+
+
+def _parse_salary(text: str) -> str | None:
+    """
+    Parse salary/income from a string in any common Indian format.
+    Returns formatted string like "₹5,00,000" or None if not found.
+
+    Handles:
+      - 6 lakh / 6 lakhs / 6L / 6l / 6.5 lakh / 3lahks / 5lakh (no space)
+      - 6 lpa / 6 LPA / 6.5 lpa  (Lakhs Per Annum)
+      - 6 cr / 6 crore / 6.5 crore / 2crore (no space)
+      - 50k / 50K / 50 thousand
+      - ₹5,00,000 / Rs. 500000 / INR 500000
+      - 500000 (bare number ≥ 10000, treated as rupees)
+      - "six lakh" / "five lakh fifty thousand" (word numbers)
+    """
+    t = text.strip().lower()
+
+    # ── Step 0: Insert space between digit and attached unit (3lahks → 3 lahks) ──
+    # Handles: "3lahks", "5lakh", "6lakhs", "2crore", "50k" etc.
+    _UNIT_SUFFIXES = (
+        r'lahks?|lakhs?|laksh|laks|laakh|lac[cs]?|lkahs?|lkah|lkhs|lahks?|lahk|lakss'
+        r'|lpa|l\.p\.a\.?'
+        r'|crores?|cr'
+        r'|thousands?'
+        r'|k'
+        r'|l\b'
+    )
+    t = re.sub(rf'(\d)({_UNIT_SUFFIXES})', r'\1 \2', t)
+
+    # ── Step 1: Normalise unit spellings ─────────────────────────
+    _NORM = [
+        (r'\blpa\b',     'lakh'),
+        (r'\bl\.p\.a\.?\b', 'lakh'),
+        (r'\blakhs?\b',  'lakh'),   (r'\blaccs?\b', 'lakh'),
+        (r'\blac\b',     'lakh'),   (r'\blacs\b',   'lakh'),
+        (r'\blaakh\b',   'lakh'),   (r'\blaksh\b',  'lakh'),
+        (r'\blaks\b',    'lakh'),   (r'\blkahs?\b', 'lakh'),
+        (r'\blkah\b',    'lakh'),   (r'\blkhs\b',   'lakh'),
+        (r'\blahks?\b',  'lakh'),   (r'\blahk\b',   'lakh'),
+        (r'\blakss\b',   'lakh'),
+        (r'\blatcham\b', 'lakh'),   (r'\blaksham\b','lakh'),
+        (r'\blacham\b',  'lakh'),
+        (r'\bcrores?\b', 'crore'),  (r'\bcr\b',     'crore'),
+        (r'\bthousands?\b', 'k'),
+        (r'\bper\s+annum\b', ''),
+        (r'\bp\.?a\.?\b', ''),
+    ]
+    for pat, repl in _NORM:
+        t = re.sub(pat, repl, t)
+
+    # ── Step 2: Word numbers → digits ────────────────────────────
+    _WORD_NUMS = {
+        'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,
+        'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
+        'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15,
+        'sixteen':16,'seventeen':17,'eighteen':18,'nineteen':19,'twenty':20,
+        'thirty':30,'forty':40,'fifty':50,'sixty':60,'seventy':70,
+        'eighty':80,'ninety':90,'hundred':100,
+    }
+    def _words_to_num(s: str) -> str:
+        tokens = s.split()
+        result, acc = [], 0
+        for tok in tokens:
+            if tok in _WORD_NUMS:
+                acc += _WORD_NUMS[tok]
+            else:
+                if acc:
+                    result.append(str(acc))
+                    acc = 0
+                result.append(tok)
+        if acc:
+            result.append(str(acc))
+        return ' '.join(result)
+
+    t = _words_to_num(t)
+
+    # ── Step 3: Pattern matching ──────────────────────────────────
+    def _to_rupees(num: float, unit: str) -> float:
+        u = unit.strip().lower()
+        if u == 'lakh':  return num * 100_000
+        if u == 'crore': return num * 10_000_000
+        if u == 'k':     return num * 1_000
+        return num
+
+    def _fmt(num: float) -> str:
+        return f"₹{num:,.0f}"
+
+    # 1. Currency prefix: ₹ / Rs. / INR then number then optional unit
+    m = re.search(
+        r'(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)\s*(lakh|crore|k)?',
+        t, re.IGNORECASE
+    )
+    if m:
+        try:
+            return _fmt(_to_rupees(float(m.group(1).replace(',','')), m.group(2) or ''))
+        except ValueError:
+            pass
+
+    # 2. Keyword then number then unit: "salary is 6 lakh", "income 5,00,000"
+    m = re.search(
+        r'(?:salary|income|earn(?:ing)?s?|annual)\s*(?:is\s*|:\s*|of\s*)?'
+        r'([\d,]+(?:\.\d+)?)\s*(lakh|crore|k)?',
+        t, re.IGNORECASE
+    )
+    if m:
+        try:
+            return _fmt(_to_rupees(float(m.group(1).replace(',','')), m.group(2) or ''))
+        except ValueError:
+            pass
+
+    # 3. Number directly attached to single-letter unit: "6L", "6.5L", "50K", "2CR"
+    m = re.search(r'\b([\d]+(?:\.\d+)?)\s*(l|k|cr)\b', t, re.IGNORECASE)
+    if m:
+        try:
+            unit_map = {'l': 'lakh', 'k': 'k', 'cr': 'crore'}
+            return _fmt(_to_rupees(float(m.group(1)), unit_map[m.group(2).lower()]))
+        except ValueError:
+            pass
+
+    # 4. Number + unit (with space after normalization): "6 lakh", "2.5 crore", "50 k"
+    m = re.search(r'\b([\d,]+(?:\.\d+)?)\s+(lakh|crore|k)\b', t, re.IGNORECASE)
+    if m:
+        try:
+            return _fmt(_to_rupees(float(m.group(1).replace(',','')), m.group(2)))
+        except ValueError:
+            pass
+
+    # 5. Bare number ≥ 10,000 (treat as rupees): "500000", "5,00,000"
+    m = re.search(r'\b([\d,]+)\b', t)
+    if m:
+        try:
+            val = float(m.group(1).replace(',',''))
+            if val >= 10_000:
+                return _fmt(val)
+        except ValueError:
+            pass
+
+    return None
 
 
 def _is_valid_name(name: str) -> bool:
@@ -2459,25 +3566,39 @@ def _build_confirmation(flow: FlowManager) -> dict:
         if val is False: return "No"
         return str(val) if val else "—"
 
+    delivery = (
+        "Physical + e-PAN" if s.get("delivery_mode") == "physical_and_soft"
+        else "e-PAN only" if s.get("delivery_mode") == "soft_only"
+        else "—"
+    )
+
     lines = [
-        "Here's everything I've collected for your PAN application.\n",
-        "**Application Options**",
-        f"**Submission mode:** {s.get('submission_mode') or '—'}",
-        f"**PAN delivery:** {'Physical + e-PAN' if s.get('delivery_mode') == 'physical_and_soft' else 'e-PAN only' if s.get('delivery_mode') == 'soft_only' else '—'}",
-        f"**Aadhaar photo on PAN:** {_yn(s.get('aadhaar_photo'))}",
-        f"**Source of income:** {s.get('source_of_income') or '—'}",
-        f"**Address for communication:** {s.get('address_for_comm') or '—'}",
-        f"**Residential status:** {s.get('residential_status') or '—'}",
-        f"**Representative Assessee:** {_yn(s.get('rep_assessee'))}",
+        "Here's everything I've collected for your PAN application.",
         "",
-        "**Personal Details**",
-        f"**Full name (as in Aadhaar):** {s.get('full_name') or '—'}",
-        f"**Mother's name:** {s.get('mother_name') or '—'}",
-        f"**Email:** {s.get('email') or '—'}",
-        f"**Annual income:** {s.get('salary') or '—'}",
+        "## Application Options",
+        f"- Submission mode: **{s.get('submission_mode') or '—'}**",
+        f"- PAN delivery: **{delivery}**",
+        f"- Aadhaar photo on PAN: **{_yn(s.get('aadhaar_photo'))}**",
+        f"- Source of income: **{s.get('source_of_income') or '—'}**",
+        f"- Address for communication: **{s.get('address_for_comm') or '—'}**",
+        f"- Residential status: **{s.get('residential_status') or '—'}**",
+        f"- Representative Assessee: **{_yn(s.get('rep_assessee'))}**",
+        "",
+        "## Personal Details",
+        f"- Full name (as in Aadhaar): **{s.get('full_name') or '—'}**",
+        f"- Mother's name: **{s.get('mother_name') or '—'}**",
+        f"- Email: **{s.get('email') or '—'}**",
+        f"- Annual income: **{s.get('salary') or '—'}**",
+        "",
+        "---",
+        "",
+        "Does everything look correct? Proceed to document upload?",
+        "",
+        "You can also update multiple fields at once — just say something like:",
+        '*"change my name to John and salary to 5 lakh"*',
     ]
 
-    answer = "\n".join(lines) + "\n\n---\n\nDoes everything look correct? Proceed to document upload?"
+    answer = "\n".join(lines)
 
     # Add explicit button options for Proceed/Change action buttons
     opts = {
@@ -2485,65 +3606,282 @@ def _build_confirmation(flow: FlowManager) -> dict:
         "choices": ["Yes, proceed", "Change something"],
     }
 
+    # ── Per-field structured data for inline edit buttons ────────────────────
+    # Each entry: { key, label, label_ta, value, display_value, field_type, options? }
+    confirmation_fields = [
+        # ── Application Options ──────────────────────────────────────────────
+        {
+            "key": "submission_mode",
+            "label": "Submission Mode",
+            "label_ta": "சமர்ப்பிக்கும் முறை",
+            "value": s.get("submission_mode") or "",
+            "display_value": s.get("submission_mode") or "—",
+            "field_type": "radio",
+            "section": "application",
+            "choices": [
+                "Aadhaar-based Online (eKYC)",
+                "Upload scanned docs & eSign",
+                "Fill online + courier physical form",
+            ],
+            "choices_ta": [
+                "ஆதார் அடிப்படையிலான ஆன்லைன் (eKYC)",
+                "ஸ்கேன் செய்த ஆவணங்களை பதிவேற்றி eSign செய்யவும்",
+                "ஆன்லைனில் நிரப்பி இயற்பியல் படிவத்தை அனுப்பவும்",
+            ],
+        },
+        {
+            "key": "delivery_mode",
+            "label": "PAN Delivery",
+            "label_ta": "விநியோக முறை",
+            "value": s.get("delivery_mode") or "",
+            "display_value": delivery,
+            "field_type": "radio",
+            "section": "application",
+            "choices": [
+                "Physical copy to home + soft copy on email (Fees applicable)",
+                "Only soft copy on email (Fees applicable)",
+            ],
+            "choices_ta": [
+                "வீட்டிற்கு இயற்பியல் நகல் + மின்னஞ்சலில் மென் நகல் (கட்டணம் உண்டு)",
+                "மின்னஞ்சலில் மட்டும் மென் நகல் (கட்டணம் உண்டு)",
+            ],
+        },
+        {
+            "key": "aadhaar_photo",
+            "label": "Aadhaar Photo on PAN",
+            "label_ta": "ஆதார் புகைப்படம்",
+            "value": str(s.get("aadhaar_photo")) if s.get("aadhaar_photo") is not None else "",
+            "display_value": _yn(s.get("aadhaar_photo")),
+            "field_type": "radio",
+            "section": "application",
+            "choices": ["Yes", "No"],
+            "choices_ta": ["ஆம்", "இல்லை"],
+        },
+        {
+            "key": "source_of_income",
+            "label": "Source of Income",
+            "label_ta": "வருமான மூலம்",
+            "value": s.get("source_of_income") or "",
+            "display_value": s.get("source_of_income") or "—",
+            "field_type": "checkbox",
+            "section": "application",
+            "choices": [
+                "Salary",
+                "Income from Business / Profession",
+                "Income from House property",
+                "Income from Other sources",
+                "Capital Gains",
+                "No income",
+            ],
+            "choices_ta": [
+                "சம்பளம்",
+                "வணிகம் / தொழிலிலிருந்து வருமானம்",
+                "வீட்டு சொத்திலிருந்து வருமானம்",
+                "பிற மூலங்களிலிருந்து வருமானம்",
+                "மூலதன ஆதாயங்கள்",
+                "வருமானம் இல்லை",
+            ],
+        },
+        {
+            "key": "address_for_comm",
+            "label": "Address for Communication",
+            "label_ta": "தொடர்பு முகவரி",
+            "value": s.get("address_for_comm") or "",
+            "display_value": s.get("address_for_comm") or "—",
+            "field_type": "radio",
+            "section": "application",
+            "choices": ["Residence", "Office", "Representative Assessee (RA)"],
+            "choices_ta": ["வீடு", "அலுவலகம்", "பிரதிநிதி நியமனம் (RA)"],
+        },
+        {
+            "key": "residential_status",
+            "label": "Residential Status",
+            "label_ta": "குடியிருப்பு நிலை",
+            "value": s.get("residential_status") or "",
+            "display_value": s.get("residential_status") or "—",
+            "field_type": "radio",
+            "section": "application",
+            "choices": ["Resident", "Non-resident", "Resident but not ordinarily resident"],
+            "choices_ta": ["குடியிருப்பாளர்", "குடியிருப்பு இல்லாதவர்", "குடியிருப்பாளர் ஆனால் வழக்கமாக இல்லாதவர்"],
+        },
+        {
+            "key": "rep_assessee",
+            "label": "Representative Assessee",
+            "label_ta": "பிரதிநிதி நியமனம்",
+            "value": str(s.get("rep_assessee")) if s.get("rep_assessee") is not None else "",
+            "display_value": _yn(s.get("rep_assessee")),
+            "field_type": "radio",
+            "section": "application",
+            "choices": ["Yes", "No"],
+            "choices_ta": ["ஆம்", "இல்லை"],
+        },
+        # ── Personal Details ─────────────────────────────────────────────────
+        {
+            "key": "full_name",
+            "label": "Full Name (as in Aadhaar)",
+            "label_ta": "முழு பெயர் (ஆதார் படி)",
+            "value": s.get("full_name") or "",
+            "display_value": s.get("full_name") or "—",
+            "field_type": "text",
+            "section": "personal",
+        },
+        {
+            "key": "mother_name",
+            "label": "Mother's Name",
+            "label_ta": "தாயின் பெயர்",
+            "value": s.get("mother_name") or "",
+            "display_value": s.get("mother_name") or "—",
+            "field_type": "text",
+            "section": "personal",
+        },
+        {
+            "key": "email",
+            "label": "Email",
+            "label_ta": "மின்னஞ்சல்",
+            "value": s.get("email") or "",
+            "display_value": s.get("email") or "—",
+            "field_type": "text",
+            "section": "personal",
+        },
+        {
+            "key": "salary",
+            "label": "Annual Income",
+            "label_ta": "ஆண்டு வருமானம்",
+            "value": s.get("salary") or "",
+            "display_value": s.get("salary") or "—",
+            "field_type": "text",
+            "section": "personal",
+        },
+    ]
+
     return {
         "answer": answer,
-        "sources": [], "followups": [], "guided": True,
+        "sources": [], "followups": [], "guided": False,
         "step": "confirmation",
         "options": opts,
+        "confirmation_fields": confirmation_fields,
     }
 
 
 def _detect_modification_field(inp: str) -> str | None:
-    """Detect which field the user wants to modify from their message."""
-    lower = inp.lower()
+    """
+    Detect which field the user wants to modify from their message.
+    Supports English and Tamil.
+    """
+    lower = inp.strip().lower()
     print(f"[DEBUG] Detecting field from input: {lower!r}")
-    
-    # Match "name" in various contexts - treat as full_name field
-    # Check for "mother" FIRST to avoid false matches
-    if re.search(r"\b(mother|mom|mum)\b", lower):
+
+    # ── Mother name — check FIRST to avoid matching plain "name" ──
+    # English + Tamil patterns
+    if re.search(r"\b(mother|mom|mum|தாய்|அம்மா)\b", lower):
         print("[DEBUG] Matched: mother_name")
         return "mother_name"
-    
-    # Now check for general "name" patterns (after mother check)
-    if re.search(r"\b(full\s+name|my\s+name|name\s+on\s+aadhaar|aadhaar\s+name|just\s+name|the\s+name|change\s+name|update\s+name|name\s+is|name\s+to|name$)\b", lower):
+
+    # ── Full name ──────────────────────────────────────────────────
+    # English + Tamil: பெயர் (name)
+    if re.search(r"\b(full\s+name|my\s+name|name\s+on\s+aadhaar|aadhaar\s+name|"
+                 r"change\s+name|update\s+name|name\s+is|name\s+to|name$|^name\b|"
+                 r"பெயர்|முழு\s*பெயர்|என்\s*பெயர்)\b", lower):
         print("[DEBUG] Matched: full_name")
         return "full_name"
-    
-    if re.search(r"\b(email|mail|gmail|e-mail)\b", lower):
+
+    # ── Email ──────────────────────────────────────────────────────
+    # English + Tamil: மின்னஞ்சல் (email)
+    if re.search(r"\b(email|mail|gmail|e-mail|மின்னஞ்சல்|மெயில்)\b", lower):
         print("[DEBUG] Matched: email")
         return "email"
-    # Check "source of income" BEFORE "salary/income" to avoid false matches
-    if re.search(r"\b(source\s+of\s+income|income\s+source|income\s+type)\b", lower):
+
+    # ── Source of income — check BEFORE plain "income/salary" ─────
+    # English + Tamil: வருமான ஆதாரம் (income source)
+    if re.search(r"\b(source\s+of\s+income|income\s+source|income\s+type|^source\b|"
+                 r"வருமான\s*ஆதாரம்|வருமானம்\s*வகை)\b", lower):
         print("[DEBUG] Matched: source_of_income")
         return "source_of_income"
-    if re.search(r"\b(salary|income|earning|annual|pay)\b", lower):
+
+    # ── Annual income / salary ─────────────────────────────────────
+    # English + Tamil: சம்பளம் (salary), வருமானம் (income), ஆண்டு வருமானம் (annual income)
+    if re.search(r"\b(salary|income|earning|annual|pay|annual\s+income|"
+                 r"சம்பளம்|வருமானம்|ஆண்டு\s*வருமானம்|சம்பளத்|வருவாய்)\b", lower):
         print("[DEBUG] Matched: salary")
         return "salary"
-    if re.search(r"\b(submission|how\s+to\s+submit|submit\s+mode)\b", lower):
+
+    # ── Submission mode ────────────────────────────────────────────
+    # English + Tamil: சமர்ப்பிப்பு முறை (submission mode)
+    if re.search(r"\b(submission|how\s+to\s+submit|submit\s+mode|submission\s+mode|"
+                 r"சமர்ப்பிப்பு|சமர்ப்பிக்கும்\s*முறை|சமர்ப்பிப்பு\s*முறை)\b", lower):
         print("[DEBUG] Matched: submission_mode")
         return "submission_mode"
-    if re.search(r"\b(delivery|card\s+delivery|physical|soft\s+copy)\b", lower):
+
+    # ── Delivery mode ──────────────────────────────────────────────
+    # English + Tamil: விநியோக முறை (delivery mode), PAN விநியோகம் (PAN delivery)
+    if re.search(r"\b(delivery|card\s+delivery|pan\s+delivery|soft\s+copy|"
+                 r"விநியோக|விநியோகம்|விநியோக\s*முறை|அனுப்பும்\s*முறை)\b", lower):
         print("[DEBUG] Matched: delivery_mode")
         return "delivery_mode"
-    if re.search(r"\b(aa?dhaa?r\s+photo|photo\s+on\s+pan|photo\s+consent|aadhar\s+photo)\b", lower):
+
+    # ── Aadhaar photo ──────────────────────────────────────────────
+    # English + Tamil: ஆதார் புகைப்படம் (Aadhaar photo)
+    if re.search(r"\b(aa?dhaa?r\s+photo|photo\s+on\s+pan|photo\s+consent|aadhar\s+photo|aadhaar\s+photo|"
+                 r"ஆதார்\s*புகைப்படம்|புகைப்படம்)\b", lower):
         print("[DEBUG] Matched: aadhaar_photo")
         return "aadhaar_photo"
-    # Check for "address" patterns - be flexible with variations
-    if re.search(r"\b(address\s+for\s+comm|communication\s+address|address\s+for\s+communication|comm\s+address|address.*communication|communication.*address)\b", lower):
+
+    # ── Address for communication ──────────────────────────────────
+    # English + Tamil: தொடர்பு முகவரி (communication address)
+    if re.search(r"\b(address\s+for\s+comm(unication)?|communication\s+address|"
+                 r"comm\s+address|address.*communication|communication.*address|"
+                 r"தொடர்பு\s*முகவரி|தொடர்பிற்கான\s*முகவரி|முகவரி)\b", lower):
         print("[DEBUG] Matched: address_for_comm")
         return "address_for_comm"
-    # Also match just "address" if it's the only word or with "change/update"
-    if re.search(r"^address$|^change\s+address$|^update\s+address$", lower):
+    if re.search(r"^address$|^change\s+address$|^update\s+address$|^முகவரி$", lower):
         print("[DEBUG] Matched: address_for_comm (simple)")
         return "address_for_comm"
-    if re.search(r"\b(residential\s+status|residency|resident\s+status)\b", lower):
+
+    # ── Residential status ─────────────────────────────────────────
+    # English + Tamil: குடியிருப்பு நிலை (residential status)
+    if re.search(r"\b(residential\s+status|residency|resident\s+status|residential|"
+                 r"குடியிருப்பு|குடியிருப்பு\s*நிலை|வசிப்பிட\s*நிலை)\b", lower):
         print("[DEBUG] Matched: residential_status")
         return "residential_status"
-    # Check for "representative assessee" - must be specific to avoid matching address option
-    if re.search(r"\b(representative\s+assessee|rep\s+assessee|appointing\s+representative)\b", lower):
+
+    # ── Representative Assessee ────────────────────────────────────
+    # English + Tamil: பிரதிநிதி மதிப்பீட்டாளர் (representative assessee)
+    if re.search(r"\b(representative\s+assessee|rep\s+assessee|appointing\s+representative|"
+                 r"பிரதிநிதி|பிரதிநிதி\s*மதிப்பீட்டாளர்)\b", lower):
         print("[DEBUG] Matched: rep_assessee")
         return "rep_assessee"
-    
+
+    # ── Bare field-label fallback — exact label text from confirmation screen ──
+    _LABEL_MAP = {
+        # English labels
+        "submission mode":           "submission_mode",
+        "pan delivery":              "delivery_mode",
+        "aadhaar photo on pan":      "aadhaar_photo",
+        "source of income":          "source_of_income",
+        "address for communication": "address_for_comm",
+        "residential status":        "residential_status",
+        "representative assessee":   "rep_assessee",
+        "full name":                 "full_name",
+        "annual income":             "salary",
+        "mothers name":              "mother_name",
+        "mother name":               "mother_name",
+        # Tamil labels
+        "சமர்ப்பிப்பு முறை":         "submission_mode",
+        "பான் விநியோகம்":            "delivery_mode",
+        "ஆதார் புகைப்படம்":          "aadhaar_photo",
+        "வருமான ஆதாரம்":            "source_of_income",
+        "தொடர்பு முகவரி":           "address_for_comm",
+        "குடியிருப்பு நிலை":         "residential_status",
+        "பிரதிநிதி மதிப்பீட்டாளர்":  "rep_assessee",
+        "முழு பெயர்":                "full_name",
+        "ஆண்டு வருமானம்":           "salary",
+        "தாயின் பெயர்":              "mother_name",
+    }
+    for label, field in _LABEL_MAP.items():
+        if label in lower:
+            print(f"[DEBUG] Matched via label map: {field}")
+            return field
+
     print(f"[DEBUG] No field matched for: {lower!r}")
     return None
 
@@ -2678,25 +4016,23 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
     lower = inp.lower()
 
     if field == "full_name":
-        # Extract name from input - handle both "name is X" and just "X"
-        # First try to extract from pattern like "name is X" or "change to X"
+        # Extract name from input - handle "name is X", "name as X", "name to X" and just "X"
         name_match = re.search(
-            r"(?:name\s+(?:is|to)\s+|change\s+(?:to|it\s+to)\s+|update\s+(?:to|it\s+to)\s+)?([A-Za-z][A-Za-z\s]{1,50})$",
+            r"(?:(?:my\s+)?(?:full\s+)?name\s+(?:is|as|to)\s+|change\s+(?:to|it\s+to)\s+|update\s+(?:to|it\s+to)\s+)?([A-Za-z][A-Za-z\s]{1,50})$",
             text, re.IGNORECASE
         )
         if name_match:
             candidate = name_match.group(1).strip()
         else:
-            # If no pattern match, treat entire input as the name
             candidate = text
         
-        # Filter out common command words
+        # Filter out common command/preposition words
         words = candidate.split()
-        _FILTER_WORDS = {'my', 'name', 'is', 'the', 'full', 'change', 'update', 'to', 'it'}
+        _FILTER_WORDS = {'my', 'name', 'is', 'as', 'the', 'full', 'change', 'update', 'to', 'it'}
         filtered_words = [w for w in words if w.lower() not in _FILTER_WORDS]
         
         if filtered_words:
-            candidate = ' '.join(filtered_words)  # Preserve original case
+            candidate = ' '.join(filtered_words)
             if _is_valid_name(candidate):
                 flow.state["full_name"] = candidate
                 print(f"[DEBUG _apply_field_update] Updated full_name to: {candidate!r}")
@@ -2706,28 +4042,26 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
             print(f"[DEBUG _apply_field_update] Name filtered to empty")
 
     elif field == "mother_name":
-        # Extract mother's name - handle both "mother name is X" and just "X"
-        # Try to strip any leading command phrase first
+        # Extract mother's name - handle "mother name is/as/to X", "mother name X", or just "X"
         _FILTER_WORDS = {'my', 'mother', "mother's", 'mothers', 'mom', "mom's", 'moms',
-                         'name', 'is', 'the', 'full', 'change', 'update', 'to', 'it', 'maa', 'amma'}
-        # Try explicit pattern first: "mother name is X" / "change to X"
+                         'name', 'is', 'as', 'the', 'full', 'change', 'update', 'to', 'it', 'maa', 'amma'}
+        # Try explicit pattern first: "mother name is/as/to X" / "change to X"
         name_match = re.search(
-            r"(?:mother(?:'?s)?\s+name\s+(?:is|to)\s+|mom(?:'?s)?\s+name\s+(?:is|to)\s+|"
+            r"(?:mother(?:'?s)?\s+name\s+(?:is|as|to)\s+|mom(?:'?s)?\s+name\s+(?:is|as|to)\s+|"
             r"change\s+(?:to|it\s+to)\s+|update\s+(?:to|it\s+to)\s+)([A-Za-z][A-Za-z\s]{0,50}?)(?:\s*$)",
             text, re.IGNORECASE
         )
         if name_match:
             candidate = name_match.group(1).strip()
         else:
-            # No command prefix — treat entire input as the name after filtering keywords
             candidate = text.strip()
 
-        # Filter out common command words
+        # Filter out common command/preposition words
         words = candidate.split()
         filtered_words = [w for w in words if w.lower() not in _FILTER_WORDS]
 
         if filtered_words:
-            candidate = ' '.join(filtered_words)  # Preserve original case
+            candidate = ' '.join(filtered_words)
             if _is_valid_name(candidate):
                 flow.state["mother_name"] = candidate
                 print(f"[DEBUG _apply_field_update] Updated mother_name to: {candidate!r}")
@@ -2759,12 +4093,12 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
                 flow.state["email_source"] = "new"
 
     elif field == "salary":
-        # Re-use the extraction logic
-        dummy_flow_state_backup = dict(flow.state)
-        flow.state["salary"] = None
-        _extract_details(flow, lower, text)
-        if not flow.state.get("salary"):
-            flow.state["salary"] = dummy_flow_state_backup.get("salary")
+        result = _parse_salary(text)
+        if result:
+            flow.state["salary"] = result
+            print(f"[DEBUG _apply_field_update] Updated salary to: {result!r}")
+        else:
+            print(f"[DEBUG _apply_field_update] Could not parse salary from: {text!r}")
 
     elif field == "submission_mode":
         _map = {
