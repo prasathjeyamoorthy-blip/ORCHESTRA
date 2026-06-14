@@ -752,6 +752,20 @@ class RAGChain:
 
         language = detect_language(question, override=language_override)
 
+        # Only fall back to the session's stored preferred_language when NO
+        # explicit override was sent. If the UI sent language_override="en",
+        # that is an intentional switch — don't let a stale "ta"/"hi" entry
+        # silently override it.
+        if not language_override:
+            try:
+                from agent.flow_manager import FlowManager as _FM
+                _fm = _FM(session_id, user_id or "anonymous")
+                stored_lang = _fm.state.get("preferred_language")
+                if stored_lang in ("ta", "hi"):
+                    language = stored_lang
+            except Exception:
+                pass
+
         # Cache the context block Node sent — this is the single source of truth
         # for history. get_session_history() reads back from this cache.
         if user_context and user_context.strip():
@@ -989,6 +1003,40 @@ class RAGChain:
                 "followups"  : [],
                 "close_form" : True,
             }
+
+        # ── 3a. Stored detail queries — ALWAYS check flow state first ──────────
+        # Any question asking about stored data (name, mother, salary, all details, etc.)
+        # must be answered from flow state before any profile/RAG fallback.
+        # handle_message contains _display_user_profile and _direct_info_query which
+        # read directly from FlowManager state on disk — the authoritative source.
+        _STORED_DETAIL_Q = re.compile(
+            r"\b(what|whats|tell\s+me|show\s+me|display)\s+(is|are|'?s)?\s*(my|the)\s+"
+            r"(name|full\s+name|mother|grandfather|email|salary|income|personal\s+details?)"
+            r"|\b(personal\s+details?|details?\s+(i\s+gave|you\s+have|you\s+stored|you\s+collected|you\s+know))"
+            r"|\b(what\s+details?|which\s+details?)\s+(do\s+you\s+have|did\s+i\s+give|have\s+you\s+(got|collected|stored))"
+            r"|\b(show|tell|list|display)\s+(me\s+)?(what\s+)?(you\s+)?(know|have|collected|stored|remember)\s+(about\s+me|on\s+me)"
+            r"|\bwhat\s+do\s+you\s+know\s+about\s+me\b"
+            r"|\bwhat\s+have\s+i\s+(told|given|shared|provided)\s+(you|so\s+far)\b",
+            re.IGNORECASE,
+        )
+        if _STORED_DETAIL_Q.search(question):
+            agent_response = handle_message(
+                question, session_id, language,
+                user_context=user_context,
+                account_email=account_email,
+                user_id=user_id,
+            )
+            if agent_response:
+                self.memory.add_to_session(session_id, question, agent_response["answer"])
+                return {
+                    "question"  : question,
+                    "answer"    : agent_response["answer"],
+                    "sources"   : [],
+                    "session_id": session_id,
+                    "intent"    : "pan_query",
+                    "language"  : language,
+                    "followups" : agent_response.get("followups", []),
+                }
 
         # ── 3b. Memory questions — check BEFORE social/unrelated handlers ──
         # IMPORTANT: Only intercept questions about the user's OWN stored data.
@@ -1392,6 +1440,20 @@ class RAGChain:
 
         language = detect_language(question, override=language_override)
 
+        # Only fall back to the session's stored preferred_language when NO
+        # explicit override was sent. If the UI sent language_override="en",
+        # that is an intentional switch — don't let a stale "ta"/"hi" entry
+        # silently override it.
+        if not language_override:
+            try:
+                from agent.flow_manager import FlowManager as _FM
+                _fm = _FM(session_id, user_id or "anonymous")
+                stored_lang = _fm.state.get("preferred_language")
+                if stored_lang in ("ta", "hi"):
+                    language = stored_lang
+            except Exception:
+                pass
+
         if user_context and user_context.strip():
             self.memory.cache_context(session_id, user_context, user_id)
 
@@ -1476,6 +1538,15 @@ class RAGChain:
                 and not flow_active
                 and user_context and user_context.strip()
             )
+            # stored-detail queries always go through run() to check flow state first
+            or bool(re.search(
+                r"\b(what|whats|tell\s+me|show\s+me|display)\s+(is|are|'?s)?\s*(my|the)\s+"
+                r"(name|full\s+name|mother|grandfather|email|salary|income|personal\s+details?)"
+                r"|\b(personal\s+details?|details?\s+(i\s+gave|you\s+have|you\s+stored|you\s+know))"
+                r"|\bwhat\s+do\s+you\s+know\s+about\s+me\b"
+                r"|\bwhat\s+have\s+i\s+(told|given|shared|provided)\s+(you|so\s+far)\b",
+                question, re.IGNORECASE,
+            ))
         )
 
         if needs_static:

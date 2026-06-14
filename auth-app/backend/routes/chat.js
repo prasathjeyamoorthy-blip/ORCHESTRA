@@ -41,7 +41,8 @@ const WINDOW_TURNS  = 6;            // recent turns injected into RAG prompt
 const CACHE_TTL     = 60 * 60 * 6;  // 6h session cache (refreshed on activity)
 const PROFILE_TTL   = 60 * 60 * 24 * 7; // 7-day profile cache
 const MEMORY_TTL    = 60 * 60 * 24 * 30; // 30-day long-term memory cache
-const RAG_URL       = process.env.RAG_URL || 'http://localhost:8000';
+const RAG_URL       = process.env.RAG_URL   || 'http://localhost:8000';
+const VOICE_URL     = process.env.VOICE_URL || 'http://localhost:8002';
 
 // Max past turns to surface from long-term memory search
 const MEMORY_SEARCH_LIMIT = 6;
@@ -1512,18 +1513,16 @@ router.post('/voice/speak', verifyToken, _voiceUpload.single('audio'), async (re
   }
 
   try {
-    // ── Step 1: STT — send audio to RAG STT endpoint ──────────────────────
-    const sttForm = new (require('form-data'))();
-    sttForm.append('audio', req.file.buffer, {
-      filename: req.file.originalname || 'audio.webm',
-      contentType: req.file.mimetype || 'audio/webm',
-    });
-    sttForm.append('language', language);
+    // ── Step 1: STT — send audio to voice agent STT endpoint ─────────────
+    // Use native FormData (Node 18+) — the npm form-data package is incompatible
+    // with Node's native fetch.
+    const sttForm = new FormData()
+    sttForm.append('audio', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' }), req.file.originalname || 'audio.webm')
+    sttForm.append('language', language)
 
-    const sttRes = await fetch(`${RAG_URL}/api/voice/stt`, {
+    const sttRes = await fetch(`${VOICE_URL}/api/voice/stt`, {
       method: 'POST',
       body: sttForm,
-      headers: sttForm.getHeaders(),
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -1609,14 +1608,13 @@ router.post('/voice/speak', verifyToken, _voiceUpload.single('audio'), async (re
     console.log(`[voice] Reply: ${reply.slice(0, 80)}...`);
 
     // ── Step 3: TTS — synthesise reply to speech ──────────────────────────
-    const ttsForm = new (require('form-data'))();
-    ttsForm.append('text', reply);
-    ttsForm.append('language', language);
+    const ttsForm = new FormData()
+    ttsForm.append('text', reply)
+    ttsForm.append('language', language)
 
-    const ttsRes = await fetch(`${RAG_URL}/api/voice/tts`, {
+    const ttsRes = await fetch(`${VOICE_URL}/api/voice/tts`, {
       method: 'POST',
       body: ttsForm,
-      headers: ttsForm.getHeaders(),
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -1636,8 +1634,8 @@ router.post('/voice/speak', verifyToken, _voiceUpload.single('audio'), async (re
     return res.send(audioBuffer);
 
   } catch (err) {
-    const reason = err.name === 'TimeoutError' ? 'Voice request timed out.' : 'Voice processing failed.';
-    console.error('[voice]', err.message);
+    const reason = err.name === 'TimeoutError' ? 'Voice request timed out.' : `Voice processing failed: ${err.message}`;
+    console.error('[voice] ERROR:', err.name, err.message, err.stack?.split('\n')[1]);
     return res.status(500).json({ error: reason });
   }
 });
@@ -1648,14 +1646,13 @@ router.post('/voice/tts', verifyToken, _voiceUpload.none(), async (req, res) => 
   if (!text?.trim()) return res.status(400).json({ error: 'Text is required.' });
 
   try {
-    const ttsForm = new (require('form-data'))();
-    ttsForm.append('text', text);
-    ttsForm.append('language', language);
+    const ttsForm = new FormData()
+    ttsForm.append('text', text)
+    ttsForm.append('language', language)
 
-    const ttsRes = await fetch(`${RAG_URL}/api/voice/tts`, {
+    const ttsRes = await fetch(`${VOICE_URL}/api/voice/tts`, {
       method: 'POST',
       body: ttsForm,
-      headers: ttsForm.getHeaders(),
       signal: AbortSignal.timeout(30_000),
     });
 

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { ChevronLeft, ChevronRight, Upload, CheckCircle2, ImageIcon, CreditCard, Car, Loader2, User, Mail, IndianRupee, Briefcase, X } from 'lucide-react'
+import { Upload, CheckCircle2, ImageIcon, CreditCard, Car, Loader2, User, Mail, IndianRupee, Briefcase, X, Check, AlertCircle } from 'lucide-react'
 
 // ── Designation classifier ────────────────────────────────────────
 const INCOME_OPTIONS = [

@@ -1,7 +1,7 @@
 import React from "react"
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { ArrowUp, Paperclip, Square, X, StopCircle, Mic, Globe, BrainCog, FolderCode } from "lucide-react"
+import { ArrowUp, Paperclip, Square, X, StopCircle, Mic } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
 const cn = (...classes) => classes.filter(Boolean).join(" ")
@@ -385,7 +385,8 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
       audioCtxRef.current = audioCtx
       const source = audioCtx.createMediaStreamSource(stream)
       const analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 512
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.1   // low smoothing = fast response to silence
       source.connect(analyser)
       analyserRef.current = analyser
 
@@ -435,31 +436,43 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
       // Hard cap: stop after 30s regardless
       hardCapTimerRef.current = setTimeout(() => stopRecording(), 30_000)
 
-      // ── Silence detection — wait 1s before starting, require speech first ──
-      const dataArr = new Uint8Array(analyser.frequencyBinCount)
+      // ── Silence detection — RMS time-domain volume, require speech first ──
+      const dataArr = new Uint8Array(analyser.fftSize)   // time-domain samples
       let silentMs = 0
       let speechDetected = false
       let elapsedMs = 0
-      const SILENCE_THRESHOLD = 8
+      const SILENCE_THRESHOLD = 0.01    // RMS 0–1 scale; ~1% volume = silence
+      const SILENCE_STOP_MS   = 3_000   // stop 3s after speech goes quiet
+      const NO_SPEECH_LIMIT   = 10_000  // auto-stop if no speech at all in 10s
+      const TICK_MS           = 100
 
       silenceTimerRef.current = setInterval(() => {
-        elapsedMs += 500
-        // Don't start detecting until 1s in (mic warmup)
-        if (elapsedMs < 1000) return
+        elapsedMs += TICK_MS
+        if (elapsedMs < 800) return   // mic warmup grace period
 
-        analyser.getByteFrequencyData(dataArr)
-        const avg = dataArr.reduce((a, b) => a + b, 0) / dataArr.length
-        if (avg >= SILENCE_THRESHOLD) {
+        // RMS over time-domain samples — accurate volume measurement
+        analyser.getByteTimeDomainData(dataArr)
+        let sum = 0
+        for (let i = 0; i < dataArr.length; i++) {
+          const s = (dataArr[i] - 128) / 128   // normalize to -1..1
+          sum += s * s
+        }
+        const rms = Math.sqrt(sum / dataArr.length)
+
+        if (rms >= SILENCE_THRESHOLD) {
           speechDetected = true
           silentMs = 0
         } else if (speechDetected) {
-          silentMs += 500
-          if (silentMs >= 3_500) {
+          silentMs += TICK_MS
+          if (silentMs >= SILENCE_STOP_MS) {
             clearInterval(silenceTimerRef.current)
             stopRecording()
           }
+        } else if (elapsedMs >= NO_SPEECH_LIMIT) {
+          clearInterval(silenceTimerRef.current)
+          stopRecording()
         }
-      }, 500)
+      }, TICK_MS)
 
     } catch (err) {
       console.error("Mic access denied:", err)
@@ -488,62 +501,50 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
     voiceElapsedRef.current = setInterval(() => setVoiceElapsed(s => s + 1), 1000)
     try {
       const ext = mimeType.includes("ogg") ? ".ogg" : ".webm"
-      const sendMime = mimeType || "audio/webm"
-      const formData = new FormData()
-      formData.append("audio", blob, `voice${ext}`)
-      formData.append("language", language)  // tell STT which language to use
 
-      // ── Full pipeline: STT → RAG+LLM → TTS, returns audio/wav ──
-      const res = await fetch("/api/voice/speak", {
+      // ── Step 1: STT — get transcript from voice agent (port 8002) ──────
+      const sttForm = new FormData()
+      sttForm.append("audio", blob, `voice${ext}`)
+      sttForm.append("language", language)
+
+      console.log(`[VOICE] Sending STT request with language: ${language}`)
+
+      const sttRes = await fetch("/api/voice/stt", {
         method: "POST",
-        credentials: "include",
-        body: formData,
+        body: sttForm,
       })
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        console.error("Voice error:", err)
-        if (err.detail?.includes("hear speech") || err.detail?.includes("make out") || res.status === 422) {
+      if (!sttRes.ok) {
+        const sttErr = await sttRes.json().catch(() => ({}))
+        console.error('[VOICE] STT failed:', sttRes.status, sttErr)
+        if (sttRes.status === 422) {
           setMicError("Couldn't hear you clearly — please speak directly into the mic and try again.")
+        } else if (sttRes.status === 404) {
+          setMicError("Voice service not available. Please ensure the voice server is running on port 8002.")
         } else {
-          setMicError(err.detail || "Could not process voice. Please try again.")
+          setMicError(sttErr.detail || "Voice transcription failed. Please try again.")
         }
         return
       }
 
-      const contentType = res.headers.get("content-type") || ""
-
-      // ── TTS failed fallback — JSON response with text only ───
-      if (contentType.includes("application/json")) {
-        const data = await res.json()
-        if (data.transcript?.trim()) {
-          setMicError(null)
-          onVoiceResponse(data.transcript, null, data.reply || undefined)
-        }
+      const sttData = await sttRes.json()
+      const transcript = sttData.transcript?.trim()
+      console.log('[VOICE] STT transcript:', transcript)
+      
+      if (!transcript) {
+        setMicError("Couldn't hear you clearly — please speak directly into the mic and try again.")
         return
       }
 
-      // ── Normal path: audio/wav response ─────────────────────
-      const transcript = decodeURIComponent(res.headers.get("X-Transcript") || "")
-      const reply      = decodeURIComponent(res.headers.get("X-Reply") || "")
-
-      // ── Play the TTS audio ───────────────────────────────────
-      const audioBlob = await res.blob()
-      const audioUrl  = URL.createObjectURL(audioBlob)
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.src = audioUrl
-        audioPlayerRef.current.onended = () => URL.revokeObjectURL(audioUrl)
-        audioPlayerRef.current.play().catch(e => console.error("Audio play failed:", e))
-      }
-
-      // ── Add both bubbles to the chat UI ─────────────────────
-      if (transcript?.trim()) {
-        setMicError(null)
-        onVoiceResponse(transcript, null, reply || undefined)
-      }
+      // ── Step 2: Send transcript through the normal chat flow ────────────
+      // This ensures PAN registration flow, session, and language work
+      // exactly the same as typed text messages.
+      setMicError(null)
+      onVoiceResponse(transcript, null, undefined)
 
     } catch (err) {
-      console.error("Voice send failed:", err)
+      console.error("[VOICE] Voice send failed:", err)
+      setMicError("Connection error. Please ensure the voice server is running and try again.")
     } finally {
       clearInterval(voiceElapsedRef.current)
       setIsVoiceLoading(false)
@@ -684,60 +685,6 @@ export const PromptInputBox = React.forwardRef((props, ref) => {
             </PromptInputAction>
 
             <div className="flex items-center">
-              <button type="button" onClick={() => { setShowSearch(p => !p); setShowThink(false) }}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showSearch ? "bg-[#1EAEDB]/15 border-[#1EAEDB] text-[#1EAEDB]" : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showSearch ? 360 : 0, scale: showSearch ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1 }} transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <Globe className={cn("w-4 h-4", showSearch ? "text-[#1EAEDB]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showSearch && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#1EAEDB] flex-shrink-0">Search</motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-
-              <CustomDivider />
-
-              <button type="button" onClick={() => { setShowThink(p => !p); setShowSearch(false) }}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showThink ? "bg-[#8B5CF6]/15 border-[#8B5CF6] text-[#8B5CF6]" : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showThink ? 360 : 0, scale: showThink ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1 }} transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <BrainCog className={cn("w-4 h-4", showThink ? "text-[#8B5CF6]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showThink && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#8B5CF6] flex-shrink-0">Think</motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-
-              <CustomDivider />
-
-              <button type="button" onClick={() => setShowCanvas(p => !p)}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showCanvas ? "bg-[#F97316]/15 border-[#F97316] text-[#F97316]" : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showCanvas ? 360 : 0, scale: showCanvas ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1 }} transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <FolderCode className={cn("w-4 h-4", showCanvas ? "text-[#F97316]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showCanvas && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#F97316] flex-shrink-0">Canvas</motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
             </div>
           </div>
 

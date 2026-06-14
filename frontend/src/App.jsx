@@ -429,14 +429,17 @@ function GuidedConfirm({ onYes, onNo }) {
 function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   const isTamil = language === 'ta'
 
-  // Build initial state from current field values
+  // Build initial state from current field values — always store in English
   const buildInitial = () => {
     const s = {}
     for (const f of fields) {
       if (f.field_type === 'text') {
         s[f.key] = f.display_value === '—' ? '' : (f.display_value || '')
       } else if (f.field_type === 'radio') {
-        s[f.key] = f.value || ''
+        // Use display_value — it's already normalized to the English choice string
+        // (e.g. "Yes"/"No" for booleans, actual choice text for others).
+        // f.value can be "True"/"False" for boolean fields which won't match choices[].
+        s[f.key] = f.display_value === '—' ? '' : (f.display_value || '')
       } else if (f.field_type === 'checkbox') {
         s[f.key] = f.value ? f.value.split(',').map(v => v.trim()).filter(Boolean) : []
       }
@@ -445,7 +448,24 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   }
 
   const [vals, setVals] = React.useState(buildInitial)
-  const [saved, setSaved] = React.useState(false)
+  // savingCount tracks in-flight saves for button feedback, but never permanently locks the panel
+  const [savingCount, setSavingCount] = React.useState(0)
+
+  // When fields prop changes (backend refreshed after a save), re-sync vals
+  // Only update fields that the user hasn't manually changed in this session
+  const prevFieldsRef = React.useRef(fields)
+  React.useEffect(() => {
+    const prev = prevFieldsRef.current
+    // Check if any field's display_value actually changed
+    const hasChanges = fields.some(f => {
+      const old = prev.find(p => p.key === f.key)
+      return old && old.display_value !== f.display_value
+    })
+    if (hasChanges) {
+      setVals(buildInitial())
+      prevFieldsRef.current = fields
+    }
+  }, [fields]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!fields || fields.length === 0) return null
 
@@ -466,20 +486,22 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
     return idx >= 0 ? f.choices[idx] : displayVal
   }
 
-  function handleRadio(key, displayVal) {
-    setVals(prev => ({ ...prev, [key]: displayVal }))
+  function handleRadio(key, displayVal, f) {
+    // Always store English value internally for language-switch safety
+    const englishVal = toEnglish(f, displayVal)
+    setVals(prev => ({ ...prev, [key]: englishVal }))
   }
 
   function handleCheckbox(f, displayVal) {
     const englishVal = toEnglish(f, displayVal)
     setVals(prev => {
       const cur = prev[f.key] || []
-      const alreadySel = cur.includes(displayVal) || cur.includes(englishVal)
+      const alreadySel = cur.includes(englishVal)
       return {
         ...prev,
         [f.key]: alreadySel
-          ? cur.filter(x => x !== displayVal && x !== englishVal)
-          : [...cur, displayVal],
+          ? cur.filter(x => x !== englishVal)
+          : [...cur, englishVal],
       }
     })
   }
@@ -489,11 +511,11 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   }
 
   function handleSaveAll() {
-    if (saved || disabled) return
+    if (savingCount > 0 || disabled) return
 
     // Collect only fields whose value actually changed
     const changes = []        // English commands for backend
-    const changesDisplay = [] // Tamil/display labels for user bubble
+    const changesDisplay = [] // Human-readable labels for user bubble (Tamil/Hindi/English)
 
     for (const f of fields) {
       const cur = vals[f.key]
@@ -508,15 +530,23 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
         displayVal = englishVal
       } else if (f.field_type === 'radio') {
         if (!cur) continue
-        englishVal = toEnglish(f, cur)
-        if (englishVal === f.value) continue
-        displayVal = cur // already the Tamil display value
+        englishVal = cur  // already English
+        // Compare against display_value (normalized English) not f.value (may be "True"/"False")
+        const origDisplay = f.display_value === '—' ? '' : (f.display_value || '')
+        if (englishVal === origDisplay) continue
+        // For display, find the Tamil label if active
+        const idx = f.choices ? f.choices.indexOf(englishVal) : -1
+        displayVal = (isTamil && f.choices_ta && idx >= 0) ? f.choices_ta[idx] : englishVal
       } else if (f.field_type === 'checkbox') {
         if (!cur || cur.length === 0) continue
-        englishVal = cur.map(v => toEnglish(f, v)).join(', ')
+        englishVal = cur.join(', ')  // already English values
         const origVal = f.value || ''
         if (englishVal === origVal) continue
-        displayVal = cur.join(', ')
+        // For display, map each English value to the Tamil label if active
+        displayVal = cur.map(v => {
+          const idx = f.choices ? f.choices.indexOf(v) : -1
+          return (isTamil && f.choices_ta && idx >= 0) ? f.choices_ta[idx] : v
+        }).join(', ')
       }
 
       changes.push(`change ${f.label} to ${englishVal}`)
@@ -525,14 +555,29 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
     }
 
     if (changes.length === 0) return
-    setSaved(true)
-    // Build a Tamil display summary for the user bubble
+    setSavingCount(n => n + 1)
+    // Brief "Saved ✓" flash on the button, then reset so user can edit again
+    setTimeout(() => setSavingCount(n => n - 1), 1200)
+    // Build a friendly display summary for the user bubble (works for all languages)
     const displayLines = changesDisplay.length > 0 ? changesDisplay : changes
-    const display = isTamil
-      ? `✏️ ${displayLines.join(' | ')}`
-      : changes.join(' | ')
-    // Send { command, display } so the backend gets English but the bubble shows Tamil
-    onUpdate({ command: changes.join(' | '), display })
+    const display = `✏️ ${displayLines.join(' | ')}`
+
+    // Build patched confirmation_fields so the panel re-initializes correctly if re-mounted
+    const updatedFields = fields.map(f => {
+      const cur = vals[f.key]
+      if (f.field_type === 'text') {
+        const v = (cur || '').trim()
+        return v ? { ...f, display_value: v, value: v } : f
+      } else if (f.field_type === 'radio') {
+        return cur ? { ...f, display_value: cur, value: cur } : f
+      } else if (f.field_type === 'checkbox') {
+        return cur?.length ? { ...f, display_value: cur.join(', '), value: cur.join(', ') } : f
+      }
+      return f
+    })
+
+    // Send { command, display, updatedFields } — App.jsx uses updatedFields to patch the message
+    onUpdate({ command: changes.join(' | '), display, updatedFields })
   }
 
   function renderField(f) {
@@ -549,7 +594,7 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
             type="text"
             value={curVal || ''}
             onChange={e => handleText(f.key, e.target.value)}
-            disabled={saved || disabled}
+            disabled={disabled}
             placeholder={isTamil ? 'புதிய மதிப்பை உள்ளிடுங்கள்…' : 'Enter value…'}
             className="w-full bg-white/[0.05] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/25 focus:outline-none focus:border-purple-500/40 disabled:opacity-50"
           />
@@ -558,13 +603,15 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
         {f.field_type === 'radio' && (
           <div className="flex flex-wrap gap-1.5">
             {choices.map((c, i) => {
-              const isSelected = curVal === c || curVal === toEnglish(f, c)
+              // vals stores English; c is the display label (may be Tamil)
+              const englishC = toEnglish(f, c)
+              const isSelected = curVal === englishC
               return (
                 <button
                   key={i}
                   type="button"
-                  disabled={saved || disabled}
-                  onClick={() => handleRadio(f.key, c)}
+                  disabled={disabled}
+                  onClick={() => handleRadio(f.key, c, f)}
                   className={`text-[11px] px-2.5 py-1 rounded-full border transition-all disabled:opacity-50
                     ${isSelected
                       ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
@@ -581,13 +628,14 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
         {f.field_type === 'checkbox' && (
           <div className="flex flex-wrap gap-1.5">
             {choices.map((c, i) => {
-              const englishVal = toEnglish(f, c)
-              const sel = (curVal || []).includes(c) || (curVal || []).includes(englishVal)
+              // vals stores English; compare against English equivalent of display label
+              const englishC = toEnglish(f, c)
+              const sel = (curVal || []).includes(englishC)
               return (
                 <button
                   key={i}
                   type="button"
-                  disabled={saved || disabled}
+                  disabled={disabled}
                   onClick={() => handleCheckbox(f, c)}
                   className={`text-[11px] px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 disabled:opacity-50
                     ${sel
@@ -631,15 +679,15 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
           <button
             type="button"
             onClick={handleSaveAll}
-            disabled={saved}
+            disabled={savingCount > 0}
             className="w-full py-2 rounded-xl text-sm font-semibold transition-all
               bg-purple-600/25 border border-purple-500/40 text-purple-200
               hover:bg-purple-600/40 hover:border-purple-400/60
-              active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {saved
-              ? (isTamil ? '✓ சேமிக்கப்பட்டது' : '✓ Saved')
-              : (isTamil ? '💾 அனைத்தையும் சேமி' : '💾 Save All Changes')}
+            {savingCount > 0
+              ? (isTamil ? '✓ புதுப்பிக்கப்பட்டது' : '✓ Updated')
+              : (isTamil ? '💾 அனைத்தையும் சேமி' : '💾 Save Changes')}
           </button>
         </div>
       )}
@@ -710,28 +758,28 @@ function Message({ msg, onFollowup, language }) {
         )}
 
         {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
-        {!msg.streaming && msg.confirmation_fields && (
+        {/* Stays open and editable until the user clicks "Yes, proceed" */}
+        {!msg.streaming && msg.confirmation_fields && confirmUsed === null && (
           <ConfirmationFieldsPanel
             fields={msg.confirmation_fields}
             language={language}
             onUpdate={(updatePayload) => {
-              if (confirmUsed !== null) return
-              setConfirmUsed('save-all')
+              // Never lock the panel — just send the update and let the user keep editing
               onFollowup(updatePayload, msg.id)
             }}
-            disabled={confirmUsed !== null}
+            disabled={false}
           />
         )}
 
-        {/* ── Confirm action buttons (Yes, proceed / No, change something) ── */}
-        {/* Hidden when Save All was used — Save All goes directly to documents */}
+        {/* ── Confirm action buttons (Confirm / Change something) ── */}
+        {/* Always shown alongside the edit panel until a final decision is made */}
         {!msg.streaming && msg.confirm_action && confirmUsed === null && (
           <div className="flex gap-3 pt-4">
             <button
               onClick={() => { setConfirmUsed('yes'); onFollowup('Yes, proceed', msg.id) }}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 hover:border-emerald-400/60 active:scale-95 transition-all"
             >
-              <span className="text-emerald-400">✓</span> Yes, proceed
+              <span className="text-emerald-400">✓</span> Confirm
             </button>
             <button
               onClick={() => { setConfirmUsed('no'); onFollowup('No, I need to change something', msg.id) }}
@@ -742,7 +790,7 @@ function Message({ msg, onFollowup, language }) {
           </div>
         )}
 
-        {/* Confirm used — show greyed state */}
+        {/* Confirm used — show greyed state (panel is already hidden via confirmUsed === null check above) */}
         {!msg.streaming && msg.confirm_action && confirmUsed !== null && (
           <div className="flex gap-3 pt-4 opacity-40 pointer-events-none">
             <div className={cn(
@@ -751,7 +799,7 @@ function Message({ msg, onFollowup, language }) {
                 ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
                 : "bg-white/[0.04] border-white/20 text-white/70"
             )}>
-              {confirmUsed === 'yes' ? <><span className="text-emerald-400">✓</span> Yes, proceed</> : <><span className="text-white/40">✎</span> Change something</>}
+              {confirmUsed === 'yes' ? <><span className="text-emerald-400">✓</span> Confirmed</> : <><span className="text-white/40">✎</span> Change something</>}
             </div>
           </div>
         )}
@@ -848,30 +896,7 @@ function Message({ msg, onFollowup, language }) {
           </div>
         )}
 
-        {/* Followup buttons */}
-        {!msg.streaming && msg.followups?.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-3">
-            {msg.followups.map((q, i) => (
-              <button key={i}
-                onClick={() => {
-                  if (usedFollowup !== null) return
-                  setUsedFollowup(i)
-                  onFollowup(q, msg.id)
-                }}
-                disabled={usedFollowup !== null || msg.followupUsed}
-                className={`text-xs border rounded-full px-3 py-1.5 transition-all flex items-center gap-1
-                  ${(usedFollowup === null && !msg.followupUsed)
-                    ? 'text-neutral-400 hover:text-white border-neutral-700 hover:border-neutral-500 hover:bg-neutral-800 active:scale-95 cursor-pointer'
-                    : usedFollowup === i
-                      ? 'text-white border-purple-500/50 bg-neutral-800 cursor-default'
-                      : 'text-neutral-600 border-neutral-800 cursor-not-allowed opacity-40'
-                  }`}>
-                <ChevronRight size={10} className={usedFollowup === null ? "text-purple-400" : usedFollowup === i ? "text-purple-400" : "text-neutral-600"} />
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
+
         {!msg.streaming && msg.elapsed_ms != null && (
           <p className="text-[10px] text-neutral-600 pt-1">{msg.elapsed_ms}ms</p>
         )}
@@ -895,14 +920,40 @@ export default function App() {
   const [lastInputWasVoice, setLastInputWasVoice] = useState(false)
   const [drafts, setDrafts] = useState({})
   const [docsOpen, setDocsOpen] = useState(false)
+  const [docCount, setDocCount] = useState(0)
+
+  // Keep doc count badge in sync via Supabase realtime
+  useEffect(() => {
+    if (!user) { setDocCount(0); return }
+
+    // Initial count
+    supabase
+      .from('document_meta')
+      .select('id', { count: 'exact', head: true })
+      .then(({ count }) => setDocCount(count ?? 0))
+
+    // Live updates
+    const ch = supabase
+      .channel('doc_count_badge')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'document_meta' },
+        () => setDocCount(n => n + 1))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'document_meta' },
+        () => setDocCount(n => Math.max(0, n - 1)))
+      .subscribe()
+
+    return () => { supabase.removeChannel(ch) }
+  }, [user])
   const [agentConsent, setAgentConsent] = useState(null)
   const [consentError, setConsentError] = useState(null)
   // Voice response toggle - when enabled, agent responds with voice even for text input
+  // Default to true for better voice experience - users can disable if needed
   const [voiceResponseEnabled, setVoiceResponseEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('voice_response_enabled') === 'true'
+      const stored = localStorage.getItem('voice_response_enabled')
+      // If not set yet, default to true (voice enabled). If explicitly set, use that value.
+      return stored !== null ? stored === 'true' : true
     }
-    return false
+    return true
   })
   // Language preference — persisted to localStorage
   const [language, setLanguage] = useState(() => {
@@ -928,6 +979,23 @@ export default function App() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('voice_response_enabled', newValue.toString())
     }
+    
+    // Unlock audio playback on browsers that require user interaction
+    if (newValue && audioPlayerRef.current) {
+      // Play a tiny silent audio to unlock autoplay
+      const silentBlob = new Blob([new Uint8Array([0])], { type: 'audio/wav' })
+      const silentUrl = URL.createObjectURL(silentBlob)
+      audioPlayerRef.current.src = silentUrl
+      audioPlayerRef.current.play()
+        .then(() => {
+          console.log('[VOICE] Audio unlocked via user interaction')
+          URL.revokeObjectURL(silentUrl)
+        })
+        .catch(() => {
+          URL.revokeObjectURL(silentUrl)
+        })
+    }
+    
     showToast(
       newValue 
         ? 'Voice responses enabled - Agent will speak replies' 
@@ -1028,6 +1096,7 @@ export default function App() {
           residential_status:{ en: 'Residential Status',        ta: 'குடியிருப்பு நிலை' },
           rep_assessee:      { en: 'Representative Assessee',   ta: 'பிரதிநிதி நியமனம்' },
           full_name:         { en: 'Full Name',                 ta: 'முழு பெயர்' },
+          grandfather_name:  { en: "Grandfather's Name",        ta: 'தாத்தாவின் பெயர்' },
           mother_name:       { en: "Mother's Name",             ta: 'தாயின் பெயர்' },
           email:             { en: 'Email',                     ta: 'மின்னஞ்சல்' },
           salary:            { en: 'Annual Income',             ta: 'ஆண்டு வருமானம்' },
@@ -1129,9 +1198,15 @@ export default function App() {
 
   // ── TTS playback for voice replies ─────────────────────────────
   async function speakReply(text) {
-    if (!text?.trim()) return
+    if (!text?.trim()) {
+      console.log('[TTS] No text to speak')
+      return
+    }
+
+    console.log(`[TTS] speakReply called with language: ${language}, voiceEnabled: ${voiceResponseEnabled}`)
+
     // Strip markdown so TTS reads clean prose
-    const clean = text
+    let clean = text
       .replace(/<think>[\s\S]*?<\/think>/g, '')
       .replace(/\*\*/g, '').replace(/\*/g, '')
       .replace(/#{1,6}\s/g, '')
@@ -1141,25 +1216,93 @@ export default function App() {
       .replace(/\n+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-    if (!clean) return
+
+    if (!clean) {
+      console.log('[TTS] Text is empty after cleaning')
+      return
+    }
+
+    // For Tamil TTS — replace English loanwords with pure Tamil equivalents
+    // so the Magpie Tamil voice pronounces them correctly
+    if (language === 'ta') {
+      clean = clean
+        .replace(/\bPAN\b/g, 'பான்')
+        .replace(/\bAadhaar\b/gi, 'ஆதார்')
+        .replace(/\bAadhar\b/gi, 'ஆதார்')
+        .replace(/\bTAN\b/g, 'டான்')
+        .replace(/\bTDS\b/g, 'டிடிஎஸ்')
+        .replace(/\bKYC\b/g, 'கேஒய்சி')
+        .replace(/\bOTP\b/g, 'ஒடிபி')
+        .replace(/\bNSDL\b/g, 'என்எஸ்டிஎல்')
+        .replace(/\bUTIITSL\b/g, 'யுடிஐஐடிஎஸ்எல்')
+        .replace(/\beKYC\b/gi, 'இ-கேஒய்சி')
+        .replace(/\be-KYC\b/gi, 'இ-கேஒய்சி')
+        .replace(/\bForm 49A\b/gi, 'படிவம் நாற்பத்தொன்பது ஏ')
+        .replace(/\bNRI\b/g, 'என்ஆர்ஐ')
+        .replace(/\bGST\b/g, 'ஜிஎஸ்டி')
+        .replace(/\bITR\b/g, 'ஐடிஆர்')
+        // Remove any remaining pure ASCII words that might break Tamil TTS
+        .replace(/\b[A-Z]{2,}\b/g, '')   // remove remaining all-caps acronyms
+        .replace(/\s+/g, ' ').trim()
+    }
+
     try {
+      console.log(`[TTS] Attempting to speak (${language}):`, clean.slice(0, 100))
       const form = new FormData()
       form.append('text', clean)
-      form.append('language', language) // Use current language setting
+      form.append('language', language)
+      // Call voice agent TTS directly (port 8002 via Vite proxy)
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
-        credentials: 'include',
         body: form,
       })
-      if (!res.ok) return
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.src = url
-        audioPlayerRef.current.onended = () => URL.revokeObjectURL(url)
-        audioPlayerRef.current.play().catch(() => {})
+      if (!res.ok) {
+        // TTS endpoint not available — skip silently (voice output is optional)
+        console.error('[TTS] Request failed, status:', res.status)
+        if (res.status === 404) {
+          console.error('[TTS] Voice server not running on port 8002.')
+          console.error('[TTS] Start with: cd pan-rag && .venv\\Scripts\\uvicorn api.voice_main:app --host 0.0.0.0 --port 8002 --reload')
+        }
+        return
       }
-    } catch { /* silent — TTS is optional */ }
+      const blob = await res.blob()
+      console.log('[TTS] Received audio blob:', blob.size, 'bytes, type:', blob.type)
+      
+      if (blob.size === 0) {
+        console.error('[TTS] Received empty audio blob')
+        return
+      }
+      
+      const url = URL.createObjectURL(blob)
+      console.log('[TTS] Created blob URL:', url)
+      
+      if (!audioPlayerRef.current) {
+        console.error('[TTS] audioPlayerRef.current is null - audio element not mounted')
+        URL.revokeObjectURL(url)
+        return
+      }
+      
+      audioPlayerRef.current.src = url
+      audioPlayerRef.current.onended = () => {
+        console.log('[TTS] Audio playback ended, revoking URL')
+        URL.revokeObjectURL(url)
+      }
+      
+      console.log('[TTS] Starting audio playback...')
+      audioPlayerRef.current.play()
+        .then(() => {
+          console.log('[TTS] ✅ Audio playback started successfully')
+        })
+        .catch((err) => {
+          console.error('[TTS] ❌ Audio playback failed:', err.message, err.name)
+          if (err.name === 'NotAllowedError') {
+            console.error('[TTS] Browser blocked autoplay. User must interact with page first.')
+            console.error('[TTS] Try clicking the "Voice On" button to enable voice responses.')
+          }
+        })
+    } catch (err) {
+      console.error('[TTS] Failed:', err)
+    }
   }
 
   // ── Messaging ───────────────────────────────────────────────────
@@ -1231,9 +1374,17 @@ export default function App() {
         if (sessionIdRef.current !== requestSid) return
         const reply = data.answer || data.reply || data.error || 'Something went wrong.'
         if (data.title) setSessions(prev => prev.map(s => s.id === requestSid ? { ...s, title: data.title } : s))
-        setMessages(prev => prev.map(m =>
-          m.id === botId ? { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: data.guided === true && !!(data.options || data.confirm_action), streaming: false, elapsed_ms: data.elapsed_ms, confirmation_fields: data.confirmation_fields || null } : m
-        ))
+        const freshFields = data.confirmation_fields || null
+        setMessages(prev => prev.map(m => {
+          if (m.id === botId) {
+            return { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: data.guided === true && !!(data.options || data.confirm_action), streaming: false, elapsed_ms: data.elapsed_ms, confirmation_fields: freshFields }
+          }
+          // Sync all older confirmation panels with the fresh field data
+          if (freshFields && m.confirmation_fields) {
+            return { ...m, confirmation_fields: freshFields }
+          }
+          return m
+        }))
         // Play voice response if enabled or if input was voice
         if ((voiceResponseEnabled || fromVoice) && reply) speakReply(reply)
         return
@@ -1265,11 +1416,21 @@ export default function App() {
 
           if (event.type === 'meta') {
             const isGuided = !!(event.options || event.confirm_action)
-            setMessages(prev => prev.map(m =>
-              m.id === botId
-                ? { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: event.confirmation_fields || null }
-                : m
-            ))
+            setMessages(prev => {
+              // If the new message has confirmation_fields, also update all earlier
+              // confirmation panels so they reflect the latest flow state
+              const freshFields = event.confirmation_fields || null
+              return prev.map(m => {
+                if (m.id === botId) {
+                  return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields }
+                }
+                // Sync all older confirmation panels with the fresh field data
+                if (freshFields && m.confirmation_fields) {
+                  return { ...m, confirmation_fields: freshFields }
+                }
+                return m
+              })
+            })
 
           } else if (event.type === 'token') {
             fullText += event.text
@@ -1528,11 +1689,16 @@ export default function App() {
                       {/* Documents button */}
                       <button
                         onClick={() => setDocsOpen(true)}
-                        className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-white/50 hover:text-white border border-white/[0.1] hover:border-white/30 px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap"
+                        className="relative flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs text-white/50 hover:text-white border border-white/[0.1] hover:border-white/30 px-2 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap"
                         title="My encrypted documents"
                       >
                         <FolderLock size={12} className="flex-shrink-0" />
                         <span className="hidden md:inline">Docs</span>
+                        {docCount > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                            {docCount > 99 ? '99+' : docCount}
+                          </span>
+                        )}
                       </button>
                       
                       {/* Sign out button */}
@@ -1574,11 +1740,20 @@ export default function App() {
                   <div className="space-y-5 sm:space-y-6">
                     {messages.map(msg => (
                       <Message key={msg.id} msg={msg} language={language} onFollowup={(q, msgId) => {
-                        if (msgId) setMessages(prev => prev.map(m => m.id === msgId ? { ...m, followupUsed: true } : m))
                         // q can be a string or { command, display } object from Save All
                         if (q && typeof q === 'object' && q.command) {
+                          // Patch the source message's confirmation_fields with the saved values
+                          // so if the panel re-mounts it shows the updated data, not stale fields
+                          if (msgId && q.updatedFields) {
+                            setMessages(prev => prev.map(m =>
+                              m.id === msgId
+                                ? { ...m, confirmation_fields: q.updatedFields }
+                                : m
+                            ))
+                          }
                           sendMessage(q.command, { displayText: q.display })
                         } else {
+                          if (msgId) setMessages(prev => prev.map(m => m.id === msgId ? { ...m, followupUsed: true } : m))
                           sendMessage(q)
                         }
                       }} />
@@ -1607,6 +1782,13 @@ export default function App() {
                     }}
                     onVoiceResponse={(transcript, errorMsg, prebuiltReply) => {
                       if (transcript?.trim()) {
+                        // Auto-enable voice responses when user speaks
+                        if (!voiceResponseEnabled) {
+                          console.log('[VOICE] Auto-enabling voice responses after microphone use')
+                          setVoiceResponseEnabled(true)
+                          localStorage.setItem('voice_response_enabled', 'true')
+                        }
+                        
                         if (prebuiltReply) {
                           if (!started) setStarted(true)
                           setMessages(prev => [
@@ -1614,6 +1796,8 @@ export default function App() {
                             { id: nextId(),     role: 'user', content: transcript },
                             { id: nextId(), role: 'bot',  content: prebuiltReply, sources: [], followups: [] },
                           ])
+                          // Speak the prebuilt reply too
+                          speakReply(prebuiltReply)
                         } else {
                           sendMessage(transcript.trim(), { fromVoice: true })
                         }

@@ -55,6 +55,7 @@ class FlowManager:
             "rep_assessee"       : None,   # Q7: Yes/No — Appointing Representative Assessee
             # Personal details (collected in details_collection step)
             "full_name"          : None,   # Full name as in Aadhaar
+            "grandfather_name"   : None,   # Grandfather's name
             "mother_name"        : None,   # Mother's name
             "email"              : None,   # Email for correspondence
             "email_source"       : None,   # "account" | "new"
@@ -99,6 +100,7 @@ class FlowManager:
                 "residential_status": self.state.get("residential_status"),
                 "rep_assessee"    : self.state.get("rep_assessee"),
                 "full_name"       : self.state.get("full_name"),
+                "grandfather_name": self.state.get("grandfather_name"),
                 "mother_name"     : self.state.get("mother_name"),
                 "email"           : self.state.get("email"),
                 "email_source"    : self.state.get("email_source"),
@@ -182,7 +184,7 @@ class FlowManager:
                 return s.get("rep_assessee") is not None
             if step == "details_collection":
                 # Check if all required details are collected
-                required = ["full_name", "mother_name", "email", "salary"]
+                required = ["full_name", "grandfather_name", "mother_name", "email", "salary"]
                 return all(s.get(field) for field in required)
             # confirmation, documents, summary — never skip
             return False

@@ -59,6 +59,7 @@ function BorderBeams() {
 
 export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
   const [tab, setTab] = useState(initialTab)
+  const [otpOnly, setOtpOnly] = useState(false)  // standalone OTP sign-in (no email+password)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -95,7 +96,7 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
 
   function switchTab(t) {
     setTab(t); setErrors({}); setServerMsg(''); setServerOk(false)
-    setPassword(''); setConfirm('')
+    setPassword(''); setConfirm(''); setOtpOnly(false)
   }
 
   function validate() {
@@ -122,7 +123,6 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
     if (tab === 'login') {
       const ok = await login(email, password)
       if (!ok) return   // authError is set inside the hook
-      // PHONE VERIFICATION DISABLED - Login directly without OTP
       const { supabase } = await import('../../lib/supabase')
       const { data: { user } } = await supabase.auth.getUser()
       const userData = { 
@@ -130,11 +130,10 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
         email: user.email, 
         display_name: user.user_metadata?.display_name ?? user.email 
       }
-      onLogin(userData)  // Complete login immediately
+      onLogin(userData)  // OTP temporarily disabled — login directly
     } else {
       const ok = await register(email, password)
       if (!ok) return
-      // PHONE VERIFICATION DISABLED - Register and login directly without OTP
       const { supabase } = await import('../../lib/supabase')
       const { data: { user } } = await supabase.auth.getUser()
       const userData = { 
@@ -142,7 +141,7 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
         email: user.email, 
         display_name: displayName || user.email 
       }
-      onLogin(userData)  // Complete login immediately
+      onLogin(userData)  // OTP temporarily disabled — login directly
     }
   }
 
@@ -157,6 +156,19 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
     e.preventDefault()
     const result = await verifyCode()
     if (!result) return  // error shown by hook
+
+    if (otpOnly) {
+      // Standalone OTP login — fetch user after OTP verification
+      const { supabase } = await import('../../lib/supabase')
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        onLogin({ id: user.id, email: user.email, display_name: user.user_metadata?.display_name ?? user.email })
+      } else {
+        // OTP verified but no user session — treat as successful anonymous verification
+        onLogin({ id: phone, email: phone, display_name: phone })
+      }
+      return
+    }
 
     // OTP verified — complete the login flow immediately
     // (session cookies were already set during email+password login)
@@ -239,6 +251,8 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
               <h1 className="text-xl font-black text-white" style={{ fontFamily: 'Archivo, sans-serif' }}>
                 {pendingUser
                   ? otpStep === 'otp' ? 'Enter OTP' : 'Verify your phone'
+                  : otpOnly
+                  ? otpStep === 'otp' ? 'Enter OTP' : 'Sign in with OTP'
                   : tab === 'login' ? 'Welcome back' : 'Create account'}
               </h1>
               <p className="text-white/40 text-xs">
@@ -246,12 +260,16 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
                   ? otpStep === 'otp'
                     ? `We sent a 6-digit code to ${phone}`
                     : 'One last step — verify your phone number'
+                  : otpOnly
+                  ? otpStep === 'otp'
+                    ? `We sent a 6-digit code to ${phone}`
+                    : 'Enter your mobile number to receive a one-time code'
                   : tab === 'login' ? 'Sign in to your PAN assistant' : 'Get started with PAN services'}
               </p>
             </div>
 
-            {/* ── OTP flow (shown after password auth succeeds) ── */}
-            {pendingUser ? (
+            {/* ── OTP flow (shown after password auth succeeds, or standalone OTP sign-in) ── */}
+            {(pendingUser || otpOnly) ? (
               <div className="px-6 pb-6 space-y-3">
 
                 {/* Step 1: phone number entry */}
@@ -292,7 +310,7 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setPendingUser(null); resetOtp() }}
+                      onClick={() => { setPendingUser(null); setOtpOnly(false); resetOtp() }}
                       className="w-full text-xs text-white/40 hover:text-white/70 transition-colors"
                     >
                       ← Back to sign in
@@ -435,6 +453,16 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
                 Continue with Google
+              </button>
+
+              {/* Sign in with OTP (phone number) */}
+              <button
+                type="button"
+                onClick={() => { setOtpOnly(true); resetOtp() }}
+                className="w-full h-10 rounded-lg bg-white/5 border border-white/10 hover:border-violet-500/30 hover:bg-violet-500/[0.06] flex items-center justify-center gap-2 text-xs font-medium text-white/70 hover:text-violet-300 transition-all duration-150"
+              >
+                <Phone className="w-4 h-4 flex-shrink-0" />
+                Sign in with OTP
               </button>
 
               {/* Switch tab */}

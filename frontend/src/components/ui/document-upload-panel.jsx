@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, CheckCircle2, ImageIcon, CreditCard, Car, Loader2, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
 import { GlowCard } from './spotlight-card'
+import { useDocumentUpload } from '../../hooks/useDocumentUpload'
 
 const STAGES = [
   {
@@ -38,7 +39,7 @@ const STAGES = [
 
 const SWIPE_THRESHOLD = 60
 
-export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded }) {
+export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded, onNotLoggedIn }) {
   const [activeIdx, setActiveIdx] = useState(0)
   const [uploads, setUploads] = useState({})
   const [previews, setPreviews] = useState({})
@@ -48,6 +49,9 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded }) {
   const [dragOffset, setDragOffset] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const refs = useRef({})
+
+  // Encrypted Supabase upload — mirrors each file into document_meta for the panel
+  const { upload: encryptAndSave } = useDocumentUpload()
 
   const uploaded = STAGES.filter(s => uploads[s.id]).length
   const allDone = uploaded === STAGES.length
@@ -62,6 +66,7 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded }) {
       reader.readAsDataURL(file)
     }
     try {
+      // 1. Upload to pan-rag for document extraction
       const form = new FormData()
       form.append('session_id', sessionId || 'anonymous')
       form.append('doc_type', stageId)
@@ -69,6 +74,12 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded }) {
       const res = await fetch('/api/upload', { method: 'POST', body: form })
       if (!res.ok) throw new Error()
       setUploads(p => ({ ...p, [stageId]: file.name }))
+
+      // 2. Also encrypt and save to Supabase document_meta so it appears in the
+      //    Encrypted Documents panel, synced to the current user.
+      encryptAndSave(file, onNotLoggedIn || (() => {})).catch(() => {
+        // Silent — extraction succeeded; encryption is best-effort
+      })
     } catch {
       setErrors(p => ({ ...p, [stageId]: 'Upload failed — try again' }))
       setPreviews(p => { const n = { ...p }; delete n[stageId]; return n })

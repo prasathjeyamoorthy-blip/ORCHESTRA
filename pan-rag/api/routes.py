@@ -2,7 +2,7 @@
 import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from api.schemas import QuestionRequest, AnswerResponse
+from api.schemas import QuestionRequest, AnswerResponse, SummarizeRequest
 from api.chain_instance import get_chain
 import traceback
 import json
@@ -44,7 +44,7 @@ _FIELD_OPTIONS: dict[str, dict] = {
         "choices": ["Yes", "No"],
     },
     "source_of_income": {
-        "type": "checkbox",
+        "type": "radio",
         "label": "Source of Income",
         "field": "source_of_income",
         "choices": [
@@ -90,7 +90,7 @@ router = APIRouter()
 _INLINE_EDIT_PREFIX_RE = re.compile(
     r"^change\s+(Source of Income|Submission Mode|PAN Delivery|Aadhaar Photo on PAN"
     r"|Address for Communication|Residential Status|Representative Assessee"
-    r"|Full Name \(as in Aadhaar\)|Full Name|Mother'?s Name|Annual Income|Email)\s+to\s+",
+    r"|Full Name \(as in Aadhaar\)|Full Name|Grandfather'?s Name|Mother'?s Name|Annual Income|Email)\s+to\s+",
     re.IGNORECASE,
 )
 
@@ -179,6 +179,7 @@ def get_flow_state(user_id: str, session_id: str):
     if s.get("residential_status"):completed["residential_status"]= s["residential_status"]
     if s.get("rep_assessee") is not None: completed["rep_assessee"] = _yn(s["rep_assessee"])
     if s.get("full_name"):         completed["full_name"]         = s["full_name"]
+    if s.get("grandfather_name"):  completed["grandfather_name"]  = s["grandfather_name"]
     if s.get("mother_name"):       completed["mother_name"]       = s["mother_name"]
     if s.get("email"):             completed["email"]             = s["email"]
     if s.get("salary"):            completed["salary"]            = s["salary"]
@@ -186,10 +187,11 @@ def get_flow_state(user_id: str, session_id: str):
     # What's still missing for the current step
     missing_for_step = []
     if step == "details_collection":
-        if not s.get("full_name"):    missing_for_step.append("full_name")
-        if not s.get("mother_name"):  missing_for_step.append("mother_name")
-        if not s.get("email"):        missing_for_step.append("email")
-        if not s.get("salary"):       missing_for_step.append("salary")
+        if not s.get("full_name"):          missing_for_step.append("full_name")
+        if not s.get("grandfather_name"):   missing_for_step.append("grandfather_name")
+        if not s.get("mother_name"):        missing_for_step.append("mother_name")
+        if not s.get("email"):              missing_for_step.append("email")
+        if not s.get("salary"):             missing_for_step.append("salary")
 
     return {
         "active": True,
@@ -486,6 +488,41 @@ async def ask_stream(request: QuestionRequest):
 @router.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@router.post("/summarize")
+async def summarize(request: SummarizeRequest):
+    """
+    Generate a rolling summary of conversation history.
+    Called fire-and-forget by the Node backend when history exceeds 20 messages.
+    Payload: { "prompt": "...", "user_id": "..." }
+    Returns: { "summary": "..." }
+    """
+    from generation.llm import _call
+
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a conversation summarizer. "
+                    "Produce a concise 3-5 sentence summary of the conversation. "
+                    "Focus on what the user asked, what was resolved, and any important "
+                    "details such as PAN number, name, income, or unresolved issues. "
+                    "Write in plain English. Do not include greetings or filler."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+        summary = _call(messages, max_tokens=200, temperature=0.2)
+        return {"summary": summary}
+    except Exception as e:
+        print(f"[summarize] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 UPLOAD_DIR = Path("storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

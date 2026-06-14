@@ -2,8 +2,22 @@ const router = require('express').Router();
 const { createClient } = require('@supabase/supabase-js');
 
 const BASE_URL = 'https://cpaas.messagecentral.com';
-const CUSTOMER_ID = process.env.MC_CUSTOMER_ID;
-const PASSWORD_B64 = process.env.MC_PASSWORD_B64; // base64 encoded password
+
+// ── Multi-account credentials (fallback if primary expires) ─────────────────
+const MC_ACCOUNTS = [
+  {
+    customerId:  process.env.MC_CUSTOMER_ID,
+    passwordB64: process.env.MC_PASSWORD_B64,
+  },
+  {
+    customerId:  process.env.MC_CUSTOMER_ID_2,
+    passwordB64: process.env.MC_PASSWORD_B64_2,
+  },
+  {
+    customerId:  process.env.MC_CUSTOMER_ID_3,
+    passwordB64: process.env.MC_PASSWORD_B64_3,
+  },
+].filter(a => a.customerId && a.passwordB64); // only include configured accounts
 
 // ── Security: Rate limiting and anti-spam ────────────────────────────────────
 const RATE_LIMIT_WINDOW = 10 * 60 * 1000; // 10 minutes in ms
@@ -44,73 +58,87 @@ function validateIndianPhone(phone) {
   return /^\+91\d{10}$/.test(phone);
 }
 
-// Get auth token from Message Central
-async function getAuthToken() {
-  if (!CUSTOMER_ID || !PASSWORD_B64) {
-    throw new Error('Message Central credentials not configured. Set MC_CUSTOMER_ID and MC_PASSWORD_B64 in .env');
-  }
-  
-  const url = `${BASE_URL}/auth/v1/authentication/token?customerId=${CUSTOMER_ID}&key=${PASSWORD_B64}&scope=NEW&country=91`;
+// Get auth token from a specific MC account
+async function getAuthTokenForAccount({ customerId, passwordB64 }) {
+  const url = `${BASE_URL}/auth/v1/authentication/token?customerId=${customerId}&key=${passwordB64}&scope=NEW&country=91`;
   const res = await fetch(url, { headers: { accept: '*/*' } });
-  
+
   if (!res.ok) {
-    throw new Error(`Message Central auth failed: ${res.status} ${res.statusText}`);
+    throw new Error(`MC auth failed (${customerId}): ${res.status} ${res.statusText}`);
   }
-  
+
   const data = await res.json();
-  console.log('[MC auth response]', JSON.stringify(data));
-  
   if (!data.token) {
-    throw new Error(`Failed to get auth token: ${JSON.stringify(data)}`);
+    throw new Error(`No token returned (${customerId}): ${JSON.stringify(data)}`);
   }
-  
+
   return data.token;
+}
+
+// Get auth token — tries primary account first, falls back to secondary on failure
+async function getAuthToken() {
+  if (MC_ACCOUNTS.length === 0) {
+    throw new Error('No Message Central credentials configured. Set MC_CUSTOMER_ID and MC_PASSWORD_B64 in .env');
+  }
+
+  let lastError;
+  for (const account of MC_ACCOUNTS) {
+    try {
+      const token = await getAuthTokenForAccount(account);
+      // Attach customerId so callers know which account is active
+      return { token, customerId: account.customerId };
+    } catch (err) {
+      console.warn(`[MC] Account ${account.customerId} failed auth, trying next: ${err.message}`);
+      lastError = err;
+    }
+  }
+  throw new Error(`All Message Central accounts failed: ${lastError?.message}`);
 }
 
 // Send OTP via Message Central
 async function sendOtpMC(mobile) {
-  const token = await getAuthToken();
+  const { token } = await getAuthToken();
   const number = mobile.replace(/^\+91/, '').replace(/^\+/, '');
   const url = `${BASE_URL}/verification/v3/send?countryCode=91&flowType=SMS&mobileNumber=${number}&otpLength=6`;
-  
+
   const res = await fetch(url, {
     method: 'POST',
     headers: { authToken: token }
   });
-  
+
   if (!res.ok) {
     throw new Error(`Message Central send failed: ${res.status} ${res.statusText}`);
   }
-  
+
   const data = await res.json();
   console.log('[MC send response]', JSON.stringify(data));
-  
+
   if (data.responseCode !== 200) {
     throw new Error(`MC error: ${data.message || JSON.stringify(data)}`);
   }
-  
+
   if (!data.data?.verificationId) {
     throw new Error(`No verificationId in response: ${JSON.stringify(data)}`);
   }
-  
+
   return data.data.verificationId;
 }
 
 // Verify OTP via Message Central
 async function verifyOtpMC(verificationId, otp) {
-  const token = await getAuthToken();
+  const { token } = await getAuthToken();
   const url = `${BASE_URL}/verification/v3/validateOtp?verificationId=${verificationId}&code=${otp}`;
-  
+
   const res = await fetch(url, { headers: { authToken: token } });
-  
+
   if (!res.ok) {
     console.error(`[MC verify] HTTP error: ${res.status} ${res.statusText}`);
     return false;
   }
-  
+
   const data = await res.json();
   console.log('[MC verify response]', JSON.stringify(data));
-  
+
   return data?.data?.verificationStatus === 'VERIFICATION_COMPLETED';
 }
 

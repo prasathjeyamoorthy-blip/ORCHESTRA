@@ -10,6 +10,10 @@ class QuestionRequest(BaseModel):
     account_email: Optional[str] = None  # Supabase auth email — always available
     language: Optional[str] = None       # explicit language override from frontend ("en"|"ta"|"hi")
 
+class SummarizeRequest(BaseModel):
+    prompt: str
+    user_id: Optional[str] = ""
+
 class Source(BaseModel):
     title: str
     url: str

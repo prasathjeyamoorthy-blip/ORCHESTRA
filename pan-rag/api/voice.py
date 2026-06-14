@@ -167,13 +167,39 @@ def _clean_for_tts(text: str, language: str = "en") -> str:
         text = text.replace('Aadhaar', 'Aadhar')  # Simplified pronunciation
         
     elif language == "ta":
-        # Tamil-specific cleaning
-        # Keep Tamil script as-is, but clean English acronyms if mixed
-        text = text.replace('PAN', 'பான்')
-        text = text.replace('KYC', 'கே வை சி')
-        text = text.replace('OTP', 'ஓ டி பி')
+        # Tamil-specific cleaning — replace ALL English loanwords with pure Tamil
+        # so Magpie Tamil TTS pronounces them naturally
+        ta_replacements = {
+            r'\bPAN\b':           'பான்',
+            r'\bAadhaar\b':       'ஆதார்',
+            r'\bAadhar\b':        'ஆதார்',
+            r'\bTAN\b':           'டான்',
+            r'\bTDS\b':           'டிடிஎஸ்',
+            r'\bKYC\b':           'கேஒய்சி',
+            r'\beKYC\b':          'இ கேஒய்சி',
+            r'\be-KYC\b':         'இ கேஒய்சி',
+            r'\bOTP\b':           'ஒடிபி',
+            r'\bNSDL\b':          'என்எஸ்டிஎல்',
+            r'\bUTIITSL\b':       'யுடிஐஐடிஎஸ்எல்',
+            r'\bForm 49A\b':      'படிவம் நாற்பத்தொன்பது ஏ',
+            r'\bForm 49AA\b':     'படிவம் நாற்பத்தொன்பது ஏஏ',
+            r'\bNRI\b':           'என்ஆர்ஐ',
+            r'\bGST\b':           'ஜிஎஸ்டி',
+            r'\bITR\b':           'ஐடிஆர்',
+            r'\bSMS\b':           'எஸ்எம்எஸ்',
+            r'\bPDF\b':           'பிடிஎஃப்',
+            r'\beSign\b':         'இ கையொப்பம்',
+            r'\bDOB\b':           'பிறந்த தேதி',
+            r'\bDigiLocker\b':    'டிஜி லாக்கர்',
+            r'\bmAadhaar\b':      'எம் ஆதார்',
+            r'\bProtean\b':       'புரோட்டியன்',
+            r'\bHUF\b':           'கூட்டு குடும்ப நிறுவனம்',
+        }
+        for pattern, replacement in ta_replacements.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         text = text.replace('&', 'மற்றும்')
-        text = text.replace('Aadhaar', 'ஆதார்')
+        # Remove any remaining all-caps English acronyms that weren't matched
+        text = re.sub(r'\b[A-Z]{2,6}\b', '', text)
         
     elif language == "hi":
         # Hindi-specific cleaning
@@ -458,14 +484,15 @@ async def voice_tts(text: str = Form(...), language: str = Form(default="en")):
 
 
 @voice_router.post("/voice/speak")
-async def voice_speak(audio: UploadFile = File(...), language: str = Form(default="en")):
+async def voice_speak(audio: UploadFile = File(...), language: str = Form(default="en"), session_id: str = Form(default=None)):
     """
-    Full voice pipeline: STT → PAN domain validation → RAG+LLM → TTS
+    Full voice pipeline: STT → PAN domain validation → RAG+LLM (same flow as text chat) → TTS
 
+    - Uses the same session_id as text chat so voice stays in sync with the PAN registration flow
     - Biases Whisper STT with PAN vocabulary initial_prompt for accuracy
     - Rejects clearly off-topic speech with a polite redirect
     - Passes transcript through full RAG chain with language context
-    - Synthesizes response to speech (TTS)
+    - Synthesizes response in the selected language (Tamil/Hindi/English)
 
     Returns:
         audio/wav with X-Transcript and X-Reply headers,
@@ -502,7 +529,7 @@ async def voice_speak(audio: UploadFile = File(...), language: str = Form(defaul
         if not transcript and detected_language != "en":
             print(f"[VOICE] {detected_language} transcription empty — retrying in English")
             transcript = _transcribe_nvidia(wav_path, "en")
-            detected_language = "en"
+            # Keep detected_language as-is — user still wants Tamil/Hindi response
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"STT failed: {e}")
@@ -549,15 +576,15 @@ async def voice_speak(audio: UploadFile = File(...), language: str = Form(defaul
             pass
         return {"transcript": transcript, "reply": reply, "audio_available": False}
 
-    # ── Step 3: RAG+LLM ───────────────────────────────────────────────────────
-    print(f"[VOICE] Processing with language: {detected_language}")
+    # ── Step 3: RAG+LLM — same flow as text chat ─────────────────────────────
+    print(f"[VOICE] Processing with language: {detected_language}, session: {session_id or 'anonymous'}")
 
     try:
         from api.chain_instance import get_chain
 
         result = get_chain().run(
             question=transcript,
-            session_id=None,
+            session_id=session_id or f"voice_{detected_language}",
             user_id="voice_user",
             user_context="",
             account_email="",
@@ -583,6 +610,14 @@ async def voice_speak(audio: UploadFile = File(...), language: str = Form(defaul
         }.get(detected_language, "I can help you with PAN card services.")
 
     # ── Step 4: TTS ───────────────────────────────────────────────────────────
+    # Safety net: ensure reply is in the correct language before speaking
+    if detected_language in ("ta", "hi"):
+        try:
+            from agent.translator import translate_response as _translate
+            reply = _translate(reply, detected_language)
+        except Exception:
+            pass  # translator unavailable — speak whatever the chain returned
+
     clean = _clean_for_tts(reply, detected_language)
     # Split on sentence boundaries — Tamil uses '. ' and '! ', Hindi uses '।'
     sentences = [s.strip() for s in re.split(r'(?<=[.!?।॥])\s+', clean) if s.strip()]

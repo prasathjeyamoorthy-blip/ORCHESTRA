@@ -999,106 +999,85 @@ async function sendOTP(userId) {
 }
 
 /**
- * Send OTP via Message Central API
+ * Send OTP via Message Central API — tries primary account, falls back to secondary
  */
 async function sendOtpViaMessageCentral(phone) {
-  try {
-    const BASE_URL = 'https://cpaas.messagecentral.com';
-    const CUSTOMER_ID = process.env.MC_CUSTOMER_ID;
-    const PASSWORD_B64 = process.env.MC_PASSWORD_B64;
+  const MC_BASE = 'https://cpaas.messagecentral.com';
+  const accounts = [
+    { customerId: process.env.MC_CUSTOMER_ID,   passwordB64: process.env.MC_PASSWORD_B64 },
+    { customerId: process.env.MC_CUSTOMER_ID_2, passwordB64: process.env.MC_PASSWORD_B64_2 },
+  ].filter(a => a.customerId && a.passwordB64);
 
-    if (!CUSTOMER_ID || !PASSWORD_B64) {
-      throw new Error('Message Central credentials not configured');
-    }
-
-    // Get auth token
-    const authUrl = `${BASE_URL}/auth/v1/authentication/token?customerId=${CUSTOMER_ID}&key=${PASSWORD_B64}&scope=NEW&country=91`;
-    const authRes = await fetch(authUrl, { headers: { accept: '*/*' } });
-    
-    if (!authRes.ok) {
-      throw new Error(`Message Central auth failed: ${authRes.status}`);
-    }
-    
-    const authData = await authRes.json();
-    const token = authData.token;
-
-    if (!token) {
-      throw new Error('Failed to get auth token from Message Central');
-    }
-
-    // Send OTP
-    const number = phone.replace(/^\+91/, '').replace(/^\+/, '');
-    const sendUrl = `${BASE_URL}/verification/v3/send?countryCode=91&flowType=SMS&mobileNumber=${number}&otpLength=6`;
-    
-    const sendRes = await fetch(sendUrl, {
-      method: 'POST',
-      headers: { authToken: token }
-    });
-    
-    if (!sendRes.ok) {
-      throw new Error(`Message Central send failed: ${sendRes.status}`);
-    }
-    
-    const sendData = await sendRes.json();
-    
-    if (sendData.responseCode !== 200 || !sendData.data?.verificationId) {
-      throw new Error(`MC error: ${sendData.message || 'No verificationId'}`);
-    }
-    
-    return sendData.data.verificationId;
-  } catch (error) {
-    console.error('Message Central send error:', error);
+  if (accounts.length === 0) {
+    console.error('No Message Central credentials configured');
     return null;
   }
+
+  for (const account of accounts) {
+    try {
+      const authUrl = `${MC_BASE}/auth/v1/authentication/token?customerId=${account.customerId}&key=${account.passwordB64}&scope=NEW&country=91`;
+      const authRes = await fetch(authUrl, { headers: { accept: '*/*' } });
+      if (!authRes.ok) throw new Error(`MC auth failed (${account.customerId}): ${authRes.status}`);
+      const { token } = await authRes.json();
+      if (!token) throw new Error(`No token returned (${account.customerId})`);
+
+      const number = phone.replace(/^\+91/, '').replace(/^\+/, '');
+      const sendUrl = `${MC_BASE}/verification/v3/send?countryCode=91&flowType=SMS&mobileNumber=${number}&otpLength=6`;
+      const sendRes = await fetch(sendUrl, { method: 'POST', headers: { authToken: token } });
+      if (!sendRes.ok) throw new Error(`MC send failed (${account.customerId}): ${sendRes.status}`);
+      const sendData = await sendRes.json();
+      if (sendData.responseCode !== 200 || !sendData.data?.verificationId) {
+        throw new Error(`MC error (${account.customerId}): ${sendData.message || 'No verificationId'}`);
+      }
+
+      console.log(`[MC uploads] OTP sent via account ${account.customerId}`);
+      return sendData.data.verificationId;
+    } catch (error) {
+      console.warn(`[MC uploads] Account ${account.customerId} failed, trying next:`, error.message);
+    }
+  }
+
+  console.error('[MC uploads] All Message Central accounts failed for send');
+  return null;
 }
 
 /**
- * Verify OTP with Message Central API
+ * Verify OTP with Message Central API — tries primary account, falls back to secondary
  */
 async function verifyOtpWithMessageCentral(verificationId, otp) {
-  try {
-    const BASE_URL = 'https://cpaas.messagecentral.com';
-    const CUSTOMER_ID = process.env.MC_CUSTOMER_ID;
-    const PASSWORD_B64 = process.env.MC_PASSWORD_B64;
+  const MC_BASE = 'https://cpaas.messagecentral.com';
+  const accounts = [
+    { customerId: process.env.MC_CUSTOMER_ID,   passwordB64: process.env.MC_PASSWORD_B64 },
+    { customerId: process.env.MC_CUSTOMER_ID_2, passwordB64: process.env.MC_PASSWORD_B64_2 },
+  ].filter(a => a.customerId && a.passwordB64);
 
-    if (!CUSTOMER_ID || !PASSWORD_B64) {
-      throw new Error('Message Central credentials not configured');
-    }
-
-    // Get auth token
-    const authUrl = `${BASE_URL}/auth/v1/authentication/token?customerId=${CUSTOMER_ID}&key=${PASSWORD_B64}&scope=NEW&country=91`;
-    const authRes = await fetch(authUrl, { headers: { accept: '*/*' } });
-    
-    if (!authRes.ok) {
-      throw new Error(`Message Central auth failed: ${authRes.status}`);
-    }
-    
-    const authData = await authRes.json();
-    const token = authData.token;
-
-    if (!token) {
-      throw new Error('Failed to get auth token from Message Central');
-    }
-
-    // Verify OTP
-    const verifyUrl = `${BASE_URL}/verification/v3/validateOtp?verificationId=${verificationId}&code=${otp}`;
-    
-    const verifyRes = await fetch(verifyUrl, { 
-      headers: { authToken: token } 
-    });
-    
-    if (!verifyRes.ok) {
-      console.error(`Message Central verify failed: ${verifyRes.status}`);
-      return false;
-    }
-    
-    const verifyData = await verifyRes.json();
-    
-    return verifyData?.data?.verificationStatus === 'VERIFICATION_COMPLETED';
-  } catch (error) {
-    console.error('Message Central verify error:', error);
+  if (accounts.length === 0) {
+    console.error('No Message Central credentials configured');
     return false;
   }
+
+  for (const account of accounts) {
+    try {
+      const authUrl = `${MC_BASE}/auth/v1/authentication/token?customerId=${account.customerId}&key=${account.passwordB64}&scope=NEW&country=91`;
+      const authRes = await fetch(authUrl, { headers: { accept: '*/*' } });
+      if (!authRes.ok) throw new Error(`MC auth failed (${account.customerId}): ${authRes.status}`);
+      const { token } = await authRes.json();
+      if (!token) throw new Error(`No token returned (${account.customerId})`);
+
+      const verifyUrl = `${MC_BASE}/verification/v3/validateOtp?verificationId=${verificationId}&code=${otp}`;
+      const verifyRes = await fetch(verifyUrl, { headers: { authToken: token } });
+      if (!verifyRes.ok) throw new Error(`MC verify failed (${account.customerId}): ${verifyRes.status}`);
+      const verifyData = await verifyRes.json();
+
+      console.log(`[MC uploads] OTP verified via account ${account.customerId}`);
+      return verifyData?.data?.verificationStatus === 'VERIFICATION_COMPLETED';
+    } catch (error) {
+      console.warn(`[MC uploads] Account ${account.customerId} failed, trying next:`, error.message);
+    }
+  }
+
+  console.error('[MC uploads] All Message Central accounts failed for verify');
+  return false;
 }
 
 module.exports = router;
