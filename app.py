@@ -86,42 +86,58 @@ def get_docs():
 def get_person_docs():
     """Get documents for a specific person.
 
-    Backend uniqueness key is `mobile_number`.
+    Lookup can be done by:
+    - person_name (legacy behavior; may contain name or mobile_number depending on UI)
+    - phone_number (new; should be mobile_number)
 
-    UI may still send the field as `person_name`.
-    If so, we treat it as a mobile number for lookup.
+    Backend uniqueness key is `mobile_number` in `persons`.
     """
-    data = request.get_json()
+    data = request.get_json() or {}
     auth_id = data.get('auth_id')
     person_name = data.get('person_name')
+    phone_number = data.get('phone_number')
 
     if not auth_id:
         return jsonify({'status': 'error', 'error': 'auth_id required'}), 400
-    if not person_name:
-        return jsonify({'status': 'error', 'error': 'person_name (mobile_number) required'}), 400
 
-    from supa import get_documents_by_person
+    if not person_name and not phone_number:
+        return jsonify({'status': 'error', 'error': 'Provide name or phone_number'}), 400
 
-    # `get_documents_by_person` expects a name for backward compatibility.
-    # We updated it to use mobile_number as unique key.
-    docs = get_documents_by_person(auth_id, person_name)
+    from supa import get_documents_by_name_or_phone
+
+    docs = get_documents_by_name_or_phone(auth_id, person_name=person_name, phone_number=phone_number)
     return jsonify({'status': 'success', 'documents': docs})
+
 
 
 
 @app.route('/api/update_document', methods=['POST'])
 def update_document():
-    """Update existing document or create new for a person."""
+    """Update existing document or create new for a person.
+
+    Lookup can be done by either:
+    - person_name (legacy UI; treated as mobile_number previously in some places)
+    - phone_number (new)
+
+    If phone_number is provided, it will be used to identify/create the person.
+    Otherwise, we fallback to extracting mobile_number from Aadhaar.
+    """
     auth_id = request.form.get('auth_id')
-    person_name = request.form.get('person_name')
-    
+    person_name = (request.form.get('person_name') or '').strip()
+    phone_number = (request.form.get('phone_number') or '').strip()
+
+    # Normalize phone_number to digits-only for DB lookup
+    phone_number = ''.join(ch for ch in phone_number if ch.isdigit())
+
+
     if not auth_id:
         return jsonify({'status': 'error', 'error': 'auth_id required'}), 400
-    if not person_name:
-        return jsonify({'status': 'error', 'error': 'person_name required'}), 400
+    if not person_name and not phone_number:
+        return jsonify({'status': 'error', 'error': 'Provide person name or phone_number'}), 400
 
     if 'aadhaar' not in request.files:
         return jsonify({'status': 'error', 'error': 'No aadhaar file'}), 400
+
 
     aadhaar_file = request.files['aadhaar']
     filename = aadhaar_file.filename
@@ -151,16 +167,21 @@ def update_document():
         # Extract data
         result = run_vlm(AADHAAR_PROMPT, file_bytes, filename)
         
-        # Get or create person using mobile_number (unique key)
+        # Get or create person
         from supa import get_or_create_person, delete_old_documents
-        mobile_number = result.get("mobile_number")
-        if not mobile_number:
-            return jsonify({'status': 'error', 'error': 'mobile_number not found in Aadhaar extraction'}), 400
-        person_id = get_or_create_person(auth_id, mobile_number, person_name)
 
-        
+        # If user provided phone_number, use it for lookup; otherwise use extracted mobile_number.
+        mobile_number = phone_number or result.get("mobile_number")
+        if not mobile_number:
+            return jsonify({'status': 'error', 'error': 'phone_number/mobile_number not found'}), 400
+
+        # Name can be provided by UI; fallback to extracted name (or existing person name).
+        person_display_name = person_name or result.get("name")
+        person_id = get_or_create_person(auth_id, mobile_number, person_display_name)
+
         # Delete old documents for this person
         delete_old_documents(person_id)
+
         
         # Save new document
         doc_id = save_document("aadhaar", result, auth_id, person_id)

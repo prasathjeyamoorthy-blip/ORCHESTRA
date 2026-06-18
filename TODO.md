@@ -1,12 +1,11 @@
 # TODO
 
-- [x] Change unique update key from `name`/username to `mobile_number`
-- [x] Update `supa.py`: `get_or_create_person` to lookup persons by `(auth_id, mobile_number)`
-
-- [x] Update `app.py`: when extracting Aadhaar, use `mobile_number` for person lookup
-
-- [x] Update any related queries (e.g., get documents by person) if they rely on `name`
-
-- [x] Run quick local tests by uploading Aadhaar twice with same mobile number and verify documents update
+- [x] Locate all frontend fields for `username` in view/update flows.
+- [x] Add `phone_number` input field to both View and Update sections.
+- [x] Update frontend JS to allow lookup by either `name` OR `mobile/phone` (AND/OR logic).
+- [x] Backend: update `/api/get_person_docs` to accept `phone_number` and search persons by `mobile_number` (unique key).
+- [x] Backend: update `/api/update_document` to accept `phone_number` optionally, and use it for person lookup if provided; otherwise continue extracting from Aadhaar.
+- [x] Backend: update Supabase helper functions if needed to support lookup by mobile_number.
+- [x] Testing: run basic local checks for view/update requests payloads.
 
 

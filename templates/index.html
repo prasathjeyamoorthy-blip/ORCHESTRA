@@ -99,10 +99,15 @@ button:hover { background: #1e3a8a; }
     <h3>View Documents</h3>
     
     <div class="form-group">
-        <label>Enter Username</label>
+        <label>Enter Name (optional)</label>
         <input type="text" id="viewUsername" placeholder="Enter person name">
-
     </div>
+
+    <div class="form-group">
+        <label>Enter Phone Number (optional)</label>
+        <input type="text" id="viewPhone" placeholder="Enter mobile number">
+    </div>
+
 
     
     <button onclick="viewDocs()">Get Documents</button>
@@ -116,9 +121,15 @@ button:hover { background: #1e3a8a; }
     <h3>Update Documents</h3>
     
     <div class="form-group">
-        <label>Username</label>
+        <label>Name (optional)</label>
         <input type="text" id="updateUsername" placeholder="Enter person name">
     </div>
+
+    <div class="form-group">
+        <label>Phone Number (optional)</label>
+        <input type="text" id="updatePhone" placeholder="Enter mobile number">
+    </div>
+
     
     <div class="form-group">
         <label>Upload New Document</label>
@@ -177,7 +188,9 @@ function showView() {
     showSection('viewSection');
     document.getElementById('viewResult').innerHTML = '';
     document.getElementById('viewUsername').value = '';
+    document.getElementById('viewPhone').value = '';
 }
+
 
 
 
@@ -185,8 +198,10 @@ function showUpdate() {
     showSection('updateSection');
     document.getElementById('updateResult').innerHTML = '';
     document.getElementById('updateUsername').value = '';
+    document.getElementById('updatePhone').value = '';
     document.getElementById('updateFile').value = '';
 }
+
 
 function showUpload() {
     showSection('uploadSection');
@@ -261,23 +276,23 @@ async function login() {
 // View documents for a person
 async function viewDocs() {
     const viewUsername = document.getElementById('viewUsername').value.trim();
-    
-    if (!viewUsername) {
-        document.getElementById('viewResult').innerHTML = '<p style="color:red">Please enter username</p>';
+    const viewPhone = document.getElementById('viewPhone').value.trim();
 
+    if (!viewUsername && !viewPhone) {
+        document.getElementById('viewResult').innerHTML = '<p style="color:red">Please enter name or phone number</p>';
         return;
     }
 
-    
     const res = await fetch('/api/get_person_docs', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
             auth_id: authId,
-            person_name: viewUsername
-
+            person_name: viewUsername || null,
+            phone_number: viewPhone || null
         })
     });
+
 
     
     const data = await res.json();
@@ -322,10 +337,11 @@ async function viewDocs() {
 // Update documents for a person
 async function updateDocs() {
     const updateUsername = document.getElementById('updateUsername').value.trim();
+    const updatePhone = document.getElementById('updatePhone').value.trim();
     const file = document.getElementById('updateFile').files[0];
     
-    if (!updateUsername) {
-        document.getElementById('updateResult').innerHTML = '<p style="color:red">Please enter username</p>';
+    if (!updateUsername && !updatePhone) {
+        document.getElementById('updateResult').innerHTML = '<p style="color:red">Please enter name or phone number</p>';
         return;
     }
     
@@ -336,13 +352,15 @@ async function updateDocs() {
     
     const formData = new FormData();
     formData.append('auth_id', authId);
-    formData.append('person_name', updateUsername);
+    formData.append('person_name', updateUsername || '');
+    formData.append('phone_number', updatePhone || '');
     formData.append('aadhaar', file);
     
     const res = await fetch('/api/update_document', {
         method: 'POST',
         body: formData
     });
+
     
     const data = await res.json();
     

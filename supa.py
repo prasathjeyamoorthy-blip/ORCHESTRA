@@ -68,18 +68,13 @@ def get_documents_by_auth(auth_id: str):
 
 
 def get_documents_by_person(auth_id: str, person_name: str):
-    """Get documents for a specific person by name.
+    """Backward-compatible lookup by name.
 
-    Decrypts stored documents.extracted_data before returning.
-
-
-    NOTE: The person unique key is now mobile_number.
-    This function is kept for backward compatibility with the existing UI.
-    If multiple persons share the same name, the first match is used.
+    NOTE: Original UI used the input as `mobile_number` sometimes.
+    New logic prefers `get_documents_by_name_or_phone`.
     """
     client = get_client()
 
-    # First get person_id by name (non-unique)
     person_response = client.table("persons") \
         .select("person_id") \
         .eq("auth_id", auth_id) \
@@ -91,7 +86,6 @@ def get_documents_by_person(auth_id: str, person_name: str):
 
     person_id = person_response.data[0]["person_id"]
 
-    # Get documents for this person
     docs_response = client.table("documents") \
         .select("*") \
         .eq("auth_id", auth_id) \
@@ -102,7 +96,6 @@ def get_documents_by_person(auth_id: str, person_name: str):
 
     from crypto_utils import decrypt_json
 
-    # Add person_name to each document and decrypt extracted_data
     for doc in docs:
         doc["person_name"] = person_name
         enc = doc.get("extracted_data")
@@ -113,6 +106,78 @@ def get_documents_by_person(auth_id: str, person_name: str):
                 pass
 
     return docs
+
+
+def _normalize_mobile(m: str) -> str:
+    return "".join(ch for ch in str(m or "") if ch.isdigit())
+
+
+def get_documents_by_name_or_phone(auth_id: str, person_name: str | None, phone_number: str | None):
+    """Lookup documents by either:
+    - phone_number => persons.mobile_number (unique key with auth_id)
+    - person_name => persons.name (non-unique)
+
+    If both are provided, phone_number takes precedence.
+    """
+    from crypto_utils import decrypt_json
+
+    client = get_client()
+
+    mobile = _normalize_mobile(phone_number) if phone_number else ""
+
+    person_ids: list[str] = []
+    lookup_label = None
+
+    if mobile:
+        lookup_label = mobile
+        resp = client.table("persons") \
+            .select("person_id, name") \
+            .eq("auth_id", auth_id) \
+            .eq("mobile_number", mobile) \
+            .execute()
+        person_ids = [r["person_id"] for r in (resp.data or [])]
+    else:
+        if not person_name:
+            return []
+        lookup_label = person_name
+        resp = client.table("persons") \
+            .select("person_id, name") \
+            .eq("auth_id", auth_id) \
+            .eq("name", person_name) \
+            .execute()
+        person_ids = [r["person_id"] for r in (resp.data or [])]
+
+    if not person_ids:
+        return []
+
+    # Fetch documents by person_ids
+    docs_response = client.table("documents") \
+        .select("*") \
+        .eq("auth_id", auth_id) \
+        .in_("person_id", person_ids) \
+        .execute()
+
+    docs = docs_response.data or []
+
+    # Map person_id -> name for display
+    persons_response = client.table("persons") \
+        .select("person_id, name") \
+        .eq("auth_id", auth_id) \
+        .in_("person_id", person_ids) \
+        .execute()
+    id_to_name = {p["person_id"]: p.get("name") for p in (persons_response.data or [])}
+
+    for doc in docs:
+        doc["person_name"] = id_to_name.get(doc.get("person_id"), lookup_label or "Unknown")
+        enc = doc.get("extracted_data")
+        if isinstance(enc, str):
+            try:
+                doc["extracted_data"] = decrypt_json(enc)
+            except Exception:
+                pass
+
+    return docs
+
 
 
 
