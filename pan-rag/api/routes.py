@@ -99,9 +99,6 @@ def _is_inline_edit_message(msg: str) -> bool:
     parts = [p.strip() for p in msg.split(" | ") if p.strip()]
     return bool(parts) and all(_INLINE_EDIT_PREFIX_RE.match(p) for p in parts)
 
-# URL of the document upload agent (Flask, port 5001)
-DOC_AGENT_URL = "http://localhost:5001/api/upload"
-
 # ── Steps where "No" / "N" is a valid answer, never a cancellation ──────────
 _YES_NO_ANSWER_STEPS = {
     "aadhaar_photo", "rep_assessee", "confirmation",
@@ -527,8 +524,8 @@ async def summarize(request: SummarizeRequest):
 UPLOAD_DIR = Path("storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Document upload agent URL — running on port 8001
-DOC_AGENT_URL = os.getenv("DOC_AGENT_URL", "http://localhost:8001/api/upload")
+# Document upload agent URL — running on port 5001
+DOC_AGENT_URL = os.getenv("DOC_AGENT_URL", "http://localhost:5001/api/upload")
 
 @router.post("/upload")
 async def upload_document(
@@ -575,7 +572,7 @@ async def upload_document(
             print(f"\n❌ Document agent error [{doc_type}]: {agent_error}")
     except httpx.ConnectError:
         agent_error = "Document extraction service is offline. File saved — extraction skipped."
-        print(f"\n⚠️  Document agent is offline at {DOC_AGENT_URL} — is the Flask server running on port 8001?")
+        print(f"\n⚠️  Document agent is offline at {DOC_AGENT_URL} — is the Flask server running on port 5001?  (cd documentuploadagent && python app.py)")
     except Exception as e:
         agent_error = f"Document extraction failed: {str(e)}"
         print(f"\n❌ Document extraction exception: {e}")

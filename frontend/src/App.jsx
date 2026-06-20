@@ -695,6 +695,74 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   )
 }
 
+// ── Details summary card — shows all collected fields in chat ────────────
+function DetailsCard({ fields, language }) {
+  if (!fields || fields.length === 0) return null
+  const isTamil = language === 'ta'
+  const isHindi = language === 'hi'
+
+  const applicationFields = fields.filter(f => f.section === 'application')
+  const personalFields = fields.filter(f => f.section === 'personal')
+
+  const sectionTitle = (en, ta, hi) => {
+    if (isTamil) return ta
+    if (isHindi) return hi
+    return en
+  }
+
+  function renderValue(f) {
+    const val = f.display_value
+    if (!val || val === '—') {
+      return <span className="text-white/25 italic text-xs">—</span>
+    }
+    return <span className="text-white font-medium text-xs">{val}</span>
+  }
+
+  function renderSection(title, sectionFields) {
+    if (sectionFields.length === 0) return null
+    return (
+      <div className="space-y-1">
+        <p className="text-[10px] uppercase tracking-widest text-purple-400/60 font-semibold px-0.5 pt-1">
+          {title}
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {sectionFields.map(f => {
+            const label = isTamil && f.label_ta ? f.label_ta : f.label
+            return (
+              <div key={f.key}
+                className="flex flex-col gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.025] px-2.5 py-2">
+                <span className="text-[10px] text-white/35">{label}</span>
+                {renderValue(f)}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-3">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+        <p className="text-xs text-white/60 font-semibold">
+          {sectionTitle('Your Application Details', 'உங்கள் விண்ணப்ப விவரங்கள்', 'आपके आवेदन विवरण')}
+        </p>
+      </div>
+
+      {renderSection(
+        sectionTitle('Application Options', 'விண்ணப்ப விருப்பங்கள்', 'आवेदन विकल्प'),
+        applicationFields
+      )}
+      {renderSection(
+        sectionTitle('Personal Details', 'தனிப்பட்ட விவரங்கள்', 'व्यक्तिगत विवरण'),
+        personalFields
+      )}
+    </div>
+  )
+}
+
 function Message({ msg, onFollowup, language }) {
   const isUser = msg.role === 'user'
   const [usedFollowup, setUsedFollowup] = React.useState(null)
@@ -755,6 +823,11 @@ function Message({ msg, onFollowup, language }) {
         {msg.content ? renderMarkdown(msg.content) : null}
         {msg.streaming && (
           <span className="inline-block w-2 h-4 ml-0.5 bg-white/60 rounded-sm animate-pulse align-middle" />
+        )}
+
+        {/* ── Details summary card — shown at confirmation step ── */}
+        {!msg.streaming && msg.confirmation_fields && confirmUsed === null && (
+          <DetailsCard fields={msg.confirmation_fields} language={language} />
         )}
 
         {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
@@ -965,8 +1038,19 @@ export default function App() {
   const msgIdRef = useRef(1)
   const nextId = () => ++msgIdRef.current
   const sessionIdRef = useRef(null)
-  const audioPlayerRef = useRef(null)
+  const audioPlayerRef = useRef(null)   // kept for legacy reference, playback now uses Web Audio
+  const audioCtxTTSRef = useRef(null)   // Web Audio API context for TTS playback
+  const activeTTSSourceRef = useRef(null)  // currently playing BufferSourceNode — stopped on new TTS
+  const activeTTSAbortRef = useRef(null)   // AbortController for in-flight TTS fetch
   const bottomRef = useRef(null)
+
+  // Create (or reuse) the shared TTS AudioContext
+  function _getTTSAudioCtx() {
+    if (!audioCtxTTSRef.current || audioCtxTTSRef.current.state === 'closed') {
+      audioCtxTTSRef.current = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    return audioCtxTTSRef.current
+  }
 
   function showToast(msg, type = 'error') {
     setToast({ msg, type })
@@ -980,20 +1064,10 @@ export default function App() {
       localStorage.setItem('voice_response_enabled', newValue.toString())
     }
     
-    // Unlock audio playback on browsers that require user interaction
-    if (newValue && audioPlayerRef.current) {
-      // Play a tiny silent audio to unlock autoplay
-      const silentBlob = new Blob([new Uint8Array([0])], { type: 'audio/wav' })
-      const silentUrl = URL.createObjectURL(silentBlob)
-      audioPlayerRef.current.src = silentUrl
-      audioPlayerRef.current.play()
-        .then(() => {
-          console.log('[VOICE] Audio unlocked via user interaction')
-          URL.revokeObjectURL(silentUrl)
-        })
-        .catch(() => {
-          URL.revokeObjectURL(silentUrl)
-        })
+    // Unlock / create AudioContext on user gesture
+    if (newValue) {
+      const ctx = _getTTSAudioCtx()
+      if (ctx.state === 'suspended') ctx.resume()
     }
     
     showToast(
@@ -1196,118 +1270,144 @@ export default function App() {
     setSessionId(null); sessionIdRef.current = null; setStarted(false); setSessions([])
   }
 
-  // ── TTS playback for voice replies ─────────────────────────────
-  async function speakReply(text) {
-    if (!text?.trim()) {
-      console.log('[TTS] No text to speak')
-      return
+  // ── Shared AudioContext for TTS playback (bypasses autoplay policy) ──────
+  useEffect(() => {
+    const unlock = () => {
+      const ctx = audioCtxTTSRef.current
+      if (ctx && ctx.state === 'suspended') ctx.resume()
     }
-
-    console.log(`[TTS] speakReply called with language: ${language}, voiceEnabled: ${voiceResponseEnabled}`)
-
-    // Strip markdown so TTS reads clean prose
-    let clean = text
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
-      .replace(/\*\*/g, '').replace(/\*/g, '')
-      .replace(/#{1,6}\s/g, '')
-      .replace(/`+/g, '')
-      .replace(/[-–—•]\s+/g, '')
-      .replace(/\[.*?\]\(.*?\)/g, '')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-
-    if (!clean) {
-      console.log('[TTS] Text is empty after cleaning')
-      return
+    window.addEventListener('click', unlock, { once: false })
+    window.addEventListener('keydown', unlock, { once: false })
+    return () => {
+      window.removeEventListener('click', unlock)
+      window.removeEventListener('keydown', unlock)
     }
+  }, [])
 
-    // For Tamil TTS — replace English loanwords with pure Tamil equivalents
-    // so the Magpie Tamil voice pronounces them correctly
-    if (language === 'ta') {
-      clean = clean
-        .replace(/\bPAN\b/g, 'பான்')
-        .replace(/\bAadhaar\b/gi, 'ஆதார்')
-        .replace(/\bAadhar\b/gi, 'ஆதார்')
-        .replace(/\bTAN\b/g, 'டான்')
-        .replace(/\bTDS\b/g, 'டிடிஎஸ்')
-        .replace(/\bKYC\b/g, 'கேஒய்சி')
-        .replace(/\bOTP\b/g, 'ஒடிபி')
-        .replace(/\bNSDL\b/g, 'என்எஸ்டிஎல்')
-        .replace(/\bUTIITSL\b/g, 'யுடிஐஐடிஎஸ்எல்')
-        .replace(/\beKYC\b/gi, 'இ-கேஒய்சி')
-        .replace(/\be-KYC\b/gi, 'இ-கேஒய்சி')
-        .replace(/\bForm 49A\b/gi, 'படிவம் நாற்பத்தொன்பது ஏ')
-        .replace(/\bNRI\b/g, 'என்ஆர்ஐ')
-        .replace(/\bGST\b/g, 'ஜிஎஸ்டி')
-        .replace(/\bITR\b/g, 'ஐடிஆர்')
-        // Remove any remaining pure ASCII words that might break Tamil TTS
-        .replace(/\b[A-Z]{2,}\b/g, '')   // remove remaining all-caps acronyms
-        .replace(/\s+/g, ' ').trim()
+  // ── Stop any currently playing TTS immediately ───────────────────────────
+  function _stopTTS() {
+    // Abort an in-flight fetch (audio still downloading)
+    if (activeTTSAbortRef.current) {
+      activeTTSAbortRef.current.abort()
+      activeTTSAbortRef.current = null
     }
+    // Stop a playing BufferSourceNode
+    if (activeTTSSourceRef.current) {
+      try { activeTTSSourceRef.current.stop() } catch (_) {}
+      activeTTSSourceRef.current = null
+    }
+  }
+
+  // ── Core TTS fetch+play — streams WAV bytes and starts playing ASAP ──────────
+  async function _playTTS(text) {
+    if (!text?.trim()) return
+
+    // Stop whatever is currently playing / downloading before starting new audio
+    _stopTTS()
+
+    const t0 = performance.now()
+    const abortCtrl = new AbortController()
+    activeTTSAbortRef.current = abortCtrl
 
     try {
-      console.log(`[TTS] Attempting to speak (${language}):`, clean.slice(0, 100))
       const form = new FormData()
-      form.append('text', clean)
+      form.append('text', text)
       form.append('language', language)
-      // Call voice agent TTS directly (port 8002 via Vite proxy)
+
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
         body: form,
+        signal: abortCtrl.signal,
       })
-      if (!res.ok) {
-        // TTS endpoint not available — skip silently (voice output is optional)
-        console.error('[TTS] Request failed, status:', res.status)
-        if (res.status === 404) {
-          console.error('[TTS] Voice server not running on port 8002.')
-          console.error('[TTS] Start with: cd pan-rag && .venv\\Scripts\\uvicorn api.voice_main:app --host 0.0.0.0 --port 8002 --reload')
-        }
-        return
+      if (!res.ok) { console.error('[TTS] request failed:', res.status); return }
+      console.log(`[TTS] headers received in ${(performance.now() - t0).toFixed(0)}ms`)
+
+      const reader = res.body.getReader()
+      const chunks = []
+      let totalBytes = 0
+
+      // Resume AudioContext in parallel while bytes are downloading
+      const ctx = _getTTSAudioCtx()
+      const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        totalBytes += value.byteLength
       }
-      const blob = await res.blob()
-      console.log('[TTS] Received audio blob:', blob.size, 'bytes, type:', blob.type)
-      
-      if (blob.size === 0) {
-        console.error('[TTS] Received empty audio blob')
-        return
+
+      // Clear the abort controller — download finished cleanly
+      activeTTSAbortRef.current = null
+
+      if (totalBytes === 0) { console.error('[TTS] empty response'); return }
+
+      const merged = new Uint8Array(totalBytes)
+      let offset = 0
+      for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength }
+
+      console.log(`[TTS] ${totalBytes} bytes in ${(performance.now() - t0).toFixed(0)}ms, decoding…`)
+
+      await resumePromise
+      const audioBuffer = await ctx.decodeAudioData(merged.buffer)
+
+      // Stop anything that started while we were decoding
+      if (activeTTSSourceRef.current) {
+        try { activeTTSSourceRef.current.stop() } catch (_) {}
+        activeTTSSourceRef.current = null
       }
-      
-      const url = URL.createObjectURL(blob)
-      console.log('[TTS] Created blob URL:', url)
-      
-      if (!audioPlayerRef.current) {
-        console.error('[TTS] audioPlayerRef.current is null - audio element not mounted')
-        URL.revokeObjectURL(url)
-        return
+
+      const source = ctx.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(ctx.destination)
+      source.onended = () => {
+        // Clean up ref when playback finishes naturally
+        if (activeTTSSourceRef.current === source) activeTTSSourceRef.current = null
       }
-      
-      audioPlayerRef.current.src = url
-      audioPlayerRef.current.onended = () => {
-        console.log('[TTS] Audio playback ended, revoking URL')
-        URL.revokeObjectURL(url)
-      }
-      
-      console.log('[TTS] Starting audio playback...')
-      audioPlayerRef.current.play()
-        .then(() => {
-          console.log('[TTS] ✅ Audio playback started successfully')
-        })
-        .catch((err) => {
-          console.error('[TTS] ❌ Audio playback failed:', err.message, err.name)
-          if (err.name === 'NotAllowedError') {
-            console.error('[TTS] Browser blocked autoplay. User must interact with page first.')
-            console.error('[TTS] Try clicking the "Voice On" button to enable voice responses.')
-          }
-        })
+      activeTTSSourceRef.current = source
+      source.start(0)
+      console.log(`[TTS] ✅ playing in ${(performance.now() - t0).toFixed(0)}ms: ${text.slice(0, 60)}`)
     } catch (err) {
-      console.error('[TTS] Failed:', err)
+      if (err.name === 'AbortError') {
+        console.log('[TTS] fetch aborted (new message started)')
+      } else {
+        console.error('[TTS] failed:', err)
+      }
     }
+  }
+
+  // ── Build options spoken sentence ─────────────────────────────
+  function _optionsSentence(options) {
+    if (!options?.choices?.length) return ''
+    const choiceList = options.choices
+    if (language === 'ta') return 'உங்கள் விருப்பங்கள்: ' + choiceList.join(', ') + '.'
+    if (language === 'hi') return 'आपके विकल्प हैं: ' + choiceList.join(', ') + '.'
+    const readable = choiceList.map(c => c.replace(/\s*\/\s*/g, ' or '))
+    if (readable.length === 1) return `Your option is: ${readable[0]}.`
+    const last = readable[readable.length - 1]
+    const rest = readable.slice(0, -1).join(', ')
+    return `Your options are: ${rest}, or ${last}.`
+  }
+
+  // ── TTS playback for voice replies ─────────────────────────────
+  async function speakReply(text, options = null) {
+    if (!text?.trim()) return
+    const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+    if (!clean) return
+    const sentences = clean.split(/(?<=[.!?।॥])\s+/).map(s => s.trim()).filter(Boolean)
+    let speakText = sentences.slice(0, 3).join(' ')
+    const optSentence = _optionsSentence(options)
+    if (optSentence) speakText = speakText + ' ' + optSentence
+    if (!speakText.trim()) return
+    await _playTTS(speakText)
   }
 
   // ── Messaging ───────────────────────────────────────────────────
   async function sendMessage(question, { fromVoice = false, displayText = null } = {}) {
     if (!question.trim() || loading) return
+
+    // Stop any currently playing TTS immediately — new message takes over
+    _stopTTS()
 
     // Auto-create session if none active
     let sid = sessionId
@@ -1385,8 +1485,8 @@ export default function App() {
           }
           return m
         }))
-        // Play voice response if enabled or if input was voice
-        if ((voiceResponseEnabled || fromVoice) && reply) speakReply(reply)
+        // Play voice response — include option choices if present
+        if ((voiceResponseEnabled || fromVoice) && reply) speakReply(reply, data.options || null)
         return
       }
 
@@ -1395,6 +1495,38 @@ export default function App() {
       const decoder = new TextDecoder()
       let buf = ''
       let fullText = ''
+      let streamOptions = null     // captured from meta event
+      let earlyTTSFired = false    // true once we've fired TTS mid-stream
+      let earlySpokenSentCount = 0 // how many sentences were spoken early
+
+      // ── Fire TTS as early as possible ────────────────────────────────────
+      // Instead of waiting for sentence-ending punctuation, we fire TTS
+      // after a short grace period (350ms) from the first token.
+      // This overlaps the Sarvam API call with the remainder of streaming,
+      // slashing the perceived delay by 1-2 seconds.
+      let firstTokenTime = null
+      let earlyTTSTimer = null
+
+      function maybeFireEarlyTTS() {
+        if (earlyTTSFired || !(voiceResponseEnabled || fromVoice)) return
+        const cleaned = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+        if (!cleaned) return
+
+        // Prefer a clean sentence boundary if we already have one
+        const hasBoundary = /[.!?।॥]/.test(cleaned)
+        if (hasBoundary) {
+          const sentences = splitSentences(cleaned)
+          if (sentences.length >= 1) {
+            earlyTTSFired = true
+            if (earlyTTSTimer) { clearTimeout(earlyTTSTimer); earlyTTSTimer = null }
+            earlySpokenSentCount = Math.min(sentences.length, 2)
+            _playTTS(sentences.slice(0, earlySpokenSentCount).join(' '))
+          }
+        }
+      }
+
+      const splitSentences = (t) =>
+        t.split(/(?<=[.!?।॥])\s+/).map(s => s.trim()).filter(Boolean)
 
       while (true) {
         const { done, value } = await reader.read()
@@ -1416,15 +1548,13 @@ export default function App() {
 
           if (event.type === 'meta') {
             const isGuided = !!(event.options || event.confirm_action)
+            streamOptions = event.options || null
             setMessages(prev => {
-              // If the new message has confirmation_fields, also update all earlier
-              // confirmation panels so they reflect the latest flow state
               const freshFields = event.confirmation_fields || null
               return prev.map(m => {
                 if (m.id === botId) {
                   return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields }
                 }
-                // Sync all older confirmation panels with the fresh field data
                 if (freshFields && m.confirmation_fields) {
                   return { ...m, confirmation_fields: freshFields }
                 }
@@ -1434,10 +1564,39 @@ export default function App() {
 
           } else if (event.type === 'token') {
             fullText += event.text
-            const snapshot = fullText
             setMessages(prev => prev.map(m =>
-              m.id === botId ? { ...m, content: snapshot } : m
+              m.id === botId ? { ...m, content: fullText } : m
             ))
+
+            // ── Early TTS ────────────────────────────────────────────────
+            if (!earlyTTSFired && (voiceResponseEnabled || fromVoice)) {
+              if (firstTokenTime === null) {
+                // First token received — start a 350ms grace timer.
+                // If a sentence boundary arrives before the timer fires,
+                // maybeFireEarlyTTS() will fire immediately and cancel the timer.
+                firstTokenTime = performance.now()
+                earlyTTSTimer = setTimeout(() => {
+                  // Grace period elapsed — speak whatever text we have so far
+                  if (earlyTTSFired) return
+                  const cleaned = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+                  if (!cleaned) return
+                  earlyTTSFired = true
+                  earlyTTSTimer = null
+                  // Take up to first 2 sentences if boundaries exist, else first ~150 chars
+                  const hasBoundary = /[.!?।॥]/.test(cleaned)
+                  if (hasBoundary) {
+                    const sentences = splitSentences(cleaned)
+                    earlySpokenSentCount = Math.min(sentences.length, 2)
+                    _playTTS(sentences.slice(0, earlySpokenSentCount).join(' '))
+                  } else {
+                    earlySpokenSentCount = 0
+                    _playTTS(cleaned.slice(0, 200))
+                  }
+                }, 350)
+              }
+              // Also try to fire immediately if we already have a sentence boundary
+              maybeFireEarlyTTS()
+            }
 
           } else if (event.type === 'replace') {
             fullText = event.text
@@ -1451,6 +1610,7 @@ export default function App() {
             ))
 
           } else if (event.type === 'error') {
+            if (earlyTTSTimer) { clearTimeout(earlyTTSTimer); earlyTTSTimer = null }
             setMessages(prev => prev.map(m =>
               m.id === botId
                 ? { ...m, content: event.message || 'Something went wrong.', streaming: false }
@@ -1458,12 +1618,27 @@ export default function App() {
             ))
 
           } else if (event.type === 'done') {
-            // Keep guided messages in the normal chat flow — no overlay
+            if (earlyTTSTimer) { clearTimeout(earlyTTSTimer); earlyTTSTimer = null }
             setMessages(prev => prev.map(m =>
               m.id === botId ? { ...m, streaming: false, elapsed_ms: event.elapsed_ms } : m
             ))
-            // Play voice response if enabled or if input was voice
-            if ((voiceResponseEnabled || fromVoice) && fullText) speakReply(fullText)
+
+            if (voiceResponseEnabled || fromVoice) {
+              const cleaned = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+              const sentences = splitSentences(cleaned)
+
+              if (!earlyTTSFired) {
+                // Response was short / no sentence boundary mid-stream — speak it all now
+                speakReply(fullText, streamOptions)
+              } else {
+                // Speak remaining sentences (after what was already spoken early)
+                // + options if present
+                const remaining = sentences.slice(earlySpokenSentCount)
+                const optSentence = _optionsSentence(streamOptions)
+                const remainText = [...remaining.slice(0, 2), optSentence].filter(Boolean).join(' ')
+                if (remainText.trim()) _playTTS(remainText)
+              }
+            }
           }
         }
       }
@@ -1565,8 +1740,6 @@ export default function App() {
 
   return (
     <>
-      {/* Hidden audio player for TTS voice replies */}
-      <audio ref={audioPlayerRef} className="hidden" />
 
       {page === 'home' && <Home onRobotClick={() => setShowAuth(true)} />}
       {showAuth && (

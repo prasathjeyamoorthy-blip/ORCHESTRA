@@ -1220,12 +1220,13 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
     # These always use the exact English field label sent by FieldEditor in App.jsx.
     # We intercept before step-specific logic so the current step doesn't interfere.
     _INLINE_EDIT_RE = re.compile(
-        r"^change\s+(Source of Income|Submission Mode|PAN Delivery|Aadhaar Photo on PAN"
+        r"^change\s+(Applicant Type|Source of Income|Submission Mode|PAN Delivery|Aadhaar Photo on PAN"
         r"|Address for Communication|Residential Status|Representative Assessee"
         r"|Full Name \(as in Aadhaar\)|Full Name|Grandfather'?s Name|Mother'?s Name|Annual Income|Email)\s+to\s+(.+)$",
         re.IGNORECASE,
     )
     _LABEL_TO_KEY = {
+        "applicant type":            "applicant_type",
         "source of income":          "source_of_income",
         "submission mode":           "submission_mode",
         "pan delivery":              "delivery_mode",
@@ -1305,6 +1306,7 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
     # Field keyword patterns for detecting mentioned-but-no-value fields
     # English + Tamil patterns
     _FIELD_KEYWORDS = {
+        "applicant_type":     r"\b(applicant\s+type|applicant\s+category|type\s+of\s+applicant|விண்ணப்பதாரர்\s*வகை)\b",
         "full_name":          r"\b(full\s+name|my\s+name|name\s+on\s+aadhaar|^name$|பெயர்|முழு\s*பெயர்|என்\s*பெயர்)\b",
         "mother_name":        r"\b(mother|mom|mum|தாய்|அம்மா|தாயின்\s*பெயர்)\b",
         "email":              r"\b(email|mail|gmail|மின்னஞ்சல்|மெயில்)\b",
@@ -3910,7 +3912,23 @@ def _build_confirmation(flow: FlowManager) -> dict:
         if val is False: return "No"
         return str(val) if val else "—"
 
+    # Map internal applicant_type codes → display labels
+    _APPLICANT_TYPE_DISPLAY = {
+        "indian_citizen": "Indian Citizen / Individual",
+        "indian_entity":  "Indian Company / HUF / Entity",
+        "foreign":        "Foreign Individual / Entity",
+    }
+    applicant_type_raw = s.get("applicant_type") or ""
+    applicant_type_display = _APPLICANT_TYPE_DISPLAY.get(applicant_type_raw, applicant_type_raw) or "—"
+
+    # Full label for the field card (must exactly match choices[])
     delivery = (
+        "Physical copy to home + soft copy on email (Fees applicable)" if s.get("delivery_mode") == "physical_and_soft"
+        else "Only soft copy on email (Fees applicable)" if s.get("delivery_mode") == "soft_only"
+        else s.get("delivery_mode") or "—"
+    )
+    # Short label for the summary text only
+    delivery_short = (
         "Physical + e-PAN" if s.get("delivery_mode") == "physical_and_soft"
         else "e-PAN only" if s.get("delivery_mode") == "soft_only"
         else "—"
@@ -3920,8 +3938,9 @@ def _build_confirmation(flow: FlowManager) -> dict:
         "Here's everything I've collected for your PAN application.",
         "",
         "## Application Options",
+        f"- Applicant type: **{applicant_type_display if applicant_type_display != '—' else '—'}**",
         f"- Submission mode: **{s.get('submission_mode') or '—'}**",
-        f"- PAN delivery: **{delivery}**",
+        f"- PAN delivery: **{delivery_short}**",
         f"- Aadhaar photo on PAN: **{_yn(s.get('aadhaar_photo'))}**",
         f"- Source of income: **{s.get('source_of_income') or '—'}**",
         f"- Address for communication: **{s.get('address_for_comm') or '—'}**",
@@ -3955,6 +3974,25 @@ def _build_confirmation(flow: FlowManager) -> dict:
     # Each entry: { key, label, label_ta, value, display_value, field_type, options? }
     confirmation_fields = [
         # ── Application Options ──────────────────────────────────────────────
+        {
+            "key": "applicant_type",
+            "label": "Applicant Type",
+            "label_ta": "விண்ணப்பதாரர் வகை",
+            "value": applicant_type_raw,
+            "display_value": applicant_type_display,
+            "field_type": "radio",
+            "section": "application",
+            "choices": [
+                "Indian Citizen / Individual",
+                "Indian Company / HUF / Entity",
+                "Foreign Individual / Entity",
+            ],
+            "choices_ta": [
+                "இந்திய குடிமகன் / தனிநபர்",
+                "இந்திய நிறுவனம் / HUF / நிறுவனம்",
+                "வெளிநாட்டு தனிநபர் / நிறுவனம்",
+            ],
+        },
         {
             "key": "submission_mode",
             "label": "Submission Mode",
@@ -4566,6 +4604,28 @@ def _apply_field_update(flow: FlowManager, field: str, inp: str, raw: str):
             flow.state["rep_assessee"] = True
         elif re.search(r"^(no|nope|nah|n)$", lower):
             flow.state["rep_assessee"] = False
+
+    elif field == "applicant_type":
+        _AT_MAP = [
+            (re.compile(r"\b(indian\s+citizen|individual|citizen|person|myself|1)\b", re.IGNORECASE), "indian_citizen"),
+            (re.compile(r"\b(company|huf|entity|business|firm|trust|2)\b", re.IGNORECASE),             "indian_entity"),
+            (re.compile(r"\b(foreign|nri|overseas|abroad|3)\b", re.IGNORECASE),                        "foreign"),
+        ]
+        # Also accept the full display labels sent by the ConfirmationFieldsPanel
+        _AT_DISPLAY = {
+            "indian citizen / individual":    "indian_citizen",
+            "indian company / huf / entity":  "indian_entity",
+            "foreign individual / entity":    "foreign",
+        }
+        matched_code = _AT_DISPLAY.get(lower.strip())
+        if not matched_code:
+            for pat, code in _AT_MAP:
+                if pat.search(text):
+                    matched_code = code
+                    break
+        if matched_code:
+            flow.state["applicant_type"] = matched_code
+            print(f"[DEBUG _apply_field_update] Updated applicant_type to: {matched_code!r}")
 
 
 def _extract_pan(text: str) -> str | None:
