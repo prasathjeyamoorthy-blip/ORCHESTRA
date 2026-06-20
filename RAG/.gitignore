@@ -1,0 +1,51 @@
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+*.pyo
+build/
+dist/
+wheels/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── Node / JS ─────────────────────────────────────────────────────
+node_modules/
+dist/
+.next/
+.nuxt/
+
+# ── Environment secrets (Not ignored as requested) ────────────────
+!*.env
+!**/.env
+!**/.env.*
+!*requirements.txt
+!**/requirements.txt
+!*req.txt
+!**/req.txt
+
+
+# ── HuggingFace model cache (multi-GB — download on first run) ────
+pan-rag/hf_cache/
+pan-rag/D:\hf_cache/
+voice-agent/hf_cache/
+
+# ── Vector database (rebuilt from source docs) ────────────────────
+pan-rag/chroma_db/
+
+# ── Runtime / user-uploaded data ─────────────────────────────────
+pan-rag/storage/uploads/
+pan-rag/storage/sessions/
+documentuploadagent/storage/
+
+# ── OS / editor ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+*.swp
+*.swo
+
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
+logs/
