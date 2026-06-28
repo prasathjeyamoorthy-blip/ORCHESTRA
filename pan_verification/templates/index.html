@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAN Document Verification</title>
+
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; max-width: 900px; margin: 0 auto; padding: 20px; background: #f8f9fa; }
+.header { text-align: center; color: #1e3a8a; margin-bottom: 30px; }
+
+.form-group { margin-bottom: 15px; }
+input, select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+}
+
+button {
+    background: #1e40af;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    width: 100%;
+    margin-bottom: 10px;
+}
+button:hover { background: #1e3a8a; }
+
+.btn-secondary { background: #64748b; }
+.btn-secondary:hover { background: #475569; }
+
+.btn-outline { background: transparent; border: 2px solid #1e40af; color: #1e40af; }
+.btn-outline:hover { background: #1e40af; color: white; }
+
+.card {
+    background: white;
+    border-radius: 12px;
+    padding: 15px;
+    margin-top: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.data-table td {
+    padding: 8px;
+    border-bottom: 1px solid #ddd;
+}
+
+.section { display: none; }
+.section.active { display: block; }
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <h1>📄 Document Verifier</h1>
+</div>
+
+<!-- AUTH -->
+<div id="authSection" class="section active">
+    <h3>Login / Signup</h3>
+
+    <input id="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+
+    <button onclick="signup()">Sign Up</button>
+    <button onclick="login()">Login</button>
+
+    <p id="authStatus"></p>
+</div>
+
+<!-- MAIN MENU -->
+<div id="menuSection" class="section">
+    <h3>Select Action</h3>
+    
+    <div class="action-buttons">
+        <button onclick="showView()">👁️ View</button>
+        <button onclick="showUpdate()">✏️ Update</button>
+        <button onclick="showUpload()">📤 Upload</button>
+    </div>
+</div>
+
+<!-- VIEW SECTION -->
+<div id="viewSection" class="section">
+    <h3>View Documents</h3>
+    
+    <div class="form-group">
+        <label>Enter Name (optional)</label>
+        <input type="text" id="viewUsername" placeholder="Enter person name">
+    </div>
+
+    <div class="form-group">
+        <label>Enter Phone Number (optional)</label>
+        <input type="text" id="viewPhone" placeholder="Enter mobile number">
+    </div>
+
+
+    
+    <button onclick="viewDocs()">Get Documents</button>
+    <button class="btn-secondary" onclick="showMenu()">Back</button>
+    
+    <div id="viewResult"></div>
+</div>
+
+<!-- UPDATE SECTION -->
+<div id="updateSection" class="section">
+    <h3>Update Documents</h3>
+    
+    <div class="form-group">
+        <label>Name (optional)</label>
+        <input type="text" id="updateUsername" placeholder="Enter person name">
+    </div>
+
+    <div class="form-group">
+        <label>Phone Number (optional)</label>
+        <input type="text" id="updatePhone" placeholder="Enter mobile number">
+    </div>
+
+    
+    <div class="form-group">
+        <label>Upload New Document</label>
+        <input type="file" id="updateFile">
+    </div>
+    
+    <button onclick="updateDocs()">Update</button>
+    <button class="btn-secondary" onclick="showMenu()">Back</button>
+    
+    <div id="updateResult"></div>
+</div>
+
+<!-- UPLOAD SECTION -->
+<div id="uploadSection" class="section">
+    <h3>Upload New Document</h3>
+
+    <!-- PERSON NAME -->
+    <div class="form-group">
+        <label>Person Name</label>
+        <input type="text" id="personName" placeholder="e.g. Brother, Father">
+    </div>
+
+    <!-- EXISTING PERSON SELECT -->
+    <div class="form-group">
+        <label>Select Existing Person</label>
+        <select id="personSelect">
+            <option value="">-- Select --</option>
+        </select>
+    </div>
+
+    <input type="file" id="file">
+
+    <button onclick="upload()">Upload & Verify</button>
+    <button class="btn-secondary" onclick="showMenu()">Back</button>
+</div>
+
+<!-- RESULT -->
+<div id="result"></div>
+
+<script>
+let authId = null;
+let persons = new Set();
+
+// Show/hide sections
+function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}
+
+function showMenu() {
+    showSection('menuSection');
+    document.getElementById('result').innerHTML = '';
+}
+
+function showView() {
+    showSection('viewSection');
+    document.getElementById('viewResult').innerHTML = '';
+    document.getElementById('viewUsername').value = '';
+    document.getElementById('viewPhone').value = '';
+}
+
+
+
+
+function showUpdate() {
+    showSection('updateSection');
+    document.getElementById('updateResult').innerHTML = '';
+    document.getElementById('updateUsername').value = '';
+    document.getElementById('updatePhone').value = '';
+    document.getElementById('updateFile').value = '';
+}
+
+
+function showUpload() {
+    showSection('uploadSection');
+    loadPersons();
+}
+
+// Load persons for dropdown
+async function loadPersons() {
+    const res = await fetch('/api/get_docs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ auth_id: authId })
+    });
+    
+    const data = await res.json();
+    
+    if (data.documents) {
+        persons = new Set();
+        data.documents.forEach(doc => {
+            if (doc.person_name) persons.add(doc.person_name);
+        });
+        
+        const select = document.getElementById('personSelect');
+        select.innerHTML = '<option value="">-- Select --</option>';
+        persons.forEach(p => {
+            select.innerHTML += `<option value="${p}">${p}</option>`;
+        });
+    }
+}
+
+// Auth functions
+async function signup() {
+    const res = await fetch('/api/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            email: email.value,
+            password: password.value
+        })
+    });
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+        authId = data.auth_id;
+        showMenu();
+    } else {
+        authStatus.innerText = data.error;
+    }
+}
+
+async function login() {
+    const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            email: email.value,
+            password: password.value
+        })
+    });
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+        authId = data.auth_id;
+        showMenu();
+    } else {
+        authStatus.innerText = data.error;
+    }
+}
+
+// View documents for a person
+async function viewDocs() {
+    const viewUsername = document.getElementById('viewUsername').value.trim();
+    const viewPhone = document.getElementById('viewPhone').value.trim();
+
+    if (!viewUsername && !viewPhone) {
+        document.getElementById('viewResult').innerHTML = '<p style="color:red">Please enter name or phone number</p>';
+        return;
+    }
+
+    const res = await fetch('/api/get_person_docs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            auth_id: authId,
+            person_name: viewUsername || null,
+            phone_number: viewPhone || null
+        })
+    });
+
+
+    
+    const data = await res.json();
+    
+    if (data.status === 'success' && data.documents && data.documents.length > 0) {
+        let html = `<div class="card">
+                    <h3>👤 ${viewUsername}</h3>`;
+
+
+        
+        data.documents.forEach(doc => {
+            const d = doc.extracted_data;
+            html += `
+            <table class="data-table">
+                <tr><td>Name</td><td>${d.name || ''}</td></tr>
+                <tr><td>First Name</td><td>${d.first_name || ''}</td></tr>
+                <tr><td>Last Name</td><td>${d.last_name || ''}</td></tr>
+                <tr><td>Middle Name</td><td>${d.middle_name || ''}</td></tr>
+                <tr><td>Aadhaar Number</td><td>${d.aadhar_number || ''}</td></tr>
+                <tr><td>Mobile Number</td><td>${d.mobile_number || ''}</td></tr>
+                <tr><td>Date of Birth</td><td>${d.dob || ''}</td></tr>
+                <tr><td>Gender</td><td>${d.gender || ''}</td></tr>
+                <tr><td>Father Name</td><td>${d.father_name || ''}</td></tr>
+                <tr><td>Father First Name</td><td>${d.father_first_name || ''}</td></tr>
+                <tr><td>Father Middle Name</td><td>${d.father_middle_name || ''}</td></tr>
+                <tr><td>Father Last Name</td><td>${d.father_last_name || ''}</td></tr>
+                <tr><td>State</td><td>${d.state || ''}</td></tr>
+                <tr><td>City</td><td>${d.city || ''}</td></tr>
+                <tr><td>Confidence</td><td>${d.confidence || ''}</td></tr>
+            </table>`;
+        });
+        
+        html += '</div>';
+        document.getElementById('viewResult').innerHTML = html;
+    } else {
+        document.getElementById('viewResult').innerHTML = '<p>No documents found for this username</p>';
+
+
+    }
+}
+
+// Update documents for a person
+async function updateDocs() {
+    const updateUsername = document.getElementById('updateUsername').value.trim();
+    const updatePhone = document.getElementById('updatePhone').value.trim();
+    const file = document.getElementById('updateFile').files[0];
+    
+    if (!updateUsername && !updatePhone) {
+        document.getElementById('updateResult').innerHTML = '<p style="color:red">Please enter name or phone number</p>';
+        return;
+    }
+    
+    if (!file) {
+        document.getElementById('updateResult').innerHTML = '<p style="color:red">Please select a file</p>';
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('auth_id', authId);
+    formData.append('person_name', updateUsername || '');
+    formData.append('phone_number', updatePhone || '');
+    formData.append('aadhaar', file);
+    
+    const res = await fetch('/api/update_document', {
+        method: 'POST',
+        body: formData
+    });
+
+    
+    const data = await res.json();
+    
+    if (data.status === 'success') {
+        document.getElementById('updateResult').innerHTML = `<p style="color:green">✅ ${data.message}</p>
+            <p>Aadhaar: ${data.extracted.aadhar_number}</p>
+            <p>Name: ${data.extracted.name}</p>`;
+    } else {
+        document.getElementById('updateResult').innerHTML = `<p style="color:red">${data.error || data.message}</p>`;
+    }
+}
+
+// Upload new document
+async function upload() {
+    const file = document.getElementById('file').files[0];
+    let personName = document.getElementById('personName').value;
+
+    if (!file) return alert("Upload file");
+    if (!personName) return alert("Enter person name");
+
+    // 1) Preview/extract ONLY (no DB write)
+    const formData = new FormData();
+    formData.append('auth_id', authId);
+    formData.append('person_name', personName);
+    formData.append('aadhaar', file);
+
+    const res = await fetch('/api/preview', {
+        method: 'POST',
+        body: formData
+    });
+
+    const data = await res.json();
+
+    if (data.status !== 'success') {
+        // Do NOT pop up message if fields are missing; show extracted UI instead.
+        // Here, preview failed (quality/rejection/etc.), so show error.
+        alert(data.error || data.message || "Preview error");
+        return;
+    }
+
+    // 2) Show editable fields for user consent/changes
+    const extracted = data.extracted_data || {};
+
+    // List of fields your UI should show/edit
+    const fields = [
+        'name','first_name','last_name','middle_name','aadhar_number','aadhaar_number','mobile_number','dob','gender',
+        'father_name','father_first_name','father_middle_name','father_last_name','state','city','confidence'
+    ];
+
+    // Normalize keys: your backend prompt uses aadhar_number (note spelling)
+    if (extracted.aadhaar_number && !extracted.aadhar_number) {
+        extracted.aadhar_number = extracted.aadhaar_number;
+    }
+
+    let html = `<div class="card">
+        <h3>✍️ Confirm extracted data</h3>
+        <p>Quality score: ${data.quality_score ?? ''}</p>
+        <div id="consentForm">`;
+
+    fields.forEach(f => {
+        const v = extracted[f];
+        html += `
+            <div class="form-group">
+                <label>${f}</label>
+                <input type="text" id="field_${f}" value="${(v === null || v === undefined) ? '' : String(v).replace(/\"/g,'"')}">
+            </div>`;
+    });
+
+    html += `
+        <input type="hidden" id="hidden_auth_id" value="${authId}">
+        <input type="hidden" id="hidden_person_name" value="${personName}">
+        <input type="hidden" id="hidden_original" value=''>
+        <button onclick="confirmExtracted()">✅ Confirm & Save</button>
+        <button class="btn-secondary" onclick="showMenu()">Cancel</button>
+        </div>
+    </div>`;
+
+    document.getElementById('result').innerHTML = html;
+    // keep a copy to merge edits
+    window.__extractedDraft = extracted;
+}
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, function(c) {
+        return ({'&':'&amp;','<':'<','>':'>','"':'"','\'':'&#39;'}[c]);
+    });
+}
+
+async function confirmExtracted() {
+    const authIdVal = document.getElementById('hidden_auth_id').value;
+    const personNameVal = document.getElementById('hidden_person_name').value;
+
+    // Build edited extracted_data
+    const draft = window.__extractedDraft || {};
+    const fields = [
+        'name','first_name','last_name','middle_name','aadhar_number','aadhaar_number','mobile_number','dob','gender',
+        'father_name','father_first_name','father_middle_name','father_last_name','state','city','confidence'
+    ];
+
+    const extracted = { ...draft };
+    fields.forEach(f => {
+        const el = document.getElementById('field_' + f);
+        extracted[f] = el ? el.value.trim() : (extracted[f] ?? '');
+        if (extracted[f] === '') extracted[f] = null;
+    });
+
+    // Ensure spelling used by backend
+    if (extracted.aadhaar_number && !extracted.aadhar_number) {
+        extracted.aadhar_number = extracted.aadhaar_number;
+    }
+
+    const formData = new FormData();
+    formData.append('auth_id', authIdVal);
+    formData.append('person_name', personNameVal);
+    formData.append('extracted_data', JSON.stringify(extracted));
+
+    const res = await fetch('/api/confirm_save', {
+        method: 'POST',
+        body: formData
+    });
+
+    const data = await res.json();
+    if (data.status === 'success') {
+        alert('Saved successfully!');
+        showMenu();
+    } else {
+        alert(data.error || data.message || 'Save error');
+    }
+}
+
+// Auto fill person
+document.getElementById('personSelect').addEventListener('change', function() {
+    document.getElementById('personName').value = this.value;
+});
+</script>
+
+</body>
+</html>

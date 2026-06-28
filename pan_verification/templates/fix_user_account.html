@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix User Account - PAN Verification</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8fafc;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .title {
+            color: #1e293b;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #64748b;
+            font-size: 16px;
+        }
+        
+        .error-box {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        
+        .error-title {
+            color: #dc2626;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .fix-section {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .fix-title {
+            color: #0369a1;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .sql-box {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-radius: 6px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            margin: 10px 0;
+            position: relative;
+        }
+        
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #475569;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .copy-btn:hover {
+            background: #334155;
+        }
+        
+        .steps {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .steps li {
+            padding: 8px 0;
+            padding-left: 30px;
+            position: relative;
+        }
+        
+        .steps li:before {
+            content: counter(step-counter);
+            counter-increment: step-counter;
+            position: absolute;
+            left: 0;
+            top: 8px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .steps {
+            counter-reset: step-counter;
+        }
+        
+        .success-box {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 8px;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">🔧 Account Setup Required</div>
+            <div class="subtitle">Your account needs a database record to save documents</div>
+        </div>
+        
+        <div class="error-box">
+            <div class="error-title">
+                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                </svg>
+                Database Record Missing
+            </div>
+            <p>Your auth ID <code id="auth-id">0bbb2a30-5057-4dbb-8980-8ea9d02b5091</code> needs to be added to the users table.</p>
+            <p><strong>Error Code:</strong> FK-0bbb2a30</p>
+        </div>
+        
+        <div class="fix-section">
+            <div class="fix-title">💡 Quick Fix (2 minutes)</div>
+            <p>Run this SQL command in your Supabase Dashboard:</p>
+            
+            <ol class="steps">
+                <li>Open your <strong>Supabase Dashboard</strong></li>
+                <li>Navigate to <strong>SQL Editor</strong></li>
+                <li>Copy and paste the SQL command below</li>
+                <li>Click <strong>Run</strong></li>
+                <li>Return here and try uploading your document again</li>
+            </ol>
+            
+            <div class="sql-box">
+                <button class="copy-btn" onclick="copySql()">Copy</button>
+                <code id="sql-command">INSERT INTO users (id, email, created_at, updated_at) 
+VALUES ('0bbb2a30-5057-4dbb-8980-8ea9d02b5091', 'user-0bbb2a30@temp.local', NOW(), NOW()) 
+ON CONFLICT (id) DO NOTHING;</code>
+            </div>
+        </div>
+        
+        <div class="fix-section">
+            <div class="fix-title">🔧 Alternative Fix</div>
+            <p>If you don't want to create user records, you can remove the database constraint:</p>
+            
+            <div class="sql-box">
+                <button class="copy-btn" onclick="copyAltSql()">Copy</button>
+                <code id="alt-sql-command">ALTER TABLE persons DROP CONSTRAINT IF EXISTS persons_auth_id_fkey;</code>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="javascript:history.back()" class="btn btn-secondary">← Go Back</a>
+            <button class="btn" onclick="testFix()">Test Fix</button>
+        </div>
+        
+        <div id="test-result"></div>
+    </div>
+    
+    <script>
+        function copySql() {
+            const sql = document.getElementById('sql-command').textContent;
+            navigator.clipboard.writeText(sql).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        }
+        
+        function copyAltSql() {
+            const sql = document.getElementById('alt-sql-command').textContent;
+            navigator.clipboard.writeText(sql).then(() => {
+                const btns = document.querySelectorAll('.copy-btn');
+                btns[1].textContent = 'Copied!';
+                setTimeout(() => btns[1].textContent = 'Copy', 2000);
+            });
+        }
+        
+        function testFix() {
+            const resultDiv = document.getElementById('test-result');
+            resultDiv.innerHTML = '<div style="text-align: center; padding: 20px;">🔄 Testing fix...</div>';
+            
+            // Test by trying to create a person record
+            fetch('/api/confirm_save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    auth_id: '0bbb2a30-5057-4dbb-8980-8ea9d02b5091',
+                    extracted_fields: {},
+                    user_fields: {
+                        name: 'Test User',
+                        father_name: 'Test Father',
+                        mobile_number: '9876543210',
+                        dob: '2000-01-01',
+                        gender: 'Male',
+                        state: 'Test State',
+                        aadhar_number: '123456789012'
+                    }
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    resultDiv.innerHTML = `
+                        <div class="success-box">
+                            <div style="color: #16a34a; font-weight: 600; margin-bottom: 8px;">
+                                ✅ Fix Successful!
+                            </div>
+                            <p>Your account is now properly set up. You can return to document upload.</p>
+                        </div>
+                    `;
+                } else if (data.error_type === 'user_account_setup') {
+                    resultDiv.innerHTML = `
+                        <div class="error-box">
+                            <div style="color: #dc2626; font-weight: 600; margin-bottom: 8px;">
+                                ❌ Fix Not Applied Yet
+                            </div>
+                            <p>Please run the SQL command in Supabase Dashboard first, then test again.</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="error-box">
+                            <div style="color: #dc2626; font-weight: 600; margin-bottom: 8px;">
+                                ⚠️ Different Error
+                            </div>
+                            <p>${data.message || data.error}</p>
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                resultDiv.innerHTML = `
+                    <div class="error-box">
+                        <div style="color: #dc2626; font-weight: 600; margin-bottom: 8px;">
+                            ❌ Test Failed
+                        </div>
+                        <p>Could not test the fix: ${error.message}</p>
+                    </div>
+                `;
+            });
+        }
+        
+        // Auto-extract auth_id from URL parameters if available
+        const urlParams = new URLSearchParams(window.location.search);
+        const authId = urlParams.get('auth_id');
+        if (authId) {
+            document.getElementById('auth-id').textContent = authId;
+            const sqlCommand = `INSERT INTO users (id, email, created_at, updated_at) 
+VALUES ('${authId}', 'user-${authId.substring(0, 8)}@temp.local', NOW(), NOW()) 
+ON CONFLICT (id) DO NOTHING;`;
+            document.getElementById('sql-command').textContent = sqlCommand;
+        }
+    </script>
+</body>
+</html>
