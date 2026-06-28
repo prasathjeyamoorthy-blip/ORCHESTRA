@@ -433,3 +433,24 @@ releases/
 !.gitattributes
 !.editorconfig
 !package-lock.json
+# Local environment
+myenv/
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+
+# Compiled/binary artifacts
+*.class
+*.zip
+
+# Unrelated / legacy copies
+doc_pan/
+TESTING1/
+pr/
+
+# Local env secrets
+.env
+
