@@ -121,21 +121,17 @@ export function AuthModal({ onClose, onLogin, initialTab = 'login' }) {
     if (!validate()) return
 
     if (tab === 'login') {
-      const ok = await login(email, password)
-      if (!ok) return   // authError is set inside the hook
-      const { supabase } = await import('../../lib/supabase')
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await login(email, password)
+      if (!user) return   // authError is set inside the hook
       const userData = { 
         id: user.id, 
         email: user.email, 
-        display_name: user.user_metadata?.display_name ?? user.email 
+        display_name: user.display_name ?? user.email 
       }
       onLogin(userData)  // OTP temporarily disabled — login directly
     } else {
-      const ok = await register(email, password)
-      if (!ok) return
-      const { supabase } = await import('../../lib/supabase')
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await register(email, password, displayName)
+      if (!user) return
       const userData = { 
         id: user.id, 
         email: user.email, 

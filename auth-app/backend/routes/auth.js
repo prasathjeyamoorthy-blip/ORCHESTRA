@@ -58,6 +58,10 @@ router.post('/verify-otp', loginLimiter, async (req, res) => {
 
   return res.json({
     message: 'Phone verified.',
+    session: {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    },
     user: {
       id: data.user.id,
       email: data.user.email,
@@ -117,6 +121,10 @@ router.post('/signup', signupLimiter, async (req, res) => {
 
   return res.json({
     message: 'Account created successfully.',
+    session: {
+      access_token: loginData.session.access_token,
+      refresh_token: loginData.session.refresh_token,
+    },
     user: {
       id: loginData.user.id,
       email: loginData.user.email,
@@ -151,6 +159,10 @@ router.post('/login', loginLimiter, async (req, res) => {
 
   return res.json({
     message: 'Logged in.',
+    session: {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    },
     user: {
       id: data.user.id,
       email: data.user.email,

@@ -2,17 +2,43 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── NVIDIA API ────────────────────────────────────────────────
+# ── API Keys ──────────────────────────────────────────────────
 # Set these in voice-agent/.env — never hardcode keys here
 NVIDIA_API_KEY  = os.getenv("NVIDIA_API_KEY")
+SARVAM_API_KEY  = os.getenv("SARVAM_API_KEY")
 ASR_API_KEY     = os.getenv("STT_API_KEY") or NVIDIA_API_KEY
 TTS_API_KEY     = os.getenv("TTS_API_KEY") or NVIDIA_API_KEY
 
+# Validate required API keys
 if not NVIDIA_API_KEY:
     raise EnvironmentError(
         "NVIDIA_API_KEY is not set. Add it to voice-agent/.env:\n"
         "  NVIDIA_API_KEY=nvapi-..."
     )
+
+if not SARVAM_API_KEY:
+    raise EnvironmentError(
+        "SARVAM_API_KEY is not set. Add it to voice-agent/.env:\n"
+        "  SARVAM_API_KEY=sk_..."
+    )
+
+# ── Voice Service Configuration ───────────────────────────────
+VOICE_AGENT_PORT = int(os.getenv("VOICE_AGENT_PORT", "8002"))
+VOICE_AGENT_HOST = os.getenv("VOICE_AGENT_HOST", "0.0.0.0")
+
+# Service endpoints and connectivity
+VOICE_SERVICE_TIMEOUT = int(os.getenv("VOICE_SERVICE_TIMEOUT", "30"))
+VOICE_HEALTH_CHECK_INTERVAL = int(os.getenv("VOICE_HEALTH_CHECK_INTERVAL", "60"))
+VOICE_FALLBACK_ENABLED = os.getenv("VOICE_FALLBACK_ENABLED", "true").lower() == "true"
+
+# ── STT/TTS Model Configuration ──────────────────────────────
+# Sarvam AI Models
+SARVAM_STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
+SARVAM_TTS_MODEL = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+
+# NVIDIA NIM Models
+NVIDIA_STT_MODEL = os.getenv("NVIDIA_STT_MODEL", "openai/whisper-large-v3")
+NVIDIA_TTS_MODEL = os.getenv("NVIDIA_TTS_MODEL", "nvidia/magpie-tts-multilingual")
 
 # ── ASR — openai/whisper-large-v3 via NVIDIA NIM cloud gRPC ──
 # No local GPU needed — calls grpc.nvcf.nvidia.com:443

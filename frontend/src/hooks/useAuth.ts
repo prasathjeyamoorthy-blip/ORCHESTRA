@@ -8,21 +8,46 @@ import {
   unwrapMEK,
 } from "../lib/crypto";
 import { setSessionKey, clearSessionKey } from "../lib/keySession";
+import { apiPost } from "../utils/api";
+
+type AuthUser = {
+  id: string;
+  email?: string;
+  display_name?: string;
+};
+
+type AuthResponse = {
+  user: AuthUser;
+  session?: {
+    access_token: string;
+    refresh_token: string;
+  };
+};
 
 export function useAuth() {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
   // ── Registration ────────────────────────────────────────────────
-  async function register(email: string, password: string): Promise<boolean> {
+  async function register(email: string, password: string, displayName = ""): Promise<AuthUser | false> {
     setLoading(true);
     setError(null);
 
     try {
-      // 1. Create Supabase auth user
-      const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
-      if (authErr || !authData.session) {
-        setError(authErr?.message ?? "Registration failed");
+      const authData = await apiPost("/api/auth/signup", {
+        email,
+        password,
+        display_name: displayName,
+      }) as AuthResponse;
+
+      if (!authData.user || !authData.session) {
+        setError("Registration failed");
+        return false;
+      }
+
+      const { error: sessionErr } = await supabase.auth.setSession(authData.session);
+      if (sessionErr) {
+        setError(sessionErr.message);
         return false;
       }
 
@@ -37,25 +62,12 @@ export function useAuth() {
       // 4. Store directly in Supabase table (RLS ensures only this user can write)
       const { error: dbErr } = await supabase
         .from("user_crypto_meta")
-        .insert({ user_id: authData.user!.id, salt, wrapped_mek: wrappedMEK });
+        .insert({ user_id: authData.user.id, salt, wrapped_mek: wrappedMEK });
 
       if (dbErr) {
         setError("Failed to initialise encryption: " + dbErr.message);
         return false;
       }
-
-      // 5. Sync session cookies with Express backend
-      try {
-        await fetch('/api/auth/sync-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            access_token:  authData.session!.access_token,
-            refresh_token: authData.session!.refresh_token,
-          }),
-        });
-      } catch { /* backend may not be running */ }
 
       // 5. Re-import MEK as extractable: false
       const rawMEK = await crypto.subtle.exportKey("raw", mek);
@@ -66,7 +78,7 @@ export function useAuth() {
       );
       setSessionKey(sessionMEK);
 
-      return true;
+      return authData.user;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Registration failed");
       return false;
@@ -77,15 +89,21 @@ export function useAuth() {
   }
 
   // ── Login ───────────────────────────────────────────────────────
-  async function login(email: string, password: string): Promise<boolean> {
+  async function login(email: string, password: string): Promise<AuthUser | false> {
     setLoading(true);
     setError(null);
 
     try {
-      // 1. Authenticate
-      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({ email, password });
-      if (authErr || !authData.session) {
-        setError(authErr?.message ?? "Login failed");
+      const authData = await apiPost("/api/auth/login", { email, password }) as AuthResponse;
+
+      if (!authData.user || !authData.session) {
+        setError("Login failed");
+        return false;
+      }
+
+      const { error: sessionErr } = await supabase.auth.setSession(authData.session);
+      if (sessionErr) {
+        setError(sessionErr.message);
         return false;
       }
 
@@ -93,7 +111,7 @@ export function useAuth() {
       const { data: meta, error: dbErr } = await supabase
         .from("user_crypto_meta")
         .select("salt, wrapped_mek")
-        .eq("user_id", authData.user!.id)
+        .eq("user_id", authData.user.id)
         .maybeSingle();   // returns null instead of 406 when no row exists
 
       // No crypto meta — this user registered before encryption was set up.
@@ -106,7 +124,7 @@ export function useAuth() {
 
         const { error: insertErr } = await supabase
           .from("user_crypto_meta")
-          .insert({ user_id: authData.user!.id, salt, wrapped_mek: wrappedMEK });
+          .insert({ user_id: authData.user.id, salt, wrapped_mek: wrappedMEK });
 
         if (insertErr) {
           setError("Failed to initialise encryption: " + insertErr.message);
@@ -120,27 +138,13 @@ export function useAuth() {
           false, ["encrypt", "decrypt"],
         );
         setSessionKey(sessionMEK);
-        return true;
+        return authData.user;
       }
 
       if (dbErr) {
         setError("Could not load encryption keys. Please contact support.");
         return false;
       }
-
-      // 3. Sync session cookies with Express backend so /api/chat/* routes work
-      //    The backend reads httpOnly cookies — we pass the Supabase tokens to set them
-      try {
-        await fetch('/api/auth/sync-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            access_token:  authData.session.access_token,
-            refresh_token: authData.session.refresh_token,
-          }),
-        });
-      } catch { /* backend may not be running — chat features will be unavailable */ }
 
       // 4. Derive KEK and unwrap MEK
       const kek = await deriveKEK(password, meta.salt);
@@ -153,7 +157,7 @@ export function useAuth() {
       }
 
       setSessionKey(mek);
-      return true;
+      return authData.user;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Login failed");
       return false;
@@ -167,6 +171,7 @@ export function useAuth() {
   async function logout(): Promise<void> {
     clearSessionKey();
     await supabase.auth.signOut();
+    await apiPost("/api/auth/logout", {}).catch(() => {});
   }
 
   return { register, login, logout, loading, error };

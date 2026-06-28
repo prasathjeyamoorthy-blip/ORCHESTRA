@@ -10,6 +10,7 @@ import Home from './pages/Home'
 import { AuthModal } from './components/ui/auth-modal'
 import { useDocumentUpload } from './hooks/useDocumentUpload'
 import { useAgentFileAccess } from './hooks/useAgentFileAccess'
+import { MissingFieldsForm } from './components/ui/missing-fields-form'
 import { clearSessionKey } from './lib/keySession'
 import { supabase } from './lib/supabase'
 
@@ -830,6 +831,27 @@ function Message({ msg, onFollowup, language }) {
           <DetailsCard fields={msg.confirmation_fields} language={language} />
         )}
 
+        {/* ── Missing Fields Form — for manual data entry after document upload ── */}
+        {!msg.streaming && msg.missing_fields_form && !optionSubmitted && (
+          <div className="pt-4 pb-2">
+            <MissingFieldsForm
+              missingFields={msg.missing_fields_form.fields}
+              extractedFields={msg.missing_fields_form.extracted_fields}
+              sessionId={msg.missing_fields_form.session_id}
+              authId={msg.missing_fields_form.auth_id}
+              qualityScore={msg.missing_fields_form.quality_score}
+              onComplete={(result) => {
+                setOptionSubmitted(true)
+                onFollowup(`Document completion successful! ${result.message || ''}`, msg.id)
+              }}
+              onCancel={() => {
+                setOptionSubmitted(true)
+                onFollowup("I'll provide the details manually later.", msg.id)
+              }}
+            />
+          </div>
+        )}
+
         {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
         {/* Stays open and editable until the user clicks "Yes, proceed" */}
         {!msg.streaming && msg.confirmation_fields && confirmUsed === null && (
@@ -1553,7 +1575,7 @@ export default function App() {
               const freshFields = event.confirmation_fields || null
               return prev.map(m => {
                 if (m.id === botId) {
-                  return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields }
+                  return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields, missing_fields_form: event.missing_fields_form }
                 }
                 if (freshFields && m.confirmation_fields) {
                   return { ...m, confirmation_fields: freshFields }
@@ -1725,16 +1747,25 @@ export default function App() {
         return
       }
 
-      botMessages.push(result.agentMessage)
+      botMessages.push({
+        msg: result.agentMessage,
+        requiresCompletion: result.data?.requires_completion,
+        missingFieldsForm: result.data?.missing_fields_form
+      })
     }
 
     // All files processed — close modal and show responses
     setAgentConsent(null)
     setConsentError(null)
+    
+    // Check if any results require manual completion
+    const firstResultWithMissingFields = botMessages.find(m => m.requiresCompletion)
+    
     setMessages(prev => [...prev, {
       id: nextId(), role: 'bot',
-      content: botMessages.join('\n\n'),
+      content: botMessages.map(m => m.msg).join('\n\n'),
       sources: [], followups: [],
+      missing_fields_form: firstResultWithMissingFields?.missingFieldsForm || null
     }])
   }
 

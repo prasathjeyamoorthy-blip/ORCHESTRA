@@ -1,46 +1,435 @@
-# ── Python ────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# PAN APPLICATION PLATFORM - COMPREHENSIVE .gitignore
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── PYTHON ─────────────────────────────────────────────────────────────────────
 __pycache__/
-*.py[oc]
-*.pyo
-build/
-dist/
-wheels/
+*.py[cod]
+*.so
+*.egg
 *.egg-info/
-.venv/
-venv/
-env/
-
-# ── Node / JS ─────────────────────────────────────────────────────
-node_modules/
 dist/
-.next/
-.nuxt/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.Python
 
-# ── Environment secrets ───────────────────────────────────────────
+# ── Virtual Environments ───────────────────────────────────────────────────────
+.venv/
+.venv
+venv/
+venv
+ENV/
+env/
+env.bak/
+venv.bak/
+*.venv
+myenv/
+
+# ── Python Type Checking ───────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# ── Pytest ─────────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# ── NODE / FRONTEND ────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.eslintcache
+.node_modules/
+package-lock.json.lock
+
+# ── FRONTEND BUILD ─────────────────────────────────────────────────────────────
+frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/.nuxt/
+frontend/.cache/
+frontend/.vuepress/dist/
+
+# ── VITE CACHE ─────────────────────────────────────────────────────────────────
+.vite/
+frontend/.vite/
+
+# ── TYPESCRIPT ─────────────────────────────────────────────────────────────────
+*.tsbuildinfo
+*.ts.map
+dist-js/
+
+# ── ENVIRONMENT & SECRETS ──────────────────────────────────────────────────────
 .env
-.env.*
+.env.local
+.env.*.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+.env.backup
+*.env
 !.env.example
+!.env.example.local
 
-# ── HuggingFace model cache (multi-GB — download on first run) ────
+# ── GOOGLE CLOUD CREDENTIALS ───────────────────────────────────────────────────
+credentials.json
+service-account-key.json
+google-credentials.json
+*-credentials.json
+google_credentials.json
+
+# ── API KEYS & TOKENS ──────────────────────────────────────────────────────────
+.api_keys
+.tokens
+*.key
+*.pem
+*.p8
+private_key.json
+public_key.json
+
+# ── DATABASE & CACHE ───────────────────────────────────────────────────────────
+# Vector databases
+pan-rag/chroma_db/
+pan-rag/chroma/
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+.cache/
+
+# ── ML MODEL CACHE (Large files - download on first run) ──────────────────────
 pan-rag/hf_cache/
 pan-rag/D:\hf_cache/
 voice-agent/hf_cache/
+pan-rag/models/
+pan-rag/transformers_cache/
+~/.cache/huggingface/
+transformers_cache/
 
-# ── Vector database (rebuilt from source docs) ────────────────────
-pan-rag/chroma_db/
-
-# ── Runtime / user-uploaded data ─────────────────────────────────
+# ── USER UPLOADED DATA & STORAGE ───────────────────────────────────────────────
+pan-rag/storage/
 pan-rag/storage/uploads/
 pan-rag/storage/sessions/
 documentuploadagent/storage/
+*.uploadcache
+uploads/
+temp/
+tmp/
 
-# ── OS / editor ───────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-.vscode/settings.json
+# ── VOICE AGENT DATA ───────────────────────────────────────────────────────────
+voice-agent/audio_cache/
+voice-agent/voice_logs/
+*.wav
+*.mp3
+*.flac
+*.ogg
+test_audio/
+
+# ── TEST FILES & TEST DATA ────────────────────────────────────────────────────
+test_output/
+test_results/
+test_*.py
+*_test.py
+test_*.wav
+*.test.js
+test_files/
+TESTING1/
+test*.html
+
+# ── TEMPORARY FILES ────────────────────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.backup
 *.swp
 *.swo
+*.swn
+*~
+._*
+.#*
 
-# ── Logs ──────────────────────────────────────────────────────────
+# ── OS FILES ───────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── IDE / EDITOR ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.idea/*
+*.iml
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+.vim/
+.emacs.d/
+.settings/
+.project
+.classpath
+.c9/
+*.launch
+.ntvs_analysis_data/
+
+# ── IDE SPECIFIC ───────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/*.log
+.vscode/launch.json
+.vscode/settings.json
+
+# ── INTELLIJ ───────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# ── LOGS & DEBUG ───────────────────────────────────────────────────────────────
 *.log
+*.log.*
 logs/
+debug/
+debug.log
+error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── BUILD ARTIFACTS ───────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.parcel-cache
+
+# ── SYSTEM FILES ───────────────────────────────────────────────────────────────
+.DS_Store
+.env.local
+.env.*.local
+
+# ── JAVA (from auth-app) ───────────────────────────────────────────────────────
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# ── C# / .NET (if used) ────────────────────────────────────────────────────────
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+
+# ── SCREENSHOTS & MEDIA (Development) ──────────────────────────────────────────
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mov
+*.avi
+
+# ── KIRO SPECIFIC ──────────────────────────────────────────────────────────────
+.kiro/
+.kiro/cache/
+.kiro/context/
+
+# ── GIT ────────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+.github/workflows/
+
+# ── DOCKER ─────────────────────────────────────────────────────────────────────
+.docker/
+.dockerignore
+docker-compose.override.yml
+
+# ── NPM CACHE ──────────────────────────────────────────────────────────────────
+.npm/
+.npmrc
+
+# ── YARN ───────────────────────────────────────────────────────────────────────
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# ── PNPM ───────────────────────────────────────────────────────────────────────
+pnpm-debug.log
+.pnpm-store/
+
+# ── VIRTUAL STUDIO CODE WORKSPACE ──────────────────────────────────────────────
+*.code-workspace
+
+# ── TURBO REPO ─────────────────────────────────────────────────────────────────
+.turbo/
+
+# ── NEXT.JS ────────────────────────────────────────────────────────────────────
+.next/
+out/
+
+# ── ASTRO ──────────────────────────────────────────────────────────────────────
+dist/
+.astro/
+
+# ── REMIX ──────────────────────────────────────────────────────────────────────
+.cache/
+.remix/
+
+# ── WEBPACK ────────────────────────────────────────────────────────────────────
+.webpack-cache/
+
+# ── ROLLUP ─────────────────────────────────────────────────────────────────────
+.rollup.cache/
+
+# ── RUSH ───────────────────────────────────────────────────────────────────────
+common/temp/
+common/autoinstallers/
+
+# ── RUNTIME / PROCESS FILES ────────────────────────────────────────────────────
+*.pid
+*.seed
+*.pid.lock
+
+# ── MISC DEVELOPMENT ───────────────────────────────────────────────────────────
+.cache/
+.run/
+*.swp
+*.swo
+*.swn
+*~
+.~lock*
+Thumbs.db
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ── TEMPORARY DOCUMENT FILES ───────────────────────────────────────────────────
+*.docx
+*.xlsx
+*.pptx
+*.doc
+*.xls
+*.ppt
+~$*
+
+# ── DJANGO (if used) ───────────────────────────────────────────────────────────
+*.sqlite3
+db.sqlite3
+/media
+/staticfiles
+
+# ── FLASK (used) ───────────────────────────────────────────────────────────────
+instance/
+.webassets-cache
+
+# ── JUPYTER NOTEBOOK ──────────────────────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
+
+# ── POETRY ─────────────────────────────────────────────────────────────────────
+poetry.lock
+
+# ── CONDA ──────────────────────────────────────────────────────────────────────
+conda-env.yml.lock
+
+# ── REQUIREMENTS LOCK FILES (Optional - uncomment if using lock files) ────────
+# requirements.lock
+# poetry.lock
+# package-lock.json (Usually tracked for reproducible builds)
+
+# ── DIST FILES FOR PACKAGES ───────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.whl
+
+# ── COMPILED PYTHON FILES ─────────────────────────────────────────────────────
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+
+# ── SHELL SCRIPTS ARTIFACTS ───────────────────────────────────────────────────
+*.sh.bak
+*.bash.bak
+
+# ── CONFIGURATION OVERRIDES ───────────────────────────────────────────────────
+local.config
+local.config.js
+local.config.json
+dev.config.local
+
+# ── COVERAGE REPORTS ──────────────────────────────────────────────────────────
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+.pytest_cache/
+
+# ── PROFILING DATA ─────────────────────────────────────────────────────────────
+*.prof
+cProfile.prof
+profile_data/
+
+# ── MISC CACHE FILES ──────────────────────────────────────────────────────────
+.cache
+.cache/*
+__cache__/
+*.cache
+
+# ── DEPLOYMENT ARTIFACTS ──────────────────────────────────────────────────────
+deployments/
+releases/
+.deployment/
+.deploymentignore
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SPECIFIC FOLDER CONTENTS TO IGNORE
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Don't ignore these important files
+!.env.example
+!.github/
+!.gitignore
+!.gitattributes
+!.editorconfig
+!package-lock.json

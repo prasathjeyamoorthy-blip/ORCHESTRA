@@ -2,6 +2,9 @@ import { useEffect, useRef, useCallback, useState } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { ArrowUpIcon, Paperclip, PlusIcon } from "lucide-react"
+import { VoiceRecorder } from "./voice-recorder"
+import { VoiceLanguageSelector } from "./voice-language-selector"
+import { useVoice } from "@/hooks/useVoice"
 
 interface UseAutoResizeTextareaProps {
   minHeight: number
@@ -45,6 +48,8 @@ interface V0AIChatProps {
 export function V0AIChat({ onSend, isLoading = false }: V0AIChatProps) {
   const [value, setValue] = useState("")
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({ minHeight: 60, maxHeight: 200 })
+  const { currentLanguage, setLanguage, preferences } = useVoice()
+  const [showVoiceLanguageSelector, setShowVoiceLanguageSelector] = useState(false)
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
@@ -55,6 +60,32 @@ export function V0AIChat({ onSend, isLoading = false }: V0AIChatProps) {
       onSend(value.trim())
       setValue("")
       adjustHeight(true)
+    }
+  }
+
+  const handleVoiceRecordingComplete = async (audioBlob: Blob, duration: number) => {
+    // Send voice message to parent
+    const formData = new FormData()
+    formData.append('audio', audioBlob, 'voice-message.webm')
+    formData.append('language', currentLanguage)
+
+    try {
+      const response = await fetch('/api/voice/speak', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
+        },
+      })
+
+      if (response.ok) {
+        const transcript = response.headers.get('X-Transcript')
+        if (transcript) {
+          onSend(decodeURIComponent(transcript))
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send voice message:', err)
     }
   }
 
@@ -76,11 +107,43 @@ export function V0AIChat({ onSend, isLoading = false }: V0AIChatProps) {
         />
       </div>
 
+      {/* Voice language selector */}
+      {preferences.enabled && showVoiceLanguageSelector && (
+        <div className="px-4 py-2 border-t border-neutral-800">
+          <VoiceLanguageSelector
+            currentLanguage={currentLanguage}
+            onLanguageChange={(lang) => {
+              setLanguage(lang)
+              setShowVoiceLanguageSelector(false)
+            }}
+          />
+        </div>
+      )}
+
       <div className="flex items-center justify-between p-3">
-        <button type="button" className="group p-2 hover:bg-neutral-800 rounded-lg transition-colors flex items-center gap-1">
-          <Paperclip className="w-4 h-4 text-white" />
-          <span className="text-xs text-zinc-400 hidden group-hover:inline transition-opacity">Attach</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            type="button" 
+            className="group p-2 hover:bg-neutral-800 rounded-lg transition-colors flex items-center gap-1"
+            title="Toggle voice language"
+            onClick={() => preferences.enabled && setShowVoiceLanguageSelector(!showVoiceLanguageSelector)}
+          >
+            <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">🗣️</span>
+          </button>
+          
+          {preferences.enabled && (
+            <VoiceRecorder 
+              onRecordingComplete={handleVoiceRecordingComplete}
+              language={currentLanguage}
+              isEnabled={!isLoading}
+            />
+          )}
+          
+          <button type="button" className="group p-2 hover:bg-neutral-800 rounded-lg transition-colors flex items-center gap-1">
+            <Paperclip className="w-4 h-4 text-white" />
+            <span className="text-xs text-zinc-400 hidden group-hover:inline transition-opacity">Attach</span>
+          </button>
+        </div>
 
         <div className="flex items-center gap-2">
           <button type="button" className="px-2 py-1 rounded-lg text-sm text-zinc-400 transition-colors border border-dashed border-zinc-700 hover:border-zinc-600 hover:bg-zinc-800 flex items-center gap-1">

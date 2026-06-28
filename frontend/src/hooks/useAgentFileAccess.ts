@@ -27,6 +27,8 @@ export interface AgentFileResult {
   agentMessage: string;
   /** Whether the agent processed the file successfully */
   success: boolean;
+  /** Full raw JSON response from the agent */
+  data?: any;
 }
 
 export function useAgentFileAccess() {
@@ -116,6 +118,7 @@ export function useAgentFileAccess() {
       return {
         agentMessage: data.message ?? `✅ ${request.file.name} processed.`,
         success: true,
+        data,
       };
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Agent access failed");

@@ -482,6 +482,8 @@ async def ask_stream(request: QuestionRequest):
     )
 
 
+
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
@@ -524,8 +526,8 @@ async def summarize(request: SummarizeRequest):
 UPLOAD_DIR = Path("storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Document upload agent URL — running on port 5001
-DOC_AGENT_URL = os.getenv("DOC_AGENT_URL", "http://localhost:5001/api/upload")
+# Document upload agent URL — running on port 5000
+DOC_AGENT_URL = os.getenv("DOC_AGENT_URL", "http://localhost:5000/api/verify")
 
 @router.post("/upload")
 async def upload_document(
@@ -556,11 +558,15 @@ async def upload_document(
     extraction_result = {}
     agent_error = None
     try:
+        # Generate a temporary auth_id for pan_verification compatibility
+        # In future integration, this should come from authenticated user
+        temp_auth_id = session_id  # Using session_id as temporary auth_id
+        
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 DOC_AGENT_URL,
-                data={"session_id": session_id, "doc_type": doc_type},
-                files={"file": (file.filename, file_bytes, file.content_type or "application/octet-stream")},
+                data={"auth_id": temp_auth_id},  # pan_verification expects auth_id
+                files={"aadhaar": (file.filename, file_bytes, file.content_type or "application/octet-stream")},  # pan_verification expects 'aadhaar' field
             )
         if response.status_code == 200:
             extraction_result = response.json()
@@ -572,7 +578,7 @@ async def upload_document(
             print(f"\n❌ Document agent error [{doc_type}]: {agent_error}")
     except httpx.ConnectError:
         agent_error = "Document extraction service is offline. File saved — extraction skipped."
-        print(f"\n⚠️  Document agent is offline at {DOC_AGENT_URL} — is the Flask server running on port 5001?  (cd documentuploadagent && python app.py)")
+        print(f"\n⚠️  Document agent is offline at {DOC_AGENT_URL} — is the Flask server running on port 5000?  (cd pan_verification && python app.py)")
     except Exception as e:
         agent_error = f"Document extraction failed: {str(e)}"
         print(f"\n❌ Document extraction exception: {e}")
@@ -595,6 +601,26 @@ async def upload_document(
     chat_message = flow_result["answer"]
     if agent_error:
         chat_message += f"\n\n> ⚠️ {agent_error}"
+    
+    # ── Handle missing fields from document verification ──
+    missing_fields_form = None
+    if extraction_result and extraction_result.get("status") == "missing_fields":
+        missing_fields = extraction_result.get("missing_fields", [])
+        extracted_fields = extraction_result.get("extracted_fields", {})
+        
+        # Build user-friendly message about missing fields
+        missing_field_names = [field["label"] for field in missing_fields]
+        if missing_field_names:
+            chat_message = f"📄 Document processed! I extracted some information, but need you to provide the missing details:\n\n**Missing:** {', '.join(missing_field_names)}\n\nPlease fill in the form below to complete your document verification."
+        
+        # Prepare missing fields form for frontend
+        missing_fields_form = {
+            "fields": missing_fields,
+            "extracted_fields": extracted_fields,
+            "session_id": session_id,
+            "auth_id": extraction_result.get("auth_id") or session_id,
+            "quality_score": extraction_result.get("quality_score")
+        }
 
     return {
         "filename": file.filename,
@@ -603,6 +629,86 @@ async def upload_document(
         "complete": flow_result.get("complete", False),
         # Full extraction payload for frontend use
         "extraction": extraction_result if extraction_result else None,
-        "verified": extraction_result.get("verified", False),
+        "verified": extraction_result.get("status") == "success" if extraction_result else False,
         "validation_errors": extraction_result.get("validation_errors", []),
+        # Missing fields form for user completion
+        "missing_fields_form": missing_fields_form,
+        "requires_completion": extraction_result.get("status") == "missing_fields" if extraction_result else False,
     }
+
+
+@router.post("/complete_document")
+async def complete_document_with_missing_fields(request_data: dict):
+    """Complete document verification by submitting missing field data."""
+    try:
+        session_id = request_data.get("session_id")
+        auth_id = request_data.get("auth_id") 
+        extracted_fields = request_data.get("extracted_fields", {})
+        user_fields = request_data.get("user_fields", {})
+        
+        if not session_id or not auth_id:
+            raise HTTPException(status_code=400, detail="session_id and auth_id are required")
+        
+        # Forward completion request to pan_verification
+        completion_result = {}
+        completion_error = None
+        
+        try:
+            # Prepare form data for pan_verification
+            form_data = {
+                "auth_id": auth_id,
+                "extracted_fields": json.dumps(extracted_fields)
+            }
+            
+            # Add user-provided fields
+            for field_name, field_value in user_fields.items():
+                if field_value and str(field_value).strip():
+                    form_data[field_name] = str(field_value).strip()
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    "http://localhost:5000/api/complete_missing_fields",
+                    data=form_data
+                )
+                
+            if response.status_code == 200:
+                completion_result = response.json()
+                print(f"\n✅ Document completion successful for session [{session_id}]")
+            else:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                completion_error = error_data.get("error", f"Completion failed with status {response.status_code}")
+                
+                # If there are specific validation errors, include them for the user
+                v_errors = error_data.get("validation_errors", [])
+                if v_errors:
+                    completion_error += f": {', '.join(v_errors)}"
+                
+                print(f"\n❌ Document completion error: {completion_error}")
+                
+        except httpx.ConnectError:
+            completion_error = "Document verification service is offline"
+        except Exception as e:
+            completion_error = f"Document completion failed: {str(e)}"
+        
+        # Return response
+        if completion_result and completion_result.get("status") == "success":
+            return {
+                "status": "success",
+                "message": "✅ Document verification completed successfully! All required information has been saved.",
+                "session_id": session_id,
+                "doc_id": completion_result.get("doc_id"),
+                "completed_fields": completion_result.get("completed_fields", []),
+                "extracted_data": completion_result.get("aadhaar_data", {})
+            }
+        else:
+            error_message = completion_error or "Document completion failed"
+            return {
+                "status": "error",
+                "message": f"❌ {error_message}",
+                "session_id": session_id,
+                "validation_errors": completion_result.get("validation_errors", []) if completion_result else []
+            }
+            
+    except Exception as e:
+        print(f"[complete_document] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
