@@ -1,0 +1,7 @@
+playwright==1.48.0
+playwright-stealth==1.0.6
+requests==2.32.3
+openai-whisper==20231117
+pydub==0.25.1
+torch==2.5.1
+torchaudio==2.5.1

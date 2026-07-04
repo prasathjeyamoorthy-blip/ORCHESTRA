@@ -138,23 +138,3 @@ def validate_document(data):
     results["overall_valid"] = all(results.values())
 
     return results
-
-# -------------------------------
-# 🔹 9. EXAMPLE USAGE
-# -------------------------------
-
-if __name__ == "__main__":
-    sample_data = {
-        "aadhaar": "123412341234",
-        "pan": "ABCDE1234F",
-        "mobile": "9876543210",
-        "email": "test@gmail.com",
-        "dob": "15/08/2000",
-        "age": "24",
-        "gender": "Male",
-        "pincode": "600001",
-        "name": "Javid Ali"
-    }
-
-    result = validate_document(sample_data)
-    print(result)

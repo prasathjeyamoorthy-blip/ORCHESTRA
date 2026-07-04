@@ -1,13 +1,18 @@
 from supabase import create_client
 import uuid
 import time
+import os
+from dotenv import load_dotenv
 
-url = "https://vnaeznlgijnarwqrwdtz.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZuYWV6bmxnaWpuYXJ3cXJ3ZHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1Mjk4OTQsImV4cCI6MjA5MjEwNTg5NH0.kw8jhS-YErCJgDVkSDj6zBrJK3ytLnFS-2f0YR9D6hw"  # backend use
+load_dotenv()
+
+_SUPABASE_URL = os.getenv("SUPABASE_URL")
+_SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 
 def get_client():
     """Get Supabase client."""
-    return create_client(url, key)
+    return create_client(_SUPABASE_URL, _SUPABASE_KEY)
 
 def ensure_user_exists(auth_id: str):
     """Ensure user exists in the database to satisfy foreign key constraints."""

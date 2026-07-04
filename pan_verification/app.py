@@ -58,8 +58,8 @@ def signup():
     if not email or not password:
         return jsonify({'status': 'error', 'error': 'Email and password required'}), 400
     
-    url = "https://vnaeznlgijnarwqrwdtz.supabase.co"
-    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZuYWV6bmxnaWpuYXJ3cXJ3ZHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1Mjk4OTQsImV4cCI6MjA5MjEwNTg5NH0.kw8jhS-YErCJgDVkSDj6zBrJK3ytLnFS-2f0YR9D6hw"
+    url = os.getenv('SUPABASE_URL')
+    key = os.getenv('SUPABASE_KEY')
     client = create_client(url, key)
     
     try:
@@ -78,8 +78,8 @@ def login():
     if not email or not password:
         return jsonify({'status': 'error', 'error': 'Email and password required'}), 400
     
-    url = "https://vnaeznlgijnarwqrwdtz.supabase.co"
-    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZuYWV6bmxnaWpuYXJ3cXJ3ZHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1Mjk4OTQsImV4cCI6MjA5MjEwNTg5NH0.kw8jhS-YErCJgDVkSDj6zBrJK3ytLnFS-2f0YR9D6hw"
+    url = os.getenv('SUPABASE_URL')
+    key = os.getenv('SUPABASE_KEY')
     client = create_client(url, key)
     
     try:
@@ -227,13 +227,20 @@ def verify_documents():
     if not auth_id:
         return jsonify({'status': 'error', 'error': 'auth_id required. Signup first.'}), 400
 
-    if 'aadhaar' not in request.files:
-        return jsonify({'status': 'error', 'error': 'No aadhaar file'}), 400
+    # Accept file under 'file', 'aadhaar', or any uploaded file key
+    uploaded_file = (
+        request.files.get('file') or
+        request.files.get('aadhaar') or
+        next(iter(request.files.values()), None)
+    )
 
-    aadhaar_file = request.files['aadhaar']
+    if not uploaded_file or uploaded_file.filename == '':
+        return jsonify({'status': 'error', 'error': 'No file provided'}), 400
 
-    if aadhaar_file.filename == '':
-        return jsonify({'status': 'error', 'error': 'No aadhaar file selected'}), 400
+    # doc_type hint from caller (e.g. 'aadhaar', 'driving_license', 'photo', 'signature')
+    doc_type_hint = (request.form.get('doc_type') or '').lower().replace(' ', '_')
+
+    aadhaar_file = uploaded_file
 
     filename = aadhaar_file.filename
     ext = Path(filename).suffix[1:].lower()
@@ -372,26 +379,36 @@ def verify_documents():
             })
         
         elif document_type in ["pan_card", "passport", "driving_license"]:
-            # For other document types, return info but don't process yet
+            # Extract data using generic prompt for these supported doc types
+            from helpers import OTHER_DOC_PROMPT
+            try:
+                result = run_vlm(OTHER_DOC_PROMPT, file_bytes, filename)
+            except Exception:
+                result = {}
             return jsonify({
-                'status': 'unsupported_document',
+                'status': 'extracted_for_verification',
                 'document_type': document_type,
-                'message': f'Document type "{document_type}" detected but processing not implemented yet',
+                'message': f'📋 {document_type.replace("_", " ").title()} processed successfully.',
+                'extracted_fields': result,
+                'all_extracted_data': result,
                 'quality_score': round(quality_score, 2),
                 'doc_type_info': doc_type_result,
-                'suggestion': 'Please upload an Aadhaar card for field extraction or a profile photo for photo validation'
-            }), 400
+                'requires_user_confirmation': True,
+            })
         
         else:
-            # Unknown or unsupported document type
+            # Unknown or unsupported document type — return what we have instead of 400
             return jsonify({
-                'status': 'unknown_document',
-                'document_type': document_type,
-                'message': 'Could not identify document type. Please upload a clear Aadhaar card or profile photo.',
+                'status': 'extracted_for_verification',
+                'document_type': document_type or 'unknown',
+                'message': 'Document processed. Please review and confirm the information.',
+                'extracted_fields': {},
+                'all_extracted_data': {},
                 'quality_score': round(quality_score, 2),
                 'doc_type_info': doc_type_result,
-                'is_human_face': is_human_face
-            }), 400
+                'is_human_face': is_human_face,
+                'requires_user_confirmation': True,
+            })
 
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500

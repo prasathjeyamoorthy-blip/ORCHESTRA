@@ -1,0 +1,67 @@
+# User data - NEVER commit
+data.json
+payment_link.json
+payment_page_*.png
+
+# Document files - contain personal info
+jphoto.jpeg
+jsign.jpeg
+jaadhar*.pdf
+jaadhar*.jpeg
+jbirthcert*.pdf
+jbirthcert*.jpeg
+
+# Temporary captcha files
+captcha_audio.mp3
+captcha_audio.wav
+
+# Diagnostic files
+diagnostic_*.png
+diagnostic_*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.backup

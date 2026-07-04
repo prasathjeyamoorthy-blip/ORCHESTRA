@@ -7,11 +7,14 @@ import json
 import time
 import logging
 from pdf2image import convert_from_bytes
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+POPPLER_PATH = os.getenv("POPPLER_PATH", r"C:\poppler-25.12.0\Library\bin")
 
 # -----------------------------------
 # BYTES → BASE64 (NO TEMP FILE)
@@ -115,29 +118,6 @@ def validate_profile_photo(file_bytes: bytes, filename: str) -> dict:
     """Validate profile photo quality and suitability."""
     return run_vlm(PROFILE_PHOTO_PROMPT, file_bytes, filename)
 
-'''AADHAAR_PROMPT = """
-Extract ONLY these fields from Aadhaar image as JSON:
-
-{
-  "aadhar_number": "12 digits or masked",
-  "name": "Full name",
-  "first_name": "First name",
-  "last_name": "Last name", 
-  "middle_name": "Middle name or null",
-  "father_name": "Full father name",
-  "father_first_name": "Father first name",
-  "father_middle_name": "Father middle name or null",
-  "father_last_name": "Father last name",
-  "mobile_number": "10 digits or null",
-  "state": "State name",
-  "city": "City or null",
-  "gender": "Male/Female/Transgender or null",
-  "dob": "DD/MM/YYYY or null",
-  "confidence": "high/medium/low"
-}
-
-Rules: Raw JSON only. Null for missing. No extra text.
-"""'''
 
 # Document Type Detection Prompt
 DOCUMENT_TYPE_PROMPT = """
@@ -246,4 +226,29 @@ Rules:
 - Check for single clear human face, good lighting, proper visibility
 - List any quality issues that would make it unsuitable
 - Output STRICT JSON only (no text, no markdown)
+"""
+
+OTHER_DOC_PROMPT = """
+You are a document extraction assistant. Extract all visible text fields from this document.
+
+Return a JSON object with the fields you can see, such as:
+{
+  "document_type": "detected type (e.g. driving_license, pan_card, passport, birth_certificate, etc.)",
+  "name": "full name if visible",
+  "dob": "date of birth in DD/MM/YYYY format if visible",
+  "doc_number": "document number/ID if visible",
+  "issue_date": "issue date if visible",
+  "expiry_date": "expiry date if visible",
+  "address": "full address if visible",
+  "state": "state if visible",
+  "gender": "Male/Female if visible",
+  "confidence": "high/medium/low",
+  "raw_fields": {}
+}
+
+Rules:
+- Extract only what is clearly visible
+- Use null for missing fields
+- Return ONLY raw JSON, no markdown, no backticks
+- Put any additional fields you find in raw_fields
 """

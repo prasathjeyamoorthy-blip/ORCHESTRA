@@ -242,7 +242,8 @@ class FlowManager:
             if doc not in self.state["covered_categories"]
         ]
 
-        if not self.state["pending_docs"] and self.state["current_step"] == "documents":
+        # Advance step when all REQUIRED documents are collected (optional ones can be skipped)
+        if self.all_required_docs_collected() and self.state["current_step"] == "documents":
             self.advance_step()
 
         self.save()
@@ -255,6 +256,20 @@ class FlowManager:
             for k, v in docs.items()
             if k in self.state["pending_docs"]
         ]
+    
+    def get_required_pending_docs(self) -> list[dict]:
+        """Get only required pending documents (excluding optional ones)."""
+        service = get_service(self.state["service_id"])
+        docs    = service.get("documents", {})
+        return [
+            {"key": k, **v}
+            for k, v in docs.items()
+            if k in self.state["pending_docs"] and not v.get("optional", False)
+        ]
+    
+    def all_required_docs_collected(self) -> bool:
+        """Check if all REQUIRED documents have been collected (optional ones can be skipped)."""
+        return len(self.get_required_pending_docs()) == 0
 
     def get_collected_docs(self) -> list:
         return self.state["collected_docs"]

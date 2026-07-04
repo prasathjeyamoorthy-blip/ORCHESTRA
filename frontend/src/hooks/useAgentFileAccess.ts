@@ -97,6 +97,7 @@ export function useAgentFileAccess() {
       form.append("doc_type", request.docType);
       if (request.sessionId) form.append("session_id", request.sessionId);
       if (request.message)   form.append("message",    request.message);
+      if (user?.id)          form.append("user_id",    user.id);
 
       // Only call RAG if we have a session — otherwise just confirm encrypted storage
       if (!request.sessionId) {

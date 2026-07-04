@@ -12,15 +12,21 @@ SERVICES = {
                 "options": ["Aadhaar Card (front & back scan or photo)"],
                 "count": 1,
             },
-            "driving_license": {
-                "label": "Driving License",
-                "options": ["Valid Driving License (front side)"],
-                "count": 1,
-            },
             "photograph": {
                 "label": "Applicant Photograph",
                 "options": ["Recent passport-size photo (white background, no sunglasses)"],
                 "count": 1,
+            },
+            "signature": {
+                "label": "Applicant Signature",
+                "options": ["Signature on white paper (scanned or photo)"],
+                "count": 1,
+            },
+            "driving_license": {
+                "label": "Driving License",
+                "options": ["Valid Driving License (front side) - Optional, used as age proof"],
+                "count": 1,
+                "optional": True,
             },
         },
         # No smart rules — all 3 docs are mandatory and distinct

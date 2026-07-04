@@ -160,7 +160,10 @@ def prefill_flow_from_profile(user_id: str, flow_state: Dict[str, Any]) -> Dict[
         print(f"[user_profile] No profile found for user {user_id}")
         return flow_state
     
-    # Prefill personal details (only if not already set)
+    # Prefill personal details only (not application preferences).
+    # Prefilling submission_mode / delivery_mode / aadhaar_photo / etc. into an
+    # active flow causes advance_step() to skip those questions and jump straight
+    # to the documents step — the user never gets asked them.
     if not flow_state.get("full_name") and profile.get("full_name"):
         flow_state["full_name"] = profile["full_name"]
         print(f"[user_profile] Prefilled full_name: {profile['full_name']}")
@@ -169,6 +172,10 @@ def prefill_flow_from_profile(user_id: str, flow_state: Dict[str, Any]) -> Dict[
         flow_state["mother_name"] = profile["mother_name"]
         print(f"[user_profile] Prefilled mother_name: {profile['mother_name']}")
     
+    if not flow_state.get("grandfather_name") and profile.get("grandfather_name"):
+        flow_state["grandfather_name"] = profile["grandfather_name"]
+        print(f"[user_profile] Prefilled grandfather_name: {profile['grandfather_name']}")
+
     if not flow_state.get("email") and profile.get("email"):
         flow_state["email"] = profile["email"]
         flow_state["email_source"] = "profile"
@@ -181,21 +188,8 @@ def prefill_flow_from_profile(user_id: str, flow_state: Dict[str, Any]) -> Dict[
     if not flow_state.get("salary") and profile.get("annual_income"):
         flow_state["salary"] = profile["annual_income"]
         print(f"[user_profile] Prefilled salary: {profile['annual_income']}")
-    
-    # Prefill PAN preferences (only if not already set)
-    pan_prefs = profile.get("pan_preferences", {})
-    if isinstance(pan_prefs, str):
-        try:
-            pan_prefs = json.loads(pan_prefs)
-        except:
-            pan_prefs = {}
 
-    for key, value in pan_prefs.items():
-        # Use `is not None` so False booleans (aadhaar_photo=False, rep_assessee=False) are kept
-        if value is not None and flow_state.get(key) is None:
-            flow_state[key] = value
-            print(f"[user_profile] Prefilled {key}: {value}")
-
-    print(f"[user_profile] Prefill complete. Flow state keys: {list(flow_state.keys())}")
-    print(f"[user_profile] PAN preferences loaded: applicant_type={flow_state.get('applicant_type')}, submission_mode={flow_state.get('submission_mode')}, delivery_mode={flow_state.get('delivery_mode')}")
-    return flow_state
+    # NOTE: pan_preferences (submission_mode, delivery_mode, aadhaar_photo, etc.)
+    # are intentionally NOT prefilled here. They are asked explicitly each session
+    # via the bulk-review / saved-preferences prompt so the user can change them.
+    # Silently loading them would skip the questions and send the user to documents.

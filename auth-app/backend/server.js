@@ -175,6 +175,82 @@ app.post('/api/complete_document', verifyToken, async (req, res) => {
   }
 });
 
+// ── Direct upload to pan-rag (with user_id injection) ────────────────────────
+app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => {
+  try {
+    const formData = new FormData()
+    if (req.body.session_id) formData.append('session_id', req.body.session_id)
+    if (req.body.doc_type)   formData.append('doc_type',   req.body.doc_type)
+    if (req.body.message)    formData.append('message',    req.body.message)
+    // Always inject the authenticated user ID
+    formData.append('user_id', req.user.id)
+    if (req.file) {
+      formData.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      })
+    }
+    const ragRes = await fetch(`${process.env.RAG_URL || 'http://localhost:8000'}/api/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    const result = await ragRes.json()
+    res.status(ragRes.status).json(result)
+  } catch (error) {
+    console.error('[upload] Error:', error.message)
+    res.status(502).json({ status: 'error', message: 'Upload service unavailable.' })
+  }
+})
+
+// ── FINALIZE APPLICATION - Integration Orchestrator ───────────────────────────
+app.post('/api/finalize-application', verifyToken, async (req, res) => {
+  try {
+    const { session_id, trigger_automation } = req.body;
+    
+    if (!session_id) {
+      return res.status(400).json({ 
+        status: 'error',
+        error: 'session_id is required' 
+      });
+    }
+    
+    console.log(`[finalize] Starting finalization for user ${req.user.id}, session ${session_id}`);
+    
+    // Forward to pan-rag service
+    const response = await fetch(`${process.env.RAG_URL}/api/finalize-application`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id,
+        user_id: req.user.id,
+        trigger_automation: trigger_automation || false,
+      }),
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok) {
+      console.log(`[finalize] Success for user ${req.user.id}, automation: ${result.automation_triggered}`);
+      res.json(result);
+    } else {
+      console.error(`[finalize] Failed: ${result.detail || result.message}`);
+      res.status(response.status).json({
+        status: 'error',
+        message: result.detail || result.message || 'Finalization failed',
+      });
+    }
+  } catch (error) {
+    console.error('[finalize] Error:', error.message);
+    res.status(502).json({ 
+      status: 'error',
+      message: 'Application finalization service unavailable. Please try again.',
+      error: error.message
+    });
+  }
+});
+
 app.listen(process.env.PORT, () =>
   console.log(`Server running on port ${process.env.PORT}`)
 );

@@ -3,8 +3,11 @@ import numpy as np
 from PIL import Image
 from pdf2image import convert_from_bytes
 import io
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+POPPLER_PATH = os.getenv("POPPLER_PATH", r"C:\poppler-25.12.0\Library\bin")
 
 # -----------------------------------
 # LOAD IMAGE FROM MEMORY
@@ -105,11 +108,9 @@ def enhance_image(image):
 # EXTRACTION (HOOK YOUR NIM HERE)
 # -----------------------------------
 def extract_text(image):
-    # TODO: Replace with NVIDIA NIM call
-    return {
-        "name": "extracted_name",
-        "aadhar": "xxxx xxxx xxxx"
-    }
+    # Actual extraction is done by the VLM in app.py via run_vlm()
+    # This function is kept for pipeline compatibility but is not used for real extraction
+    return {}
 
 
 # -----------------------------------
@@ -130,21 +131,7 @@ def process_document(file_bytes, filename):
             "message": "Low quality image"
         }
 
-    cropped = detect_document(image)
-    enhanced = enhance_image(cropped)
-    extracted = extract_text(enhanced)
-
     return {
         "status": "processed",
         "quality_score": round(quality_score, 2),
-        "data": extracted
     }
-
-# -----------------------------------
-# RUN
-# -----------------------------------
-if __name__ == "__main__":
-    path = r"C:/aws_residence/ORCHESTRA/ORCHESTRA/DocumentUploadAgent/uploads/daniel_aadhar.pdf"
-
-    output = process_document(path)
-    print(output)

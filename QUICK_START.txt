@@ -1,0 +1,205 @@
+═══════════════════════════════════════════════════════════════════════════════
+                         PAN APPLICATION - QUICK START
+═══════════════════════════════════════════════════════════════════════════════
+
+▶ STEP 1: START SERVICES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Option A: Automatic (Recommended)
+    Double-click: start_all_services.bat
+    Wait 10 seconds
+
+Option B: Manual
+    Terminal 1:  cd pan_verification && .venv\Scripts\activate && python app.py
+    Terminal 2:  cd pan-rag && .venv\Scripts\activate && uvicorn api.main:app --reload --port 8000
+    Terminal 3:  cd auth-app\backend && npm run dev
+    Terminal 4:  cd frontend && npm run dev
+
+
+▶ STEP 2: USE FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    1. Open: http://localhost:5173
+    2. Login/Create account
+    3. Chat: "I want to apply for PAN"
+    4. Upload documents:
+       - Aadhaar PDF
+       - Profile photo JPG
+       - Signature JPG
+       - Driving license PDF (optional)
+    5. Answer questions (name, email, income, etc.)
+    6. Confirm details
+
+
+▶ STEP 3: TEST FINALIZE (PREPARE DATA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Get session ID from browser (F12 → Console):
+    localStorage.getItem('session_id')
+
+Get JWT token:
+    localStorage.getItem('token')
+
+Test finalize (without automation):
+    curl -X POST http://localhost:4000/api/finalize-application ^
+      -H "Content-Type: application/json" ^
+      -H "Authorization: Bearer YOUR_TOKEN" ^
+      -d "{\"session_id\":\"YOUR_SESSION_ID\",\"trigger_automation\":false}"
+
+Expected: Status 200 with data_prepared object
+
+
+▶ STEP 4: REVIEW DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Launch Tkinter review app:
+    cd automation_agent
+    python review_data.py
+
+Verify:
+    ✓ All 30 fields shown
+    ✓ Name split correctly (Anand R Ajaanand → first=Ajaanand, middle=R, last=Anand)
+    ✓ Files paths present
+    ✓ No critical fields empty
+
+
+▶ STEP 5: APPROVE & START AUTOMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In review app:
+    Click: "✅ Approve & Start Automation"
+    Confirm dialog
+    
+Watch browser:
+    - Chrome opens (VISIBLE)
+    - NSDL form fills
+    - reCAPTCHA solves (may need manual click)
+    - Documents upload
+    - Application submits
+    - Payment page captured
+
+
+▶ STEP 6: CHECK RESULTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Files created:
+    automation_agent\data.json          ← Application data (30 fields)
+    automation_agent\docs\*             ← Copied documents
+    automation_agent\payment_link.json  ← Payment URL
+    automation_agent\payment_page.png   ← Screenshot
+
+View payment link:
+    type automation_agent\payment_link.json
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                              NAME SPLITTING LOGIC
+═══════════════════════════════════════════════════════════════════════════════
+
+Single name:           "Akash"              → first="", middle="", last="Akash"
+Two names:             "Akash Raja"         → first="Raja", middle="", last="Akash"
+Three with initial:    "Anand R Ajaanand"   → first="Ajaanand", middle="R", last="Anand"
+Three no initial:      "John Michael Doe"   → first="John", middle="Michael", last="Doe"
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                             DOCUMENT REQUIREMENTS
+═══════════════════════════════════════════════════════════════════════════════
+
+Required (3):
+    1. Aadhaar PDF
+    2. Profile Photo JPG/JPEG
+    3. Signature JPG/JPEG
+
+Optional (1):
+    4. Driving License PDF (age proof)
+
+NOT YET SUPPORTED:
+    ✗ Birth Certificate
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                                TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════════
+
+Service won't start:
+    → Check port not in use: netstat -ano | findstr :8000
+
+Module not found:
+    → Activate venv: cd service && .venv\Scripts\activate
+
+Document agent offline:
+    → Start pan_verification first (Terminal 1)
+
+Review app won't open:
+    → Check tkinter installed: python -m tkinter
+
+Browser doesn't open:
+    → Install Chromium: cd automation_agent && playwright install chromium
+
+reCAPTCHA fails:
+    → Click checkbox manually when browser pauses
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                              VERIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+Before Automation:
+    □ All 4 services running
+    □ Documents uploaded (3-4 docs)
+    □ data.json created (30 fields)
+    □ Files in automation_agent/docs/
+    □ Name split correctly
+    □ Review app shows data
+
+After Automation:
+    □ Browser ran visibly
+    □ Form filled automatically
+    □ Application submitted
+    □ payment_link.json exists
+    □ Payment URL valid
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                                  QUICK COMMANDS
+═══════════════════════════════════════════════════════════════════════════════
+
+# Check data.json content
+type automation_agent\data.json | python -m json.tool
+
+# Verify 30 fields
+python -c "import json; print(len(json.load(open('automation_agent/data.json'))))"
+
+# Test name splitting
+python test_name_logic.py
+
+# Check files copied
+dir automation_agent\docs\
+
+# View payment link
+type automation_agent\payment_link.json
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                                   PORTS USED
+═══════════════════════════════════════════════════════════════════════════════
+
+5000  pan_verification   (Flask)
+8000  pan-rag            (FastAPI)
+4000  auth-app backend   (Node.js)
+5173  frontend           (Vite/React)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                               FOR MORE DETAILS
+═══════════════════════════════════════════════════════════════════════════════
+
+See: TESTING_GUIDE.md  (Complete step-by-step guide)
+See: READY_TO_TEST.md  (What's been configured)
+See: NAME_LOGIC_AND_DOCS_UPDATE.md  (Technical details)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                                READY TO TEST! 🚀
+═══════════════════════════════════════════════════════════════════════════════

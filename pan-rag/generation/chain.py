@@ -798,7 +798,7 @@ class RAGChain:
 
         # ── 0a. Cancellation — close any open form/flow immediately ──
         from agent.receptionist import _is_cancellation
-        fm = FlowManager(session_id)
+        fm = FlowManager(session_id, user_id or "anonymous")
         flow_active = fm.has_active_flow()
 
         # Don't treat "no" as cancellation in steps where it's a valid answer
@@ -827,7 +827,7 @@ class RAGChain:
         # ── 0b. Document upload intent ────────────────────────────────
         # Don't intercept if user is answering a form step (e.g. "Upload scanned docs & eSign")
         if _is_upload_intent(question):
-            fm = FlowManager(session_id)
+            fm = FlowManager(session_id, user_id or "anonymous")
             _FORM_STEPS = {"submission_mode", "delivery_mode", "aadhaar_photo",
                            "source_of_income", "address_for_comm", "residential_status",
                            "rep_assessee", "details_collection", "confirmation"}
@@ -863,7 +863,7 @@ class RAGChain:
         # ── 0c. Numbered/option reply — route through normal flow, no panel ──
         _short_option = re.match(r'^(option\s*1|1|online|option\s*one)$', question.strip(), re.IGNORECASE)
         if _short_option and has_history:
-            fm = FlowManager(session_id)
+            fm = FlowManager(session_id, user_id or "anonymous")
             service_id = fm.state.get("service_id") if fm.has_active_flow() else None
             from agent.service_flows import get_service
             has_docs = bool(service_id and get_service(service_id).get("documents"))
@@ -942,10 +942,12 @@ class RAGChain:
                     "open_upload" : agent_response.get("open_upload", False),
                     "close_form"  : agent_response.get("close_form", False),
                     "form_data"   : agent_response.get("form_data"),
+                    "form_fields" : agent_response.get("form_fields"),
                     "options"     : agent_response.get("options"),
                     "confirm_action": agent_response.get("confirm_action", False),
                     "flow_confirmed": agent_response.get("flow_confirmed", False),
                     "confirmation_fields": agent_response.get("confirmation_fields"),
+                    "show_submit" : agent_response.get("show_submit", False),
                 }
             # agent returned None — flow cancelled, fall through to RAG
 
@@ -965,6 +967,7 @@ class RAGChain:
                     "followups"   : agent_response.get("followups", []),
                     "open_upload" : agent_response.get("open_upload", False),
                     "form_data"   : agent_response.get("form_data"),
+                    "form_fields" : agent_response.get("form_fields"),
                     "options"     : agent_response.get("options"),
                 }
             # No active flow — if last bot message was asking to upload,
@@ -1460,7 +1463,7 @@ class RAGChain:
         session_history = self.memory.get_session_history(session_id, user_id)
         has_history     = len(session_history) > 0
         intent          = detect_intent(question, session_history=session_history)
-        fm              = FlowManager(session_id)
+        fm              = FlowManager(session_id, user_id or "anonymous")
         flow_active     = fm.has_active_flow()
 
         # Paths that don't hit the LLM streaming path — delegate to run()
@@ -1585,12 +1588,14 @@ class RAGChain:
                 "followups"     : agent_response.get("followups", []),
                 "open_upload"   : agent_response.get("open_upload", False),
                 "form_data"     : agent_response.get("form_data"),
+                "form_fields"   : agent_response.get("form_fields"),
                 "options"       : agent_response.get("options"),
                 "confirm_action": agent_response.get("confirm_action", False),
                 "flow_confirmed": flow_confirmed,
                 "flow_data"     : flow_data,
-                "field_buttons" : agent_response.get("field_buttons"),  # Add field buttons for modification menu
+                "field_buttons" : agent_response.get("field_buttons"),
                 "confirmation_fields": agent_response.get("confirmation_fields"),
+                "show_submit"   : agent_response.get("show_submit", False),
             }
             yield _sse({"type": "meta", **result})
             yield _sse({"type": "token", "text": agent_response["answer"]})

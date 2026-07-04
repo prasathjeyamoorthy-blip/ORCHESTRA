@@ -764,12 +764,306 @@ function DetailsCard({ fields, language }) {
   )
 }
 
+// ── Inline text form for details_collection step ─────────────────────────
+function DetailsCollectionForm({ fields, onSubmit }) {
+  const [values, setValues] = React.useState(() =>
+    Object.fromEntries(fields.map(f => [f.key, '']))
+  )
+  const allFilled = fields.every(f => values[f.key]?.trim())
+
+  return (
+    <div className="mt-3 rounded-2xl border border-purple-500/20 bg-purple-500/[0.04] p-4 space-y-3">
+      <p className="text-[11px] text-purple-300/70 font-semibold uppercase tracking-widest">Personal Details</p>
+      <div className="space-y-2.5">
+        {fields.map(f => (
+          <div key={f.key} className="space-y-1">
+            <label className="text-xs text-white/50">{f.label}</label>
+            <input
+              type={f.type || 'text'}
+              placeholder={f.placeholder || ''}
+              value={values[f.key]}
+              onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter' && allFilled) onSubmit(values) }}
+              className="w-full bg-white/[0.05] border border-white/[0.10] rounded-xl px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-purple-500/60 transition-colors"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        disabled={!allFilled}
+        onClick={() => onSubmit(values)}
+        className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]
+          bg-purple-600/80 hover:bg-purple-600 border border-purple-500/40 text-white
+          disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        Submit Details →
+      </button>
+    </div>
+  )
+}
+
+// ── One-by-one document upload prompt ──────────────────────────────────────
+const DOC_SEQUENCE = [
+  { key: 'photograph',     label: 'Profile Photo',    hint: 'Passport-size photo, white background',       accept: '.jpg,.jpeg,.png' },
+  { key: 'signature',      label: 'Signature',         hint: 'Signature on white paper (scan or photo)',    accept: '.jpg,.jpeg,.png' },
+  { key: 'aadhaar',        label: 'Aadhaar Card',      hint: 'Aadhaar PDF or front+back scan',              accept: '.pdf,.jpg,.jpeg,.png' },
+  { key: 'driving_license',label: 'Driving License',   hint: 'Optional – used as age proof',               accept: '.pdf,.jpg,.jpeg,.png', optional: true },
+]
+
+function DocUploadPrompt({ sessionId, userId, currentDoc, uploadedDocs, onDocUploaded, onSkip }) {
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState(null)
+  const fileRef = React.useRef()
+
+  async function handleFile(file) {
+    if (!file) return
+    setBusy(true); setError(null)
+    try {
+      const form = new FormData()
+      form.append('session_id', sessionId || 'anonymous')
+      form.append('doc_type', currentDoc.key)
+      form.append('file', file)
+      if (userId) form.append('user_id', userId)
+
+      const res = await fetch('/api/upload', {
+        method: 'POST', body: form,
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+      const data = await res.json()
+      onDocUploaded(currentDoc.key, file.name, data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 space-y-3">
+      {/* Progress dots */}
+      <div className="flex items-center gap-2 mb-1">
+        {DOC_SEQUENCE.map(d => {
+          const done = uploadedDocs.includes(d.key)
+          const active = d.key === currentDoc.key
+          return (
+            <div key={d.key}
+              className={`h-1.5 rounded-full transition-all ${
+                done ? 'w-6 bg-emerald-400' :
+                active ? 'w-6 bg-purple-400' :
+                'w-2 bg-white/15'
+              }`} />
+          )
+        })}
+        <span className="text-[10px] text-white/25 ml-1">{uploadedDocs.length}/{DOC_SEQUENCE.filter(d => !d.optional).length} required</span>
+      </div>
+
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-white">{currentDoc.label}</p>
+          <p className="text-xs text-white/40 mt-0.5">{currentDoc.hint}</p>
+          {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+        </div>
+        {currentDoc.optional && (
+          <button onClick={onSkip}
+            className="text-xs text-white/30 hover:text-white/60 transition-colors px-2 py-1 rounded-lg border border-white/10 hover:border-white/20">
+            Skip
+          </button>
+        )}
+      </div>
+
+      <input ref={fileRef} type="file" accept={currentDoc.accept} className="hidden"
+        onChange={e => handleFile(e.target.files?.[0])} />
+
+      <button
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]
+          bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.10] text-white/80 hover:text-white
+          disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {busy
+          ? <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Uploading…</>
+          : <>📎 Upload {currentDoc.label}</>
+        }
+      </button>
+    </div>
+  )
+}
+
+// ── Final submit button (shown at summary step) ────────────────────────────
+function SubmitApplicationButton({ sessionId, userId, language, onPaymentLink }) {
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState(null)
+  const [done, setDone] = React.useState(false)
+  const isTamil = language === 'ta'
+
+  async function handleSubmit() {
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch('/api/finalize-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+          trigger_automation: true,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || data.detail || 'Submission failed')
+      setDone(true)
+      onPaymentLink(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (done) return null
+
+  return (
+    <div className="mt-4 space-y-2">
+      {error && (
+        <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+          ⚠️ {error}
+        </div>
+      )}
+      <button
+        onClick={handleSubmit}
+        disabled={loading}
+        className="w-full py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.98]
+          bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
+          border border-emerald-500/40 text-white shadow-lg shadow-emerald-900/30
+          disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ fontFamily: 'Archivo, sans-serif' }}
+      >
+        {loading
+          ? <span className="flex items-center justify-center gap-2">
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {isTamil ? 'சமர்ப்பிக்கிறது…' : 'Submitting Application…'}
+            </span>
+          : (isTamil ? '🚀 விண்ணப்பத்தை சமர்ப்பி' : '🚀 Proceed & Submit Application')
+        }
+      </button>
+      <p className="text-[10px] text-white/25 text-center">
+        {isTamil
+          ? 'NSDL போர்ட்டலில் தானாகவே நிரப்பப்படும் — பணம் செலுத்தும் இணைப்பு திரும்பும்'
+          : 'Auto-fills the NSDL portal and returns your payment link'}
+      </p>
+    </div>
+  )
+}
+
+// ── Final review panel with Proceed button ─────────────────────────────────
+function FinalReviewPanel({ sessionId, userId, confirmationFields, uploadedDocs, language, onPaymentLink }) {
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState(null)
+
+  async function handleProceed() {
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch('/api/finalize-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+          trigger_automation: true,
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Finalize failed')
+      onPaymentLink(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const isTamil = language === 'ta'
+
+  return (
+    <div className="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <p className="text-xs text-emerald-300/80 font-semibold uppercase tracking-widest">
+          {isTamil ? 'இறுதி சமர்ப்பிப்பு' : 'Ready to Submit'}
+        </p>
+      </div>
+
+      {/* Uploaded docs summary */}
+      <div className="space-y-1">
+        <p className="text-[11px] text-white/40">Documents uploaded:</p>
+        <div className="flex flex-wrap gap-2">
+          {DOC_SEQUENCE.map(d => {
+            const done = uploadedDocs.includes(d.key)
+            if (!done && d.optional) return null
+            return (
+              <span key={d.key}
+                className={`text-[11px] px-2.5 py-1 rounded-full border font-medium ${
+                  done
+                    ? 'text-emerald-300 bg-emerald-400/10 border-emerald-400/25'
+                    : 'text-red-300/60 bg-red-400/5 border-red-400/15'
+                }`}>
+                {done ? '✓' : '✗'} {d.label}
+              </span>
+            )
+          })}
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      <button
+        onClick={handleProceed}
+        disabled={loading}
+        className="w-full py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.98]
+          bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
+          border border-emerald-500/40 text-white shadow-lg shadow-emerald-900/30
+          disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ fontFamily: 'Archivo, sans-serif' }}
+      >
+        {loading
+          ? <span className="flex items-center justify-center gap-2">
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Submitting Application…
+            </span>
+          : (isTamil ? '🚀 விண்ணப்பத்தை சமர்ப்பி' : '🚀 Proceed & Submit Application')
+        }
+      </button>
+
+      <p className="text-[10px] text-white/25 text-center">
+        {isTamil
+          ? 'இது NSDL போர்ட்டலில் தானாகவே படிவத்தை நிரப்பும்'
+          : 'This will auto-fill the NSDL portal and return your payment link'}
+      </p>
+    </div>
+  )
+}
+
 function Message({ msg, onFollowup, language }) {
   const isUser = msg.role === 'user'
   const [usedFollowup, setUsedFollowup] = React.useState(null)
   const [checkedOptions, setCheckedOptions] = React.useState([])
   const [optionSubmitted, setOptionSubmitted] = React.useState(false)
   const [confirmUsed, setConfirmUsed] = React.useState(null) // 'yes' | 'no'
+  // Doc-by-doc upload state (for messages at documents step)
+  const [uploadedDocs, setUploadedDocs] = React.useState([])
+  const [currentDocIdx, setCurrentDocIdx] = React.useState(0)
+  const [showFinalReview, setShowFinalReview] = React.useState(false)
   if (!msg.content && !msg.streaming) return null
 
   if (isUser) {
@@ -842,14 +1136,42 @@ function Message({ msg, onFollowup, language }) {
               qualityScore={msg.missing_fields_form.quality_score}
               onComplete={(result) => {
                 setOptionSubmitted(true)
-                onFollowup(`Document completion successful! ${result.message || ''}`, msg.id)
+                // Silently advance the flow — don't send the completion text as a user message
+                // as it confuses the AI. Send a plain "continue" instead.
+                onFollowup("continue", msg.id)
               }}
               onCancel={() => {
                 setOptionSubmitted(true)
-                onFollowup("I'll provide the details manually later.", msg.id)
+                onFollowup("continue", msg.id)
               }}
             />
           </div>
+        )}
+
+        {/* ── Details Collection Form — inline text inputs for personal details ── */}
+        {!msg.streaming && msg.form_fields && msg.form_fields.length > 0 && !optionSubmitted && (
+          <DetailsCollectionForm
+            fields={msg.form_fields}
+            onSubmit={(values) => {
+              setOptionSubmitted(true)
+              // Build a natural language message with all values
+              const parts = Object.entries(values)
+                .filter(([, v]) => v && v.trim())
+                .map(([k, v]) => {
+                  const labels = {
+                    full_name: 'my name is',
+                    grandfather_name: "grandfather's name is",
+                    mother_name: "mother's name is",
+                    email: 'email is',
+                    salary: 'annual income is',
+                  }
+                  return `${labels[k] || k} ${v.trim()}`
+                })
+              if (parts.length > 0) {
+                onFollowup(parts.join(', '), msg.id)
+              }
+            }}
+          />
         )}
 
         {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
@@ -992,8 +1314,76 @@ function Message({ msg, onFollowup, language }) {
         )}
 
 
+        {/* ── Final submit button at summary step ── */}
+        {!msg.streaming && msg.show_submit && (
+          <SubmitApplicationButton
+            sessionId={msg._sessionId}
+            userId={msg._userId}
+            language={language}
+            onPaymentLink={(data) => {
+              const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
+              const successMsg = paymentUrl
+                ? `✅ Application submitted successfully!\n\n💳 **[Click here to pay →](${paymentUrl})**\n\nYour acknowledgment number will be emailed to you after payment.`
+                : `✅ Application submitted! The browser automation is running.\n\n${data?.message || ''}`
+              onFollowup(`__payment_result__${successMsg}`, msg.id)
+            }}
+          />
+        )}
+
         {!msg.streaming && msg.elapsed_ms != null && (
           <p className="text-[10px] text-neutral-600 pt-1">{msg.elapsed_ms}ms</p>
+        )}
+
+        {/* ── Doc-by-doc upload (documents step) ── */}
+        {!msg.streaming && msg.open_upload && !showFinalReview && (() => {
+          const currentDoc = DOC_SEQUENCE[currentDocIdx]
+          if (!currentDoc) return null
+          return (
+            <DocUploadPrompt
+              key={`${msg.id}-${currentDocIdx}`}
+              sessionId={msg._sessionId}
+              userId={msg._userId}
+              currentDoc={currentDoc}
+              uploadedDocs={uploadedDocs}
+              onDocUploaded={(docKey, filename, data) => {
+                const next = [...uploadedDocs, docKey]
+                setUploadedDocs(next)
+                // Advance to next doc or show final review
+                const nextIdx = currentDocIdx + 1
+                if (nextIdx < DOC_SEQUENCE.length) {
+                  setCurrentDocIdx(nextIdx)
+                } else {
+                  setShowFinalReview(true)
+                }
+              }}
+              onSkip={() => {
+                const nextIdx = currentDocIdx + 1
+                if (nextIdx < DOC_SEQUENCE.length) {
+                  setCurrentDocIdx(nextIdx)
+                } else {
+                  setShowFinalReview(true)
+                }
+              }}
+            />
+          )
+        })()}
+
+        {/* ── Final review + Proceed button ── */}
+        {!msg.streaming && (showFinalReview || (msg.open_upload && uploadedDocs.length >= 3)) && (
+          <FinalReviewPanel
+            sessionId={msg._sessionId}
+            userId={msg._userId}
+            confirmationFields={msg._confirmationFields}
+            uploadedDocs={uploadedDocs}
+            language={language}
+            onPaymentLink={(data) => {
+              const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
+              const successMsg = paymentUrl
+                ? `✅ Application submitted!\n\n💳 **Payment Link:** [Click here to pay](${paymentUrl})\n\nYour acknowledgment number will be available after payment.`
+                : `✅ Application data prepared! The browser automation is running — payment link will appear shortly.\n\n${data?.message || ''}`
+              onFollowup(`__payment_result__${successMsg}`, msg.id)
+            }}
+          />
         )}
       </div>
     </div>
@@ -1575,7 +1965,7 @@ export default function App() {
               const freshFields = event.confirmation_fields || null
               return prev.map(m => {
                 if (m.id === botId) {
-                  return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields, missing_fields_form: event.missing_fields_form }
+                  return { ...m, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload, options: event.options || null, confirm_action: event.confirm_action || false, guided: isGuided, confirmation_fields: freshFields, missing_fields_form: event.missing_fields_form, form_fields: event.form_fields || null, show_submit: event.show_submit || false, _sessionId: sessionId, _userId: user?.id, _confirmationFields: freshFields }
                 }
                 if (freshFields && m.confirmation_fields) {
                   return { ...m, confirmation_fields: freshFields }
@@ -1708,14 +2098,17 @@ export default function App() {
       const name = filename.toLowerCase()
       if (name.includes('aadhaar') || name.includes('aadhar')) return 'aadhaar'
       if (name.includes('driving') || name.includes('license') || name.includes('licence') || name.includes('dl')) return 'driving_license'
-      if (name.includes('photo') || name.includes('photograph') || name.includes('pic') || name.includes('selfie')) return 'photograph'
+      if (name.includes('photo') || name.includes('photograph') || name.includes('pic') || name.includes('selfie') || name.includes('image')) return 'profile_photo'
+      if (name.includes('sign') || name.includes('signature')) return 'signature'
       if (messageText) {
         const msg = messageText.toLowerCase()
         if (msg.includes('aadhaar') || msg.includes('aadhar')) return 'aadhaar'
         if (msg.includes('driving') || msg.includes('license') || msg.includes('dl')) return 'driving_license'
-        if (msg.includes('photo') || msg.includes('photograph')) return 'photograph'
+        if (msg.includes('photo') || msg.includes('photograph') || msg.includes('pic')) return 'profile_photo'
+        if (msg.includes('sign') || msg.includes('signature')) return 'signature'
       }
-      return 'aadhaar'
+      // Default to unknown - let backend detect
+      return 'unknown'
     }
 
     let allOk = true
@@ -1946,8 +2339,6 @@ export default function App() {
                       <Message key={msg.id} msg={msg} language={language} onFollowup={(q, msgId) => {
                         // q can be a string or { command, display } object from Save All
                         if (q && typeof q === 'object' && q.command) {
-                          // Patch the source message's confirmation_fields with the saved values
-                          // so if the panel re-mounts it shows the updated data, not stale fields
                           if (msgId && q.updatedFields) {
                             setMessages(prev => prev.map(m =>
                               m.id === msgId
@@ -1956,6 +2347,14 @@ export default function App() {
                             ))
                           }
                           sendMessage(q.command, { displayText: q.display })
+                        } else if (typeof q === 'string' && q.startsWith('__payment_result__')) {
+                          // Payment result — show directly as a bot message, don't send to AI
+                          const resultText = q.replace('__payment_result__', '')
+                          setMessages(prev => [...prev, {
+                            id: nextId(), role: 'bot',
+                            content: resultText,
+                            sources: [], followups: [],
+                          }])
                         } else {
                           if (msgId) setMessages(prev => prev.map(m => m.id === msgId ? { ...m, followupUsed: true } : m))
                           sendMessage(q)

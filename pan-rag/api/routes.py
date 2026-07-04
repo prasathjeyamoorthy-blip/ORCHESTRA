@@ -535,20 +535,17 @@ async def upload_document(
     doc_type: str = Form(...),
     file: UploadFile = File(...),
     message: str = Form(default=""),
+    user_id: str = Form(default="anonymous"),
 ):
-    # Save file locally using {username}_{doctype} naming
+    # Save file locally with document type in filename
     dest = UPLOAD_DIR / session_id
     dest.mkdir(parents=True, exist_ok=True)
 
-    # Build stored filename: {username}_{doctype}.{ext}
-    from agent.flow_manager import FlowManager as _FM
-    _fm = _FM(session_id)
-    _username = (_fm.state.get("full_name") or "user").split()[0].lower()
-    import re as _re
-    _username = _re.sub(r'[^a-z0-9]', '', _username) or "user"
+    # Build temporary filename with original name to avoid conflicts
+    # Format: user_{original_name} (e.g., "user_photo.jpg", "user_aadhar.pdf")
     _ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    stored_filename = f"{_username}_{doc_type.lower().replace(' ', '_')}{_ext}"
-    file_path = dest / stored_filename
+    temp_filename = f"user_{file.filename}"
+    file_path = dest / temp_filename
 
     file_bytes = await file.read()
     with open(file_path, "wb") as f:
@@ -557,6 +554,9 @@ async def upload_document(
     # ── Forward to document upload agent for extraction + verification ──
     extraction_result = {}
     agent_error = None
+    detected_doc_type = doc_type  # Default to user-provided type
+    stored_filename = temp_filename  # Track the actual stored filename
+    
     try:
         # Generate a temporary auth_id for pan_verification compatibility
         # In future integration, this should come from authenticated user
@@ -565,14 +565,114 @@ async def upload_document(
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 DOC_AGENT_URL,
-                data={"auth_id": temp_auth_id},  # pan_verification expects auth_id
-                files={"aadhaar": (file.filename, file_bytes, file.content_type or "application/octet-stream")},  # pan_verification expects 'aadhaar' field
+                data={"auth_id": temp_auth_id, "doc_type": doc_type},
+                # Send under both 'aadhaar' (legacy) and 'file' so pan_verification accepts any doc type
+                files={
+                    "aadhaar": (file.filename, file_bytes, file.content_type or "application/octet-stream"),
+                    "file": (file.filename, file_bytes, file.content_type or "application/octet-stream"),
+                },
             )
         if response.status_code == 200:
             extraction_result = response.json()
             print(f"\n✅ Extraction result for [{doc_type}] session [{session_id}]:")
             import json as _json
             print(_json.dumps(extraction_result, indent=2, ensure_ascii=False))
+            
+            # Get the DETECTED document type from extraction (more reliable than user input)
+            # pan_verification returns document_type at top level OR inside doc_type_info
+            detected_type = (
+                extraction_result.get("document_type")
+                or extraction_result.get("doc_type_info", {}).get("document_type")
+                or extraction_result.get("all_extracted_data", {}).get("document_type")
+                or extraction_result.get("extracted", {}).get("document_type")
+                or ""
+            )
+            
+            # Get the VLM description to help disambiguate "other_document"
+            vlm_description = (
+                extraction_result.get("doc_type_info", {}).get("description", "")
+                or extraction_result.get("description", "")
+            ).lower()
+            
+            if detected_type and detected_type != "unknown":
+                # Normalize document type names to match service_flows.py expectations
+                # pan_verification returns: aadhaar_card, profile_photo, signature, driving_license
+                # service_flows expects: aadhaar, photograph, signature, driving_license
+                type_normalization = {
+                    "aadhaar_card": "aadhaar",
+                    "aadhaar": "aadhaar",
+                    "profile_photo": "photograph",
+                    "photograph": "photograph",
+                    "signature": "signature",
+                    "driving_license": "driving_license",
+                }
+                
+                # "other_document" fallback logic:
+                # VLMs can't reliably classify signatures — they often return other_document.
+                # 1. If VLM description mentions "signature" → treat as signature
+                # 2. If user explicitly said the doc_type is signature → trust it
+                # 3. If filename contains "sign" → treat as signature
+                if detected_type == "other_document":
+                    fname_lower = file.filename.lower()
+                    user_hint = doc_type.lower()
+                    if "signature" in vlm_description or "sign" in vlm_description:
+                        detected_doc_type = "signature"
+                        print(f"      ℹ️ VLM description mentions signature → overriding other_document to: signature")
+                    elif user_hint in ("signature", "sign"):
+                        detected_doc_type = "signature"
+                        print(f"      ℹ️ User doc_type hint is '{user_hint}' → overriding other_document to: signature")
+                    elif "sign" in fname_lower:
+                        detected_doc_type = "signature"
+                        print(f"      ℹ️ Filename contains 'sign' → overriding other_document to: signature")
+                    else:
+                        # Keep user-provided type if the VLM can't figure it out
+                        fallback = type_normalization.get(doc_type.lower(), doc_type.lower())
+                        if fallback and fallback != "unknown":
+                            detected_doc_type = fallback
+                            print(f"      ℹ️ other_document — falling back to user hint: {detected_doc_type}")
+                        else:
+                            detected_doc_type = detected_type
+                else:
+                    detected_doc_type = type_normalization.get(detected_type, detected_type)
+                    print(f"      ℹ️ Detected document type: {detected_type} → normalized to: {detected_doc_type} (user said: {doc_type})")
+            
+            # Rename file to match detected type
+            if detected_doc_type != doc_type or detected_doc_type != "unknown":
+                # Create unique filename: {detected_type}_{timestamp}.{ext}
+                import time
+                timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+                clean_detected = detected_doc_type.lower().replace(" ", "_").replace("-", "_")
+                new_filename = f"{clean_detected}_{timestamp}{_ext}"
+                new_path = dest / new_filename
+                
+                # Rename
+                import os
+                if file_path.exists():
+                    os.rename(file_path, new_path)
+                    stored_filename = new_filename
+                    file_path = new_path
+                    print(f"      ✓ Renamed file to: {stored_filename}")
+            
+            # Store extraction result in Redis for finalize-application to retrieve
+            # Use the DETECTED type for Redis key; store the richest available data
+            try:
+                from memory.memory_manager import MemoryManager
+                mm = MemoryManager()
+                # Prefer all_extracted_data (full fields), fall back to extracted_fields, then extracted
+                cache_data = (
+                    extraction_result.get("all_extracted_data")
+                    or extraction_result.get("extracted_fields")
+                    or extraction_result.get("extracted")
+                    or {}
+                )
+                mm._setex(
+                    f"extraction:{session_id}:{detected_doc_type}",
+                    60 * 60 * 24 * 7,
+                    _json.dumps(cache_data)
+                )
+                print(f"      ✓ Extraction result cached in Redis with key: extraction:{session_id}:{detected_doc_type}")
+            except Exception as cache_err:
+                print(f"      ⚠️ Could not cache extraction result: {cache_err}")
         else:
             agent_error = response.json().get("error", "Document agent returned an error")
             print(f"\n❌ Document agent error [{doc_type}]: {agent_error}")
@@ -591,14 +691,19 @@ async def upload_document(
             merge_form_fields(fm, message)
 
     # ── Update conversation flow ──
+    # Use the DETECTED document type (not user-provided) for flow tracking
     flow_result = handle_document_upload(
         session_id=session_id,
         filename=stored_filename,
-        doc_type=doc_type,
+        doc_type=detected_doc_type,
+        user_id=user_id,
     )
 
     # ── Build response ──
-    chat_message = flow_result["answer"]
+    # Show user what document type was detected
+    doc_type_display = detected_doc_type.replace("_", " ").title()
+    chat_message = f"📄 **{doc_type_display}** detected!\n\n" + flow_result["answer"]
+    
     if agent_error:
         chat_message += f"\n\n> ⚠️ {agent_error}"
     
@@ -624,6 +729,9 @@ async def upload_document(
 
     return {
         "filename": file.filename,
+        "stored_filename": stored_filename,  # Show the actual stored filename
+        "detected_doc_type": detected_doc_type,  # Show what was detected
+        "user_provided_doc_type": doc_type,  # Show what user said
         "session_id": session_id,
         "message": chat_message,
         "complete": flow_result.get("complete", False),
@@ -667,7 +775,7 @@ async def complete_document_with_missing_fields(request_data: dict):
             
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    "http://localhost:5000/api/complete_missing_fields",
+                    f"{DOC_AGENT_URL.replace('/api/verify', '')}/api/complete_missing_fields",
                     data=form_data
                 )
                 
@@ -711,4 +819,362 @@ async def complete_document_with_missing_fields(request_data: dict):
             
     except Exception as e:
         print(f"[complete_document] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  FINALIZE APPLICATION - INTEGRATION ORCHESTRATOR
+#  Collects all data and triggers automation_agent
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/finalize-application")
+async def finalize_application(request_data: dict):
+    """
+    Final integration endpoint that:
+    1. Collects FlowManager state (user chat responses)
+    2. Collects document extraction results (from pan_verification)
+    3. Merges all data into automation_agent schema
+    4. Copies files to automation_agent/docs/
+    5. Writes automation_agent/data.json
+    6. Triggers automation_agent/main.py
+    7. Returns payment URL to frontend
+    """
+    session_id = request_data.get("session_id")
+    user_id = request_data.get("user_id", "anonymous")
+    
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    try:
+        from agent.flow_manager import FlowManager
+        import shutil
+        from pathlib import Path
+        
+        print(f"\n{'='*80}")
+        print(f"FINALIZING APPLICATION - Session: {session_id}")
+        print(f"{'='*80}\n")
+        
+        # ── Step 1: Load FlowManager state ───────────────────────────────────
+        fm = FlowManager(session_id, user_id)
+        if not fm.has_active_flow():
+            raise HTTPException(
+                status_code=400,
+                detail="No active flow found. Please complete the application steps first."
+            )
+        
+        state = fm.state
+        print(f"[1/7] ✓ Loaded FlowManager state")
+        print(f"      Service: {state.get('service_id')}")
+        print(f"      Current step: {state.get('current_step')}")
+        print(f"      Documents collected: {len(state.get('collected_docs', []))}")
+        
+        # ── Step 2: Load document extraction results ─────────────────────────
+        # Documents are stored in storage/uploads/{session_id}/
+        upload_dir = UPLOAD_DIR / session_id
+        if not upload_dir.exists():
+            raise HTTPException(
+                status_code=400,
+                detail="No documents found. Please upload required documents first."
+            )
+        
+        # Collect all uploaded files
+        uploaded_files = list(upload_dir.glob("*"))
+        print(f"\n[2/7] ✓ Found {len(uploaded_files)} uploaded files")
+        for f in uploaded_files:
+            print(f"      - {f.name}")
+        
+        # Load extraction results from memory (stored during upload)
+        from memory.memory_manager import MemoryManager
+        mm = MemoryManager()
+        
+        # Collect extracted data for each document type
+        extraction_data = {}
+        for doc in state.get("collected_docs", []):
+            doc_type = doc.get("doc_type", "unknown")
+            filename = doc.get("filename", "")
+            
+            # Try to load extraction result from Redis
+            key = f"extraction:{session_id}:{doc_type}"
+            cached = mm._get(key)
+            if cached:
+                extraction_data[doc_type] = json.loads(cached)
+        
+        print(f"\n[3/7] ✓ Loaded extraction data for {len(extraction_data)} document types")
+        for doc_type in extraction_data.keys():
+            print(f"      - {doc_type}")
+        
+        # ── Step 3: Merge all data into automation_agent schema ──────────────
+        print(f"\n[4/7] ⚙️  Merging data into automation_agent schema...")
+        
+        # Helper function to split full name with South Indian initial logic
+        def split_name(full_name):
+            """
+            Split name following South Indian conventions:
+            
+            Rules:
+            1. Single name (e.g., "Akash") → goes to LAST NAME (first="", middle="", last="Akash")
+            2. Two names (e.g., "Akash Raja") → first=last name, last=first name (first="Raja", middle="", last="Akash")
+            3. Three+ names with initial (e.g., "Anand R Ajaanand") → first=last, middle=middle, last=first initial
+               - "Anand R Ajaanand" → first="Ajaanand", middle="R", last="Anand"
+            4. Three names no initial (e.g., "John Michael Doe") → normal western order
+               - "John Michael Doe" → first="John", middle="Michael", last="Doe"
+            
+            Returns: (first_name, middle_name, last_name)
+            """
+            if not full_name:
+                return "", "", ""
+            
+            parts = full_name.strip().split()
+            
+            if len(parts) == 1:
+                # Single name goes to last name
+                return "", "", parts[0]
+            
+            elif len(parts) == 2:
+                # Two names: reverse order (South Indian convention)
+                # "Akash Raja" → first="Raja", last="Akash"
+                return parts[1], "", parts[0]
+            
+            elif len(parts) == 3:
+                # Three names: check if middle is an initial
+                middle = parts[1]
+                if len(middle) == 1 or (len(middle) == 2 and middle[1] == '.'):
+                    # Has initial: South Indian order (last first middle_initial)
+                    # "Anand R Ajaanand" → first="Ajaanand", middle="R", last="Anand"
+                    return parts[2], middle.replace('.', ''), parts[0]
+                else:
+                    # No initial: Western order (first middle last)
+                    # "John Michael Doe" → first="John", middle="Michael", last="Doe"
+                    return parts[0], parts[1], parts[2]
+            
+            else:
+                # More than 3 parts: treat as Western (first, middle parts, last)
+                return parts[0], " ".join(parts[1:-1]), parts[-1]
+        
+        # Get Aadhaar extraction if available
+        aadhaar_data = extraction_data.get("aadhaar", {})
+        driving_license_data = extraction_data.get("driving_license", {})
+        
+        # Build the 30-field data.json schema
+        full_name = state.get("full_name") or aadhaar_data.get("name", "")
+        first, middle, last = split_name(full_name)
+        
+        # Get parent names
+        grandfather_name = state.get("grandfather_name", "")
+        gf_first, gf_middle, gf_last = split_name(grandfather_name)
+        
+        mother_name = state.get("mother_name") or aadhaar_data.get("mother_name", "")
+        m_first, m_middle, m_last = split_name(mother_name)
+        
+        father_name = aadhaar_data.get("father_name", "")
+        f_first, f_middle, f_last = split_name(father_name)
+        
+        # DOB: Prefer driving license, then Aadhaar, then user input
+        dob = driving_license_data.get("dob") or aadhaar_data.get("dob", "")
+        
+        # Get Aadhaar number and split it
+        aadhaar_number = (aadhaar_data.get("aadhar_number") or "").replace(" ", "").replace("-", "")
+        aadhaar_first_8 = aadhaar_number[:8] if len(aadhaar_number) >= 8 else ""
+        aadhaar_last_4 = aadhaar_number[-4:] if len(aadhaar_number) >= 4 else ""
+        
+        # Map delivery mode to automation_agent format
+        delivery_mode = state.get("delivery_mode", "")
+        delivery_option = "physical" if "physical" in delivery_mode.lower() else "soft"
+        
+        # Build complete data.json
+        automation_data = {
+            "first_name": first or aadhaar_data.get("first_name", ""),
+            "last_name": last or aadhaar_data.get("last_name", ""),
+            "middle_name": middle or aadhaar_data.get("middle_name", ""),
+            "dob": dob,
+            "email": state.get("email", ""),
+            "phone": aadhaar_data.get("phone") or aadhaar_data.get("mobile_number", ""),
+            "aadhaar_first_8": aadhaar_first_8,
+            "aadhaar_last_4": aadhaar_last_4,
+            "name_on_aadhaar": aadhaar_data.get("name", ""),
+            "gender": aadhaar_data.get("gender", ""),
+            "father_first_name": f_first or aadhaar_data.get("father_first_name", ""),
+            "father_last_name": f_last or aadhaar_data.get("father_last_name", ""),
+            "mother_first_name": m_first or aadhaar_data.get("mother_first_name", ""),
+            "mother_middle_name": m_middle or aadhaar_data.get("mother_middle_name", ""),
+            "mother_last_name": m_last,
+            "residential_status": state.get("residential_status", "Resident"),
+            "flat_room_door": aadhaar_data.get("flat_room_door", ""),
+            "building_village": aadhaar_data.get("building_village", ""),
+            "road_street_post": aadhaar_data.get("road_street_post", ""),
+            "area_locality": aadhaar_data.get("area_locality", ""),
+            "country": aadhaar_data.get("country", "INDIA"),
+            "state": aadhaar_data.get("state", ""),
+            "pin_code": aadhaar_data.get("pincode", ""),
+            "verifier_place": "",  # TODO: Add to FlowManager if needed
+            "verifier_designation": "",  # TODO: Add to FlowManager if needed
+            "delivery_option": delivery_option,
+            "photo_file": "",
+            "signature_file": "",
+            "aadhaar_pdf": "",
+            "birth_cert_pdf": "",  # Used for driving license (age proof document)
+        }
+        
+        print(f"      ✓ Merged {len([v for v in automation_data.values() if v])} non-empty fields")
+        
+        # ── Step 4: Copy files to automation_agent/docs/ ─────────────────────
+        print(f"\n[5/7] 📁 Copying files to automation_agent/docs/...")
+        
+        automation_agent_dir = Path(__file__).parent.parent.parent / "automation_agent"
+        docs_dir = automation_agent_dir / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Map extracted document types to automation_agent fields
+        # Required: Aadhaar, Photo, Signature
+        # Optional: Driving License (as age proof, mapped to birth_cert_pdf field)
+        doc_type_mapping = {
+            "aadhaar": {"field": "aadhaar_pdf",      "target": "jaadhar.pdf"},
+            "photograph": {"field": "photo_file",    "target": "jphoto.jpeg"},
+            "signature": {"field": "signature_file", "target": "jsign.jpeg"},
+            "driving_license": {"field": "birth_cert_pdf", "target": "jbirthcert.pdf"},
+        }
+        
+        # De-duplicate: keep only the LAST entry per doc_type, skip other_document
+        seen = {}
+        for doc in state.get("collected_docs", []):
+            dt = doc.get("doc_type", "").lower()
+            if dt and dt != "other_document":
+                seen[dt] = doc  # later upload of same type overwrites earlier
+        
+        files_copied = 0
+        for doc_type, doc in seen.items():
+            filename = doc.get("filename", "")
+            
+            if not filename or doc_type not in doc_type_mapping:
+                print(f"      ⚠️ Skipping unknown doc type: {doc_type} ({filename})")
+                continue
+            
+            source_path = upload_dir / filename
+            if not source_path.exists():
+                # Try scanning the directory for a file starting with the doc_type prefix
+                matches = list(upload_dir.glob(f"{doc_type}_*"))
+                if matches:
+                    source_path = sorted(matches)[-1]  # most recent
+                    print(f"      ℹ️ Using scanned match: {source_path.name}")
+                else:
+                    print(f"      ⚠️ File not found: {filename}")
+                    continue
+            
+            mapping = doc_type_mapping[doc_type]
+            target_name = mapping["target"]
+            field_name = mapping["field"]
+            
+            target_path = docs_dir / target_name
+            shutil.copy2(source_path, target_path)
+            automation_data[field_name] = f"docs/{target_name}"
+            files_copied += 1
+            print(f"      ✓ {doc_type.upper()}: {source_path.name} → {target_name}")
+        
+        print(f"      Total files copied: {files_copied}")
+        
+        # ── Step 5: Write automation_agent/INPUT.json ─────────────────────────
+        print(f"\n[6/7] 💾 Writing automation_agent/INPUT.json...")
+        
+        input_json_path = automation_agent_dir / "INPUT.json"
+        with open(input_json_path, "w", encoding="utf-8") as f:
+            json.dump(automation_data, f, indent=4, ensure_ascii=False)
+        
+        print(f"      ✓ Written to {input_json_path}")
+        print(f"      ℹ️ Review this file before running automation")
+        
+        # Also write to data.json for backward compatibility
+        data_json_path = automation_agent_dir / "data.json"
+        with open(data_json_path, "w", encoding="utf-8") as f:
+            json.dump(automation_data, f, indent=4, ensure_ascii=False)
+        
+        # ── Step 6: Trigger automation_agent/main.py ─────────────────────────
+        print(f"\n[7/7] 🤖 Triggering automation_agent...")
+        
+        # Check if automation should be triggered or just prepared
+        trigger_automation = request_data.get("trigger_automation", False)
+        
+        if trigger_automation:
+            # Call the automation_agent server (running on port 8003)
+            automation_server_url = os.getenv("AUTOMATION_AGENT_URL", "http://localhost:8003")
+            try:
+                async with httpx.AsyncClient(timeout=360.0) as client:
+                    print(f"      🤖 Calling automation server at {automation_server_url}/run ...")
+                    resp = await client.post(
+                        f"{automation_server_url}/run",
+                        json={"data": automation_data, "session_id": session_id},
+                    )
+                
+                if resp.status_code == 200:
+                    result = resp.json()
+                    print(f"      ✓ Automation server returned: {result.get('status')}")
+                    return {
+                        "status": "success",
+                        "message": "✅ Application submitted successfully!",
+                        "session_id": session_id,
+                        "automation_triggered": True,
+                        "payment_info": {
+                            "url": result.get("payment_url"),
+                            **result.get("payment_info", {}),
+                        },
+                        "data_prepared": automation_data,
+                    }
+                elif resp.status_code == 409:
+                    return {
+                        "status": "error",
+                        "message": "⚠️ Automation is already running. Please wait for it to finish.",
+                        "session_id": session_id,
+                        "automation_triggered": False,
+                    }
+                else:
+                    err = resp.json().get("detail", "Automation failed")
+                    print(f"      ❌ Automation server error: {err}")
+                    return {
+                        "status": "partial",
+                        "message": f"⚠️ Automation failed: {err}",
+                        "session_id": session_id,
+                        "automation_triggered": True,
+                        "automation_error": err,
+                        "data_prepared": automation_data,
+                    }
+
+            except httpx.ConnectError:
+                return {
+                    "status": "error",
+                    "message": (
+                        "⚠️ Automation agent is offline.\n\n"
+                        "Start it with:\n"
+                        "```\ncd automation_agent\n"
+                        ".venv\\Scripts\\activate\n"
+                        "uvicorn server:app --port 8003\n```"
+                    ),
+                    "session_id": session_id,
+                    "automation_triggered": False,
+                    "data_prepared": automation_data,
+                }
+            except Exception as e:
+                print(f"      ❌ Error calling automation server: {e}")
+                return {
+                    "status": "partial",
+                    "message": f"⚠️ Could not reach automation server: {str(e)}",
+                    "session_id": session_id,
+                    "automation_triggered": False,
+                    "automation_error": str(e),
+                    "data_prepared": automation_data,
+                }
+        else:
+            # Just prepare data, don't trigger automation
+            print(f"      ℹ️ Data prepared (automation not triggered)")
+            return {
+                "status": "success",
+                "message": "✅ Application data prepared. Start automation_agent server and click Submit.",
+                "session_id": session_id,
+                "automation_triggered": False,
+                "data_prepared": automation_data,
+                "input_file": str(input_json_path)
+            }
+    
+    except Exception as e:
+        import traceback
+        print(f"\n❌ Finalize application error: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

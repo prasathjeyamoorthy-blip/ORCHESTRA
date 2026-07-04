@@ -783,30 +783,27 @@ def _prefill_from_user_context(flow: FlowManager, user_context: str):
     Parse the =VERIFIED USER FACTS= block Node sends in user_context and
     prefill flow state fields that are still empty.
     This is the most up-to-date source — Node builds it from Supabase + Redis.
+
+    NOTE: Application-preference fields (submission_mode, delivery_mode, etc.)
+    are intentionally NOT prefilled here — they must be answered explicitly in
+    each new flow session so that advance_step() does not skip those questions.
+    Only personal-detail fields (name, email, salary, mother_name) are silently
+    restored so the user doesn't have to re-type them.
     """
     if not user_context:
         return
 
     import re as _re
 
-    # Map context keys → flow state keys
+    # Only prefill personal details — NOT application preferences.
+    # Prefilling submission_mode / delivery_mode / etc. would cause advance_step()
+    # to skip those questions and jump straight to the documents step.
     _FIELD_PATTERNS = {
         "full_name":         _re.compile(r"-\s*(?:Full\s+)?[Nn]ame:\s*(.+)", _re.IGNORECASE),
         "mother_name":       _re.compile(r"-\s*Mother'?s?\s+[Nn]ame:\s*(.+)", _re.IGNORECASE),
+        "grandfather_name":  _re.compile(r"-\s*Grandfather'?s?\s+[Nn]ame:\s*(.+)", _re.IGNORECASE),
         "email":             _re.compile(r"-\s*Email:\s*(.+)", _re.IGNORECASE),
         "salary":            _re.compile(r"-\s*Annual\s+income:\s*(.+)", _re.IGNORECASE),
-        "submission_mode":   _re.compile(r"-\s*Submission\s+mode:\s*(.+)", _re.IGNORECASE),
-        "delivery_mode":     _re.compile(r"-\s*PAN\s+delivery:\s*(.+)", _re.IGNORECASE),
-        "source_of_income":  _re.compile(r"-\s*Source\s+of\s+income:\s*(.+)", _re.IGNORECASE),
-        "address_for_comm":  _re.compile(r"-\s*Address\s+for\s+communication:\s*(.+)", _re.IGNORECASE),
-        "residential_status":_re.compile(r"-\s*Residential\s+status:\s*(.+)", _re.IGNORECASE),
-        "applicant_type":    _re.compile(r"-\s*Applicant\s+type:\s*(.+)", _re.IGNORECASE),
-    }
-
-    # Boolean fields stored as "Yes"/"No" text
-    _BOOL_PATTERNS = {
-        "aadhaar_photo":  _re.compile(r"-\s*Aadhaar\s+[Pp]hoto\s+on\s+PAN:\s*(.+)", _re.IGNORECASE),
-        "rep_assessee":   _re.compile(r"-\s*Representative\s+Assessee:\s*(.+)", _re.IGNORECASE),
     }
 
     for field, pat in _FIELD_PATTERNS.items():
@@ -817,36 +814,6 @@ def _prefill_from_user_context(flow: FlowManager, user_context: str):
             val = m.group(1).strip()
             if val and val != "—":
                 flow.state[field] = val
-
-    for field, pat in _BOOL_PATTERNS.items():
-        if flow.state.get(field) is not None:
-            continue   # already set (False is valid)
-        m = pat.search(user_context)
-        if m:
-            val = m.group(1).strip().lower()
-            if val in ("yes", "true", "1"):
-                flow.state[field] = True
-            elif val in ("no", "false", "0"):
-                flow.state[field] = False
-
-    # Normalise delivery_mode to internal codes
-    dm = flow.state.get("delivery_mode", "")
-    if dm and "physical" in dm.lower():
-        flow.state["delivery_mode"] = "physical_and_soft"
-    elif dm and ("soft" in dm.lower() or "e-pan" in dm.lower() or "epan" in dm.lower()):
-        flow.state["delivery_mode"] = "soft_only"
-
-    # Normalise applicant_type to internal codes
-    at = flow.state.get("applicant_type", "")
-    if at:
-        at_lower = at.lower()
-        if "indian" in at_lower and ("citizen" in at_lower or "individual" in at_lower):
-            flow.state["applicant_type"] = "indian_citizen"
-        elif "company" in at_lower or "huf" in at_lower or "firm" in at_lower:
-            flow.state["applicant_type"] = "indian_entity"
-        elif "foreign" in at_lower or "nri" in at_lower or "overseas" in at_lower:
-            flow.state["applicant_type"] = "foreign"
-
 
 def _smart_advance_to_first_missing(flow: FlowManager, language: str, user_id: str = None) -> dict | None:
     """
@@ -2692,10 +2659,15 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
     elif step == "documents":
         if _is_off_topic_during_flow(inp): return None
         language = flow.state.get("_current_language", "en")
-        _confirm = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay|ready|let'?s\s+go|proceed|go\s+ahead|upload\s+now|aam|haan)$", re.IGNORECASE)
+        _confirm = re.compile(r"^(yes|y|yeah|yep|yup|sure|ok|okay|ready|let'?s\s+go|proceed|go\s+ahead|upload\s+now|continue|next|aam|haan)$", re.IGNORECASE)
         if _confirm.match(inp):
+            # Check if all required docs are already collected — if so advance
+            if flow.all_required_docs_collected():
+                next_question = _ask_step(flow)
+                if next_question:
+                    return next_question
             upload_msg = get_template("upload_now", language)
-            return {"answer": upload_msg, "sources": [], "followups": [], "guided": True, "step": step, "open_upload": True}
+            return _build_documents_response(flow, language) | {"answer": upload_msg}
 
         # ── Field update at documents step: user corrects a detail while uploading ──
         # "ennodiya per devaprasath", "my name is Ravi", "salary 5 lakh", etc.
@@ -2740,25 +2712,72 @@ def _continue_flow(flow: FlowManager, user_input: str, language: str, user_id: s
 
     # ── Summary / complete ───────────────────────────────────────
     elif step == "summary" or flow.is_complete():
-        return {"answer": _generate_summary(flow), "sources": [], "followups": [], "guided": True, "step": "summary"}
+        return {
+            "answer": _generate_summary(flow),
+            "sources": [], "followups": [], "guided": True, "step": "summary",
+            "show_submit": True,   # tells frontend to render the Proceed & Submit button
+        }
 
     return None
 
 
-def handle_document_upload(session_id: str, filename: str, doc_type: str) -> dict:
-    flow = FlowManager(session_id, "anonymous")  # TODO: pass user_id from upload endpoint
+def handle_document_upload(session_id: str, filename: str, doc_type: str, user_id: str = "anonymous") -> dict:
+    flow = FlowManager(session_id, user_id)
     if not flow.has_active_flow():
         return {"answer": "Document received! Let me know what PAN service you need help with.", "guided": False, "complete": False}
 
     flow.record_document(filename, doc_type)
     pending = flow.get_pending_docs()
+    required_pending = flow.get_required_pending_docs()
 
-    if not pending:
-        return {"answer": f"**{filename}** received!\n\nThat's everything. Here's your application summary:\n\n" + _generate_summary(flow), "guided": True, "complete": True}
+    # Check if all REQUIRED documents are collected (optional ones can be skipped)
+    if len(required_pending) == 0:
+        # All required documents collected
+        next_step = flow.get_current_step()
+        language = flow.state.get("_current_language", "en")
+        
+        # Build acknowledgment message
+        if language == "ta":
+            ack = f"**{filename}** பெறப்பட்டது!\n\n✅ அனைத்து தேவையான ஆவணங்களும் பதிவேற்றப்பட்டன."
+        elif language == "hi":
+            ack = f"**{filename}** प्राप्त हो गया!\n\n✅ सभी आवश्यक दस्तावेज़ अपलोड हो गए।"
+        else:
+            ack = f"**{filename}** received!\n\n✅ All required documents uploaded successfully."
+        
+        # Check if there are optional documents still pending
+        optional_pending = [doc for doc in pending if doc.get("optional", False)]
+        if optional_pending:
+            opt_labels = ", ".join([doc["label"] for doc in optional_pending])
+            if language == "ta":
+                ack += f"\n\n📋 விருப்ப ஆவணங்கள்: {opt_labels}\n\nதொடர சொல்லுங்கள் அல்லது விருப்ப ஆவணங்களை பதிவேற்றுங்கள்."
+            elif language == "hi":
+                ack += f"\n\n📋 वैकल्पिक दस्तावेज़: {opt_labels}\n\n'जारी रखें' कहें या वैकल्पिक दस्तावेज़ अपलोड करें।"
+            else:
+                ack += f"\n\n📋 Optional: {opt_labels}\n\nSay 'Continue' to proceed, or upload optional documents."
+        
+        # If flow is complete, show summary
+        if flow.is_complete():
+            return {"answer": ack + "\n\n" + _generate_summary(flow), "guided": True, "complete": True, "show_submit": True, "step": "summary"}
+        
+        # Otherwise, ask the next question
+        next_question = _ask_step(flow)
+        if next_question:
+            return {"answer": ack + "\n\n" + next_question["answer"], "guided": True, "complete": False, "step": next_step, "show_submit": next_question.get("show_submit", False)}
+        
+        # Fallback to summary if no next question
+        return {"answer": ack + "\n\n" + _generate_summary(flow), "guided": True, "complete": True, "show_submit": True, "step": "summary"}
 
-    next_doc = pending[0]
-    options  = "\n".join([f"- {o}" for o in next_doc["options"]])
-    return {"answer": f"**{filename}** uploaded!\n\nOne more — I still need your **{next_doc['label']}**.\n\nAccepted:\n{options}\n\nUpload whenever you're ready.", "guided": True, "complete": False}
+    # Still have required documents to collect
+    next_required = required_pending[0] if required_pending else pending[0]
+    options  = "\n".join([f"- {o}" for o in next_required["options"]])
+    language = flow.state.get("_current_language", "en")
+    
+    if language == "ta":
+        return {"answer": f"**{filename}** பதிவேற்றப்பட்டது!\n\nமேலும் ஒன்று — எனக்கு உங்கள் **{next_required['label']}** தேவை.\n\nஏற்றுக்கொள்ளப்பட்டவை:\n{options}\n\nதயாராக இருக்கும்போது பதிவேற்றுங்கள்.", "guided": True, "complete": False}
+    elif language == "hi":
+        return {"answer": f"**{filename}** अपलोड हो गया!\n\nएक और — मुझे आपका **{next_required['label']}** चाहिए।\n\nस्वीकृत:\n{options}\n\nजब तैयार हों तो अपलोड करें।", "guided": True, "complete": False}
+    else:
+        return {"answer": f"**{filename}** uploaded!\n\nOne more — I still need your **{next_required['label']}**.\n\nAccepted:\n{options}\n\nUpload whenever you're ready.", "guided": True, "complete": False}
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -2874,6 +2893,14 @@ def _generate_summary(flow: FlowManager) -> str:
     service   = get_service(flow.state["service_id"])
     collected = flow.get_collected_docs()
 
+    # De-duplicate: keep only the LAST upload per doc_type, and skip other_document
+    seen_types = {}
+    for doc in collected:
+        dt = doc.get("doc_type", "unknown")
+        if dt != "other_document":
+            seen_types[dt] = doc  # later entry overwrites earlier — keeps most recent
+    deduped_docs = list(seen_types.values())
+
     lines = [
         "Here's a summary of your application:\n",
         f"**Service:** {service['name']}",
@@ -2910,12 +2937,19 @@ def _generate_summary(flow: FlowManager) -> str:
         lines.append(f"**PAN:** {flow.state['pan_number']}")
     if flow.state.get("aadhaar_number"):
         lines.append(f"**Aadhaar:** {flow.state['aadhaar_number']}")
-    if collected:
-        lines.append(f"\n**Documents ({len(collected)}):**")
-        for doc in collected:
-            lines.append(f"- {doc['filename']} ({doc['doc_type']})")
+    if deduped_docs:
+        lines.append(f"\n**Documents ({len(deduped_docs)}):**")
+        doc_labels = {
+            "aadhaar": "✅ Aadhaar Card",
+            "photograph": "✅ Profile Photo",
+            "signature": "✅ Signature",
+            "driving_license": "✅ Driving License",
+        }
+        for doc in deduped_docs:
+            label = doc_labels.get(doc['doc_type'], f"✅ {doc['doc_type'].replace('_',' ').title()}")
+            lines.append(f"- {label}")
 
-    lines.append("\nYou're all set! Our team will review your documents and proceed with the application.")
+    lines.append("\nEverything looks good! Click **Proceed & Submit** to send your application to NSDL.")
     return "\n".join(lines)
 
 
@@ -3074,9 +3108,24 @@ def _ask_details_collection(flow: FlowManager, language: str = None) -> dict:
         else:
             answer = f"Great! Now I need a few personal details to fill in your application.\n\nPlease provide:\n\n{ask_block}"
 
+    # ── Build form_fields for inline text inputs ────────────────
+    # Only include fields that are still missing so the frontend renders inputs
+    form_fields = []
+    if "full_name" in missing:
+        form_fields.append({"key": "full_name", "label": "Full Name (as in Aadhaar)", "type": "text", "placeholder": "e.g. Lohith G"})
+    if "grandfather_name" in missing:
+        form_fields.append({"key": "grandfather_name", "label": "Grandfather's Name", "type": "text", "placeholder": "e.g. Gopalakrishnan"})
+    if "mother_name" in missing:
+        form_fields.append({"key": "mother_name", "label": "Mother's Name", "type": "text", "placeholder": "e.g. Kavitha"})
+    if "email" in missing and not (state.get("_account_email") and not state.get("_email_confirm_asked")):
+        form_fields.append({"key": "email", "label": "Email Address", "type": "email", "placeholder": "e.g. you@email.com"})
+    if "salary" in missing:
+        form_fields.append({"key": "salary", "label": "Annual Income / Salary", "type": "text", "placeholder": "e.g. ₹5,00,000 or 500000"})
+
     return {
         "answer": answer,
         "sources": [], "followups": [], "guided": True, "step": "details_collection",
+        "form_fields": form_fields if form_fields else None,
     }
 
 
