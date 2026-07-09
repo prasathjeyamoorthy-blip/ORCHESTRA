@@ -251,6 +251,22 @@ app.post('/api/finalize-application', verifyToken, async (req, res) => {
   }
 });
 
+// ── Record document in pan-rag flow (after panel-based upload) ────────────────
+app.post('/api/record-document', verifyToken, async (req, res) => {
+  try {
+    const response = await fetch(`${process.env.RAG_URL || 'http://localhost:8000'}/api/record-document`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...req.body, user_id: req.user.id }),
+    })
+    const result = await response.json()
+    res.status(response.status).json(result)
+  } catch (error) {
+    console.error('[record-document] Error:', error.message)
+    res.status(502).json({ error: 'Could not notify flow manager.' })
+  }
+})
+
 app.listen(process.env.PORT, () =>
   console.log(`Server running on port ${process.env.PORT}`)
 );
@@ -274,10 +290,10 @@ app.post('/api/voice/speak', verifyToken, upload.single('audio'), async (req, re
     }
 
     // Validate language
-    if (!['en', 'ta', 'hi'].includes(language)) {
+    if (!['en', 'ta'].includes(language)) {
       return res.status(400).json({
         status: 'error',
-        error: 'Unsupported language. Supported: en, ta, hi',
+        error: 'Unsupported language. Supported: en, ta',
         audio_available: false
       });
     }
@@ -410,7 +426,7 @@ app.get('/api/voice/health', async (req, res) => {
         voice_agent_status: 'online',
         stt_available: healthData.stt_available,
         tts_available: healthData.tts_available,
-        supported_languages: healthData.supported_languages || ['en', 'ta', 'hi'],
+        supported_languages: healthData.supported_languages || ['en', 'ta'],
         latency_ms: healthData.latency_ms
       });
     } else {

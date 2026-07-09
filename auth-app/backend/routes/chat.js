@@ -146,6 +146,8 @@ async function loadProfile(userId) {
     if (prefs.residential_status) profile.residential_status = prefs.residential_status;
     if (prefs.rep_assessee !== undefined) profile.rep_assessee = prefs.rep_assessee;
     if (prefs.applicant_type) profile.applicant_type = prefs.applicant_type;
+    if (prefs.title) profile.title = prefs.title;
+    if (prefs.grandfather_name) profile.grandfather_name = prefs.grandfather_name;
   }
   
   await cacheSet(key, profile, PROFILE_TTL);
@@ -165,7 +167,7 @@ async function saveProfile(userId, facts) {
   if (facts.full_name || facts.name) profileData.full_name = facts.full_name || facts.name;
   if (facts.mother_name) profileData.mother_name = facts.mother_name;
   if (facts.email) profileData.email = facts.email;
-  if (facts.phone) profileData.phone = facts.phone;
+  if (facts.phone || facts.mobile) profileData.phone = facts.mobile || facts.phone;
   if (facts.income) profileData.annual_income = facts.income;
   if (facts.dob) profileData.date_of_birth = facts.dob;
   
@@ -179,6 +181,8 @@ async function saveProfile(userId, facts) {
   if (facts.residential_status) panPrefs.residential_status = facts.residential_status;
   if (facts.rep_assessee !== undefined) panPrefs.rep_assessee = facts.rep_assessee;
   if (facts.applicant_type) panPrefs.applicant_type = facts.applicant_type;
+  if (facts.title) panPrefs.title = facts.title;
+  if (facts.grandfather_name) panPrefs.grandfather_name = facts.grandfather_name;
   
   if (Object.keys(panPrefs).length > 0) {
     profileData.pan_preferences = panPrefs;
@@ -690,21 +694,44 @@ function _isAskingAboutStoredData(message) {
   
   // Specific field patterns - asking about particular information
   // IMPORTANT: These patterns should NOT match when user is PROVIDING data (e.g., "my name is X")
-  // We check for "is", "are", "was" after the field to exclude providing statements
+  // More specific fields (mother_name, grandfather_name) are listed FIRST so they
+  // take priority over generic "name" patterns in the iteration order.
   const SPECIFIC_PATTERNS = {
+    mother_name: [
+      'what is my mother name', 'whats my mother name',
+      'what mother name did i give', "what is my mother's name",
+      "whats my mothers name", 'what is my mom name', "what is my mom's name",
+      'tell me my mother name', "tell me my mother's name",
+      'do you know my mother name', 'do you have my mother name',
+      'what mother name', 'my mother name', "mother's name",
+      'what is mother name', 'what name did i give for mother',
+      'amma name', 'what is my amma name', "what's my mother's name",
+      "what's my mother name", 'mother name', "mother's name what is it",
+    ],
+    grandfather_name: [
+      'what is my grandfather name', "what is my grandfather's name",
+      'whats my grandfather name', 'what grandfather name did i give',
+      'tell me my grandfather name', 'what is my thatha name',
+      'grandfather name', "grandfather's name", 'thatha name',
+    ],
     name: [
       'what is my name', 'whats my name', 'what name did i give',
       'what name i provided', 'do you know my name', 'tell me my name',
       'what did i say my name was', 'remind me my name',
+      'do you remember my name', 'who am i',
+      'what is my full name', 'whats my full name',
+      'what full name did i give', 'tell me my full name',
     ],
     email: [
       'what is my email', 'whats my email', 'what email did i give',
       'what email i provided', 'do you know my email', 'tell me my email',
-      'what email address',
+      'what email address', 'what is my email address', 'whats my email address',
     ],
     phone: [
       'what is my phone', 'whats my phone', 'what phone did i give',
       'what phone number', 'what number did i give', 'tell me my phone',
+      'what is my mobile', 'whats my mobile', 'what is my mobile number',
+      'what mobile did i give', 'tell me my mobile',
     ],
     pan: [
       'what is my pan', 'whats my pan', 'what pan did i give',
@@ -723,14 +750,12 @@ function _isAskingAboutStoredData(message) {
       'what is my income', 'whats my income', 'what is my salary', 'whats my salary',
       'what salary did i give', 'what income did i give', 'how much do i earn',
       'tell me my income', 'tell me my salary', 'do you have my income', 'do you have my salary',
+      'what is my annual income', 'whats my annual income',
     ],
     dob: [
       'what is my dob', 'whats my dob', 'what is my date of birth',
-      'when was i born', 'what dob did i give',
-    ],
-    mother_name: [
-      'what is my mother name', 'whats my mother name',
-      'what mother name did i give',
+      'when was i born', 'what dob did i give', 'what is my birth date',
+      'whats my date of birth',
     ],
   };
   
@@ -777,6 +802,7 @@ function _buildStoredDataResponse(profile, agentMemory, specificField = null) {
       income: profile.income || profile.annual_income,
       dob: profile.dob || profile.date_of_birth,
       mother_name: profile.mother_name,
+      grandfather_name: profile.grandfather_name,
     };
     
     const value = fieldMap[specificField];
@@ -790,6 +816,7 @@ function _buildStoredDataResponse(profile, agentMemory, specificField = null) {
       income: 'annual income',
       dob: 'date of birth',
       mother_name: "mother's name",
+      grandfather_name: "grandfather's name",
     };
     
     if (value) {
@@ -958,10 +985,11 @@ function buildUserContext(profile, history, longTermMemory = [], lastSessionSumm
   const profileLines = [];
   
   // Personal details
-  if (profile.full_name)    profileLines.push(`- Full name: ${profile.full_name}`);
-  if (profile.mother_name)  profileLines.push(`- Mother's name: ${profile.mother_name}`);
-  if (profile.email)        profileLines.push(`- Email: ${profile.email}`);
-  if (profile.phone)        profileLines.push(`- Phone: ${profile.phone}`);
+  if (profile.full_name)        profileLines.push(`- Full name: ${profile.full_name}`);
+  if (profile.grandfather_name) profileLines.push(`- Grandfather's name: ${profile.grandfather_name}`);
+  if (profile.mother_name)      profileLines.push(`- Mother's name: ${profile.mother_name}`);
+  if (profile.email)            profileLines.push(`- Email: ${profile.email}`);
+  if (profile.phone)            profileLines.push(`- Phone: ${profile.phone}`);
   if (profile.income !== undefined && profile.income !== null && profile.income !== '')
                             profileLines.push(`- Annual income: ${profile.income}`);
   if (profile.dob)          profileLines.push(`- Date of birth: ${profile.dob}`);
@@ -1088,11 +1116,10 @@ router.delete('/sessions/:id', verifyToken, async (req, res) => {
       .eq('user_id', uid)
       .limit(1);
 
-    if (!remaining?.length) {
-      // No sessions left — wipe profile facts and profile cache
-      await supabase.from('user_profiles').delete().eq('user_id', uid);
-      await cacheDel(profileKey(uid));
-    }
+    // NOTE: We intentionally do NOT delete user_profiles when sessions are cleared.
+    // The profile contains PAN application details (name, mother's name, income etc.)
+    // that the user provided — these should persist across sessions permanently.
+    // Only the conversation history is ephemeral; the user's profile data is not.
 
     // Clear RAG flow state (fire-and-forget)
     fetch(`${RAG_URL}/api/session/${id}`, { method: 'DELETE' }).catch(() => {});
@@ -1129,7 +1156,7 @@ router.get('/history/:sessionId', verifyToken, async (req, res) => {
     const [{ history }, flowStateResult] = await Promise.all([
       loadHistory(userId, sessionId),
       // Fetch flow state from Python RAG server (non-blocking — graceful degradation)
-      fetch(`${RAG_URL}/flow-state/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`)
+      fetch(`${RAG_URL}/api/flow-state/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`)
         .then(r => r.ok ? r.json() : null)
         .catch(() => null),
     ]);
@@ -1198,29 +1225,47 @@ router.post('/', verifyToken, async (req, res) => {
     console.log('[stored-data-intent] Detection result:', storedDataQuery);
     
     if (storedDataQuery.isAsking) {
-      console.log('[stored-data-intent] Building response for user:', userId.slice(0, 8));
-      const response = _buildStoredDataResponse(profile, agentMemory, storedDataQuery.specificField);
-      
-      // Still append to history for memory continuity
-      const ts = new Date().toISOString();
-      agentMemory.history.push({ role: 'user', content: message, ts });
-      agentMemory.history.push({ role: 'assistant', content: response.answer, ts: new Date().toISOString() });
-      
-      // Save memory (non-blocking)
-      saveAgentHistory(userId, agentMemory.history).catch(() => {});
-      
-      // Also save to session history
-      await appendHistory(cacheKey, history, userId, session_id, message, response.answer);
-      
-      // Update session timestamp
-      await supabase
-        .from('chat_sessions')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', session_id)
-        .eq('user_id', userId);
-      
-      console.log('[stored-data-intent] Returning response, NOT calling RAG');
-      return res.json(response);
+      // Check if there's an active guided flow — if so, let pan-rag handle it
+      // so it can answer the question AND re-show the current flow step/buttons.
+      let hasActiveFlow = false;
+      try {
+        const flowRes = await fetch(
+          `${RAG_URL}/api/flow-state/${encodeURIComponent(userId)}/${encodeURIComponent(session_id)}`
+        );
+        if (flowRes.ok) {
+          const flowState = await flowRes.json();
+          // Active flow = pan-rag says active=true
+          hasActiveFlow = !!(flowState && flowState.active);
+        }
+      } catch (_) { /* non-blocking — if we can't check, default to Node handling */ }
+
+      if (!hasActiveFlow) {
+        console.log('[stored-data-intent] Building response for user:', userId.slice(0, 8));
+        const response = _buildStoredDataResponse(profile, agentMemory, storedDataQuery.specificField);
+        
+        // Still append to history for memory continuity
+        const ts = new Date().toISOString();
+        agentMemory.history.push({ role: 'user', content: message, ts });
+        agentMemory.history.push({ role: 'assistant', content: response.answer, ts: new Date().toISOString() });
+        
+        // Save memory (non-blocking)
+        saveAgentHistory(userId, agentMemory.history).catch(() => {});
+        
+        // Also save to session history
+        await appendHistory(cacheKey, history, userId, session_id, message, response.answer);
+        
+        // Update session timestamp
+        await supabase
+          .from('chat_sessions')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', session_id)
+          .eq('user_id', userId);
+        
+        console.log('[stored-data-intent] Returning response, NOT calling RAG');
+        return res.json(response);
+      }
+      // Active flow detected — fall through to RAG so pan-rag can answer + re-show flow step
+      console.log('[stored-data-intent] Active flow detected — letting pan-rag handle it');
     }
 
     // 1d. Check if user is asking about their last session
@@ -1360,7 +1405,7 @@ router.post('/', verifyToken, async (req, res) => {
         if (event.type === 'meta') {
           metaData = event;
           // Forward meta to frontend (strip internal type field)
-          res.write(`data: ${JSON.stringify({ type: 'meta', session_id: event.session_id, intent: event.intent, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload || false, form_data: event.form_data || null, options: event.options || null, confirm_action: event.confirm_action || false, flow_confirmed: event.flow_confirmed || false, flow_data: event.flow_data || null, field_buttons: event.field_buttons || null, confirmation_fields: event.confirmation_fields || null })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'meta', session_id: event.session_id, intent: event.intent, sources: event.sources || [], followups: event.followups || [], open_upload: event.open_upload || false, form_data: event.form_data || null, options: event.options || null, confirm_action: event.confirm_action || false, flow_confirmed: event.flow_confirmed || false, flow_data: event.flow_data || null, field_buttons: event.field_buttons || null, confirmation_fields: event.confirmation_fields || null, show_submit: event.show_submit || false, form_fields: event.form_fields || null, missing_fields_form: event.missing_fields_form || null })}\n\n`);
 
         } else if (event.type === 'token') {
           fullAnswer += event.text;
@@ -1398,8 +1443,11 @@ router.post('/', verifyToken, async (req, res) => {
             const profileUpdates = {};
             // Personal details
             if (flowData.full_name || flowData.name) profileUpdates.full_name  = flowData.full_name || flowData.name;
-            if (flowData.mother_name)  profileUpdates.mother_name = flowData.mother_name;
-            if (flowData.email)        profileUpdates.email        = flowData.email;
+            if (flowData.mother_name)      profileUpdates.mother_name      = flowData.mother_name;
+            if (flowData.grandfather_name) profileUpdates.grandfather_name = flowData.grandfather_name;
+            if (flowData.email)            profileUpdates.email             = flowData.email;
+            if (flowData.mobile)       profileUpdates.mobile       = flowData.mobile;
+            if (flowData.title)        profileUpdates.title        = flowData.title;
             if (flowData.salary || flowData.income) profileUpdates.income = flowData.salary || flowData.income;
             // PAN preferences — save ALL of them
             if (flowData.submission_mode)    profileUpdates.submission_mode    = flowData.submission_mode;
@@ -1664,6 +1712,56 @@ router.post('/voice/tts', verifyToken, _voiceUpload.none(), async (req, res) => 
     return res.send(audioBuffer);
   } catch (err) {
     return res.status(500).json({ error: 'TTS failed.' });
+  }
+});
+
+// ── Flow status endpoint — lets frontend check if application is ready to submit ──
+router.get('/flow-status/:userId/:sessionId', verifyToken, async (req, res) => {
+  try {
+    const { userId, sessionId } = req.params;
+
+    // Security: ensure the userId matches the authenticated user
+    if (userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    // Fetch flow state from pan-rag
+    const ragRes = await fetch(
+      `${RAG_URL}/api/flow-state/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`
+    );
+
+    if (!ragRes.ok) {
+      return res.json({ active: false, complete: false, current_step: null });
+    }
+
+    const flowState = await ragRes.json();
+    const isComplete = flowState.complete || flowState.current_step === 'summary';
+
+    // Check if all required docs are done (driving_license is optional)
+    const OPTIONAL_DOCS = ['driving_license'];
+    const pendingDocs = flowState.pending_docs || [];
+    const pendingRequired = pendingDocs.filter(d => !OPTIONAL_DOCS.includes(d));
+    const allDocsReady = pendingRequired.length === 0;
+
+    // Check if all personal details are filled
+    const completed = flowState.completed_fields || {};
+    const requiredPersonalFields = ['full_name', 'mother_name', 'email', 'salary'];
+    const allDetailsReady = requiredPersonalFields.every(f => completed[f]);
+
+    // Application is ready when: summary/complete OR (all docs + all details filled)
+    const applicationReady = isComplete || (allDocsReady && allDetailsReady && flowState.active);
+
+    return res.json({
+      active: flowState.active || false,
+      complete: isComplete,
+      application_ready: applicationReady,
+      current_step: flowState.current_step || null,
+      pending_docs: pendingDocs,
+      missing_for_step: flowState.missing_for_step || [],
+    });
+  } catch (err) {
+    console.error('[flow-status] Error:', err.message);
+    return res.json({ active: false, complete: false, current_step: null });
   }
 });
 

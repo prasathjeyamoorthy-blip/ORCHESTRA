@@ -1,7 +1,7 @@
 """Browser initialization and management."""
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright
-from playwright_stealth import Stealth
+from playwright_stealth import stealth_sync
 from config import (
     BROWSER_ARGS, 
     BROWSER_VIEWPORT, 
@@ -33,7 +33,8 @@ class BrowserManager:
         
         # Apply stealth scripts
         context.add_init_script(STEALTH_SCRIPT)
-        Stealth().apply_stealth_sync(context)
+        # Apply playwright-stealth to each new page in this context
+        context.on("page", lambda page: stealth_sync(page))
         
         return context
     
@@ -41,7 +42,10 @@ class BrowserManager:
     def create_page(context: BrowserContext) -> Page:
         """Create a new page with event listeners."""
         page = context.new_page()
-        
+
+        # Apply playwright-stealth directly to this page (in addition to context hook)
+        stealth_sync(page)
+
         # Prevent page from closing unexpectedly
         page.on("close", lambda: print("[!] Page closed unexpectedly"))
         page.on("crash", lambda: print("[!] Page crashed"))

@@ -1,300 +1,238 @@
 # intent/language_detector.py
 """
-Language detection for Tamil and Hindi (native script + transliteration).
-Detects when users type Tamil/Hindi words in English OR native script and switches response language.
+Language detection — 3-tier pipeline:
+
+  Tier 1: Unicode script check (instant, 100% accurate for native Tamil/Hindi)
+  Tier 2: lingua library  (statistical model, no keyword lists, handles short text)
+  Tier 3: Groq LLM        (fallback for ambiguous Tanglish — called async, result cached)
+
+This replaces the old keyword-matching approach which caused false positives on
+English words like "Non-resident", "en", "nan", etc.
 """
+
 import re
+import os
+import threading
 from typing import Tuple, Optional
 
-# Try to import langdetect, but make it optional
-try:
-    from langdetect import detect, DetectorFactory
-    DetectorFactory.seed = 0  # Make detection deterministic
-    LANGDETECT_AVAILABLE = True
-except ImportError:
-    LANGDETECT_AVAILABLE = False
-    print("[language_detector] langdetect not available. Install with: pip install langdetect")
+# ── Tier 2: lingua (lazy singleton) ──────────────────────────────────────────
+_lingua_detector = None
+_lingua_lock = threading.Lock()
 
-# ── Tamil transliteration keywords ───────────────────────────────────────────
-TAMIL_KEYWORDS = {
-    # Greetings
-    'vanakkam', 'vanakam', 'vaṇakkam', 'vanakaam',
-    'nandri', 'nanri', 'nandrigal',
-    'poitu', 'poyitu', 'varen', 'vaaren',
-    
-    # Common words
-    'enna', 'ena', 'epadi', 'eppadi', 'yeppadi', 'epdi', 'yepdi',
-    'naan', 'nan', 'naanu', 'na',
-    'ungal', 'unga', 'ungaḷ',
-    'enna', 'yenna',
-    'sari', 'seri', 'sariya', 'seriya', 'sariyana',
-    'illa', 'illai', 'illaiye', 'ila',
-    'aam', 'aama', 'aamam', 'ama',
-    'ponga', 'pongal',
-    'vaa', 'vaanga', 'vaanga', 'va',
-    'irukka', 'irukkira', 'iruku', 'irukku', 'irukken', 'iruken',
-    'da', 'di', 'pa', 'ma', 'ba',  # Tamil informal suffixes
-    'sollu', 'sollum', 'sollunga', 'solren', 'sol',
-    'pannunga', 'pannu', 'panna', 'pannalam', 'panlam',
-    'paru', 'paaru', 'parunga', 'paruga',
-    'vaanga', 'vanga', 'vaada', 'vada',
-    'poi', 'po', 'ponga', 'poda',
-    
-    # Questions
-    'yaar', 'yar', 'yaaru', 'yaru',
-    'yenge', 'enga', 'yengae', 'enga',
-    'yeppo', 'eppo', 'yeppothu', 'eppothu',
-    'yeppadi', 'eppadi', 'yepdi', 'epdi',
-    'yen', 'en', 'yean', 'yenna',
-    'yevlo', 'evlo', 'evalo', 'yevalo',
-    
-    # PAN related (Tamil)
-    'pan', 'card', 'kard', 'kaadu',
-    'apply', 'appli',
-    'venum', 'vendum', 'venuma', 'venam',
-    'thevai', 'tevai', 'thevaiya', 'tevaiya',
-}
+def _get_lingua():
+    global _lingua_detector
+    if _lingua_detector is None:
+        with _lingua_lock:
+            if _lingua_detector is None:
+                try:
+                    from lingua import Language, LanguageDetectorBuilder
+                    _lingua_detector = (
+                        LanguageDetectorBuilder
+                        .from_languages(Language.ENGLISH, Language.TAMIL, Language.HINDI)
+                        .with_minimum_relative_distance(0.25)  # confidence gate
+                        .build()
+                    )
+                    print("[language_detector] lingua detector ready ✅")
+                except Exception as e:
+                    print(f"[language_detector] lingua unavailable: {e}")
+                    _lingua_detector = False   # mark as tried-and-failed
+    return _lingua_detector if _lingua_detector is not False else None
 
-# ── Hindi transliteration keywords ────────────────────────────────────────────
-HINDI_KEYWORDS = {
-    # Greetings
-    'namaste', 'namaskar', 'namasthe', 'namaskaar',
-    'dhanyavaad', 'dhanyavad', 'shukriya', 'shukria',
-    'alvida', 'alwida',
-    
-    # Common words
-    'haan', 'han', 'haa', 'ha',
-    'nahi', 'nahin', 'nai', 'na',
-    'kya', 'kia',
-    'kaise', 'kese', 'kaisey',
-    'kahan', 'kaha', 'kahaan',
-    'kab', 'kub',
-    'kyun', 'kyon', 'kyoon', 'kyu',
-    'aap', 'aapka', 'aapki',
-    'main', 'mein', 'mai',
-    'mera', 'meri', 'mere',
-    'theek', 'thik', 'theekh', 'thikh',
-    'achha', 'acha', 'accha', 'achaa',
-    'bahut', 'bohot', 'bahot',
-    
-    # Questions
-    'kaun', 'kon', 'koun',
-    'kaunsa', 'konsa', 'kaunsi', 'konsi',
-    
-    # PAN related (Hindi)
-    'chahiye', 'chaiye', 'chahie',
-    'karna', 'krna', 'karne',
-    'milega', 'milega', 'milta',
-}
 
-# ── Language detection patterns ───────────────────────────────────────────────
+# ── Tier 1: Unicode script detection ─────────────────────────────────────────
 def _detect_native_script(text: str) -> Optional[str]:
     """
     Detect Tamil or Hindi from native Unicode script ranges.
-    
-    Tamil: U+0B80 to U+0BFF
-    Hindi (Devanagari): U+0900 to U+097F
-    
-    Returns 'ta', 'hi', or None
+    Tamil: U+0B80–U+0BFF  |  Hindi/Devanagari: U+0900–U+097F
+    Returns 'ta', 'hi', or None.
     """
-    tamil_chars = len(re.findall(r'[\u0B80-\u0BFF]', text))
-    hindi_chars = len(re.findall(r'[\u0900-\u097F]', text))
-    
-    total_chars = len(re.sub(r'\s+', '', text))  # Non-whitespace chars
-    
+    total_chars = len(re.sub(r'\s+', '', text))
     if total_chars == 0:
         return None
-    
-    tamil_ratio = tamil_chars / total_chars
-    hindi_ratio = hindi_chars / total_chars
-    
-    # If >30% of text is in Tamil/Hindi script, it's that language
-    if tamil_ratio > 0.3:
+
+    tamil_chars = len(re.findall(r'[\u0B80-\u0BFF]', text))
+    hindi_chars  = len(re.findall(r'[\u0900-\u097F]', text))
+
+    if tamil_chars / total_chars > 0.3:
         return 'ta'
-    elif hindi_ratio > 0.3:
+    if hindi_chars / total_chars > 0.3:
         return 'hi'
-    
     return None
 
 
-def _detect_with_langdetect(text: str) -> Optional[str]:
+# ── Tier 2: lingua statistical detection ─────────────────────────────────────
+def _detect_with_lingua(text: str) -> Optional[str]:
     """
-    Use langdetect library as fallback for better detection.
-    Returns 'ta', 'hi', or None
+    Use the lingua library to detect language.
+    Returns 'ta', 'hi', or None (None = English or uncertain).
+    Minimum relative distance of 0.25 acts as a confidence gate.
     """
-    if not LANGDETECT_AVAILABLE:
+    detector = _get_lingua()
+    if detector is None:
         return None
-    
     try:
-        detected = detect(text)
-        # Map langdetect codes to our codes
-        if detected == 'ta':
+        from lingua import Language
+        result = detector.detect_language_of(text)
+        if result == Language.TAMIL:
             return 'ta'
-        elif detected == 'hi':
+        if result == Language.HINDI:
             return 'hi'
-        else:
-            return None
-    except:
+        # ENGLISH or None → return None so caller defaults to English
+        return None
+    except Exception as e:
+        print(f"[language_detector] lingua error: {e}")
         return None
 
+
+# ── Tier 3: Groq LLM fallback (for genuinely ambiguous Tanglish) ─────────────
+def _detect_with_groq(text: str) -> Optional[str]:
+    """
+    Ask Groq 8B to classify the language. Only called when both Tier 1 and
+    Tier 2 return None and the text is at least 10 chars long.
+    Fast: ~300ms on llama-3.1-8b-instant.
+    """
+    if len(text.strip()) < 10:
+        return None
+    try:
+        # Load env if not already loaded (handles direct module import contexts)
+        from dotenv import load_dotenv
+        load_dotenv()
+
+        api_keys = [
+            os.getenv("GROQ_API_KEY1", ""),
+            os.getenv("GROQ_API_KEY2", ""),
+            os.getenv("GROQ_API_KEY3", ""),
+        ]
+        api_key = next((k for k in api_keys if k), None)
+        if not api_key:
+            return None
+
+        import requests
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        "Classify the language of this text. "
+                        "Reply with exactly one word: ENGLISH, TAMIL, or HINDI.\n\n"
+                        f"Text: {text[:200]}"
+                    )
+                }],
+                "max_tokens": 5,
+                "temperature": 0,
+            },
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            label = resp.json()["choices"][0]["message"]["content"].strip().upper()
+            if "TAMIL" in label:
+                return 'ta'
+            if "HINDI" in label:
+                return 'hi'
+        return None
+    except Exception as e:
+        print(f"[language_detector] Groq fallback error: {e}")
+        return None
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def detect_language(text: str, override: str = None) -> str:
     """
-    Detect language from transliterated text.
-    
+    Detect language using 3-tier pipeline.
+
     Args:
-        text: User input text
-        override: Optional language code to force ('en', 'ta', 'hi')
-        
+        text:     User input text
+        override: Force a language code ('en', 'ta', 'hi') — always respected
+
     Returns:
-        language_code: 'ta' (Tamil), 'hi' (Hindi), 'en' (English)
+        'ta' | 'hi' | 'en'
     """
-    # If override is provided, use it
     if override and override in ('en', 'ta', 'hi'):
         return override
-    
-    if not text:
+    if not text or not text.strip():
         return 'en'
-    
-    # 1. First try native script detection (most reliable)
-    native_lang = _detect_native_script(text)
-    if native_lang:
-        return native_lang
-    
-    # 2. Try langdetect library (good for longer texts)
-    if len(text) > 20:
-        lang_detect_result = _detect_with_langdetect(text)
-        if lang_detect_result:
-            return lang_detect_result
-    
-    # 3. Fall back to keyword matching (for transliterated text)
-    # Normalize text
-    text_lower = text.lower().strip()
-    words = re.findall(r'\b\w+\b', text_lower)
-    
-    if not words:
-        return 'en'
-    
-    # Count matches
-    tamil_matches = sum(1 for word in words if word in TAMIL_KEYWORDS)
-    hindi_matches = sum(1 for word in words if word in HINDI_KEYWORDS)
-    total_words = len(words)
-    
-    # Calculate confidence
-    tamil_confidence = tamil_matches / total_words if total_words > 0 else 0.0
-    hindi_confidence = hindi_matches / total_words if total_words > 0 else 0.0
-    
-    # Determine language (require at least 20% match or 2 keywords)
-    threshold = 0.2
-    min_keywords = 2
-    
-    if tamil_matches >= min_keywords or tamil_confidence >= threshold:
-        return 'ta'
-    elif hindi_matches >= min_keywords or hindi_confidence >= threshold:
-        return 'hi'
-    else:
-        return 'en'
+
+    # Tier 1: native script (fastest, zero false positives)
+    native = _detect_native_script(text)
+    if native:
+        return native
+
+    # Tier 2: lingua statistical model
+    lingua_result = _detect_with_lingua(text)
+    if lingua_result:
+        return lingua_result
+
+    # Tier 3: Groq LLM — only for ambiguous Tanglish (≥10 chars)
+    if len(text.strip()) >= 10:
+        groq_result = _detect_with_groq(text)
+        if groq_result:
+            return groq_result
+
+    return 'en'
 
 
 def detect_language_with_confidence(text: str, override: str = None) -> Tuple[str, float]:
     """
-    Detect language from transliterated text with confidence score.
-    
-    Args:
-        text: User input text
-        override: Optional language code to force ('en', 'ta', 'hi')
-        
-    Returns:
-        Tuple of (language_code, confidence)
-        - language_code: 'ta' (Tamil), 'hi' (Hindi), 'en' (English)
-        - confidence: 0.0 to 1.0
+    Same pipeline but returns (language_code, confidence).
+
+    Confidence levels:
+      - Native script:  0.95  (very high — script range is unambiguous)
+      - lingua:         0.80  (high — statistical model with distance gate)
+      - Groq LLM:       0.90  (high — LLM understands Tanglish context)
+      - Default English: 1.0  (certain — nothing triggered a switch)
     """
-    # If override is provided, use it
     if override and override in ('en', 'ta', 'hi'):
         return (override, 1.0)
-    
-    if not text:
+    if not text or not text.strip():
         return ('en', 1.0)
-    
-    # 1. First try native script detection (most reliable)
-    native_lang = _detect_native_script(text)
-    if native_lang:
-        # Calculate confidence based on script ratio
+
+    # Tier 1
+    native = _detect_native_script(text)
+    if native:
+        # Refine confidence by script density
+        total_chars = len(re.sub(r'\s+', '', text))
         tamil_chars = len(re.findall(r'[\u0B80-\u0BFF]', text))
         hindi_chars = len(re.findall(r'[\u0900-\u097F]', text))
-        total_chars = len(re.sub(r'\s+', '', text))
-        
-        if native_lang == 'ta':
-            confidence = tamil_chars / total_chars if total_chars > 0 else 0.5
-        else:  # 'hi'
-            confidence = hindi_chars / total_chars if total_chars > 0 else 0.5
-        
-        return (native_lang, min(confidence, 1.0))
-    
-    # 2. Try langdetect library (good for longer texts)
-    if len(text) > 20:
-        lang_detect_result = _detect_with_langdetect(text)
-        if lang_detect_result:
-            return (lang_detect_result, 0.7)  # Medium-high confidence
-    
-    # 3. Fall back to keyword matching (for transliterated text)
-    # Normalize text
-    text_lower = text.lower().strip()
-    words = re.findall(r'\b\w+\b', text_lower)
-    
-    if not words:
-        return ('en', 1.0)
-    
-    # Count matches
-    tamil_matches = sum(1 for word in words if word in TAMIL_KEYWORDS)
-    hindi_matches = sum(1 for word in words if word in HINDI_KEYWORDS)
-    total_words = len(words)
-    
-    # Calculate confidence
-    tamil_confidence = tamil_matches / total_words if total_words > 0 else 0.0
-    hindi_confidence = hindi_matches / total_words if total_words > 0 else 0.0
-    
-    # Determine language (require at least 20% match or 2 keywords)
-    threshold = 0.2
-    min_keywords = 2
-    
-    if tamil_matches >= min_keywords or tamil_confidence >= threshold:
-        return ('ta', tamil_confidence)
-    elif hindi_matches >= min_keywords or hindi_confidence >= threshold:
-        return ('hi', hindi_confidence)
-    else:
-        return ('en', 1.0)
+        density = (tamil_chars if native == 'ta' else hindi_chars) / total_chars
+        return (native, min(0.5 + density * 0.5, 0.99))
+
+    # Tier 2
+    lingua_result = _detect_with_lingua(text)
+    if lingua_result:
+        return (lingua_result, 0.80)
+
+    # Tier 3
+    if len(text.strip()) >= 10:
+        groq_result = _detect_with_groq(text)
+        if groq_result:
+            return (groq_result, 0.90)
+
+    return ('en', 1.0)
 
 
 def get_language_name(code: str) -> str:
-    """Get full language name from code."""
-    return {
-        'ta': 'Tamil',
-        'hi': 'Hindi',
-        'en': 'English',
-    }.get(code, 'English')
+    return {'ta': 'Tamil', 'hi': 'Hindi', 'en': 'English'}.get(code, 'English')
 
 
-# ── Test function ─────────────────────────────────────────────────────────────
+# ── Quick self-test ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    test_cases = [
-        "vanakkam, enna pan card apply panna venum",
-        "namaste, mujhe pan card chahiye",
-        "hello, I want to apply for PAN card",
-        "naan pan card apply panna venum",
-        "main pan card ke liye apply karna chahta hoon",
-        "epadi pan card apply pannurathu",
-        "kaise pan card apply kare",
+    tests = [
+        ("vanakkam, enna pan card apply panna venum",   "ta"),
+        ("namaste, mujhe pan card chahiye",             "hi"),
+        ("hello, I want to apply for PAN card",         "en"),
+        ("Non-resident",                                "en"),
+        ("Yes",                                         "en"),
+        ("naan pan card apply panna venum",             "ta"),
+        ("நான் PAN கார்டு வேண்டும்",                    "ta"),
+        ("मुझे PAN card चाहिए",                         "hi"),
     ]
-    
-    print("Language Detection Tests:")
+    print("Language Detection Tests (3-tier pipeline)")
     print("=" * 60)
-    for text in test_cases:
-        # Test simple detection
-        lang = detect_language(text)
-        # Test with confidence
-        lang_conf, conf = detect_language_with_confidence(text)
-        print(f"Input: {text}")
-        print(f"Detected: {get_language_name(lang)} ({lang})")
-        print(f"With confidence: {get_language_name(lang_conf)} ({lang_conf}) - {conf:.2%}")
-        print("-" * 60)
+    for text, expected in tests:
+        lang, conf = detect_language_with_confidence(text)
+        status = "✅" if lang == expected else "❌"
+        print(f"{status} [{expected}→{lang} {conf:.0%}] {text[:50]}")

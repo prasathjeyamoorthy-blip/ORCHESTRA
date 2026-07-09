@@ -204,7 +204,10 @@ export function MissingFieldsForm({
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
         credentials: 'include',
         body: JSON.stringify(requestBody),
       })

@@ -146,7 +146,7 @@ if missing_prefs:
 else:
     print("✅ All preferences loaded! Agent should skip all preference questions.")
 
-# Step 6: Summary
+# Step 6: Summary   
 print("\n" + "=" * 70)
 print("SUMMARY")
 print("=" * 70)

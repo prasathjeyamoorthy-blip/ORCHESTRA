@@ -55,63 +55,24 @@ async def health():
         "port": 8002,
         "services": {}
     }
-    
-    # Check Sarvam AI connectivity
     try:
         sarvam_key = os.getenv("SARVAM_API_KEY")
         if sarvam_key:
-            # Quick connectivity test - we won't actually call the API to save quota
             health_status["services"]["sarvam_ai"] = {
                 "status": "configured",
                 "api_key_present": True,
                 "models": {
                     "stt": os.getenv("SARVAM_STT_MODEL", "saaras:v3"),
-                    "tts": os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+                    "tts": os.getenv("SARVAM_TTS_MODEL", "bulbul:v3"),
                 }
             }
         else:
             health_status["services"]["sarvam_ai"] = {
                 "status": "misconfigured",
-                "api_key_present": False
+                "api_key_present": False,
             }
     except Exception as e:
         health_status["services"]["sarvam_ai"] = {
-            "status": "error", 
-            "error": str(e)
-        }
-    
-    # Check NVIDIA NIM connectivity
-    try:
-        nvidia_key = os.getenv("NVIDIA_API_KEY")
-        if nvidia_key:
-            # Test NVIDIA API with a simple ping (low quota usage)
-            async with httpx.AsyncClient(timeout=5) as client:
-                response = await client.get(
-                    "https://integrate.api.nvidia.com/v1/models",
-                    headers={"Authorization": f"Bearer {nvidia_key}"}
-                )
-                if response.status_code == 200:
-                    health_status["services"]["nvidia_nim"] = {
-                        "status": "online",
-                        "api_accessible": True,
-                        "models": {
-                            "stt": os.getenv("NVIDIA_STT_MODEL", "openai/whisper-large-v3"),
-                            "tts": os.getenv("NVIDIA_TTS_MODEL", "nvidia/magpie-tts-multilingual")
-                        }
-                    }
-                else:
-                    health_status["services"]["nvidia_nim"] = {
-                        "status": "degraded",
-                        "api_accessible": False,
-                        "http_status": response.status_code
-                    }
-        else:
-            health_status["services"]["nvidia_nim"] = {
-                "status": "misconfigured",
-                "api_key_present": False
-            }
-    except Exception as e:
-        health_status["services"]["nvidia_nim"] = {
             "status": "error",
             "error": str(e)
         }

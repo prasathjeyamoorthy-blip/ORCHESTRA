@@ -404,42 +404,21 @@ function EmailInputBox({ onSubmit }) {
   )
 }
 
-function GuidedConfirm({ onYes, onNo }) {
-  const [used, setUsed] = React.useState(null)
-  return (
-    <div className="flex gap-3 pt-1">
-      <button
-        onClick={() => { if (!used) { setUsed('yes'); onYes() } }}
-        disabled={!!used}
-        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 active:scale-95 transition-all disabled:opacity-40"
-      >
-        <span className="text-emerald-400">✓</span> Yes, proceed
-      </button>
-      <button
-        onClick={() => { if (!used) { setUsed('no'); onNo() } }}
-        disabled={!!used}
-        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/[0.04] border border-white/20 text-white/70 hover:bg-white/[0.08] active:scale-95 transition-all disabled:opacity-40"
-      >
-        <span className="text-white/40">✎</span> Change something
-      </button>
-    </div>
-  )
-}
-
-// ── Confirmation fields panel — all fields editable simultaneously ─────────
-function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
+// ── Confirmation panel — editable fields + confirm button ─────────────────
+function ConfirmationFieldsPanel({ fields, language, onUpdate, onConfirm, confirmed }) {
   const isTamil = language === 'ta'
 
-  // Build initial state from current field values — always store in English
+  const t = (en, ta) => {
+    if (isTamil && ta) return ta
+    return en
+  }
+
   const buildInitial = () => {
     const s = {}
     for (const f of fields) {
       if (f.field_type === 'text') {
         s[f.key] = f.display_value === '—' ? '' : (f.display_value || '')
       } else if (f.field_type === 'radio') {
-        // Use display_value — it's already normalized to the English choice string
-        // (e.g. "Yes"/"No" for booleans, actual choice text for others).
-        // f.value can be "True"/"False" for boolean fields which won't match choices[].
         s[f.key] = f.display_value === '—' ? '' : (f.display_value || '')
       } else if (f.field_type === 'checkbox') {
         s[f.key] = f.value ? f.value.split(',').map(v => v.trim()).filter(Boolean) : []
@@ -449,21 +428,20 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   }
 
   const [vals, setVals] = React.useState(buildInitial)
-  // savingCount tracks in-flight saves for button feedback, but never permanently locks the panel
-  const [savingCount, setSavingCount] = React.useState(0)
+  const [saving, setSaving] = React.useState(false)
+  const [confirming, setConfirming] = React.useState(false)
+  const [dirty, setDirty] = React.useState({})
 
-  // When fields prop changes (backend refreshed after a save), re-sync vals
-  // Only update fields that the user hasn't manually changed in this session
   const prevFieldsRef = React.useRef(fields)
   React.useEffect(() => {
     const prev = prevFieldsRef.current
-    // Check if any field's display_value actually changed
     const hasChanges = fields.some(f => {
       const old = prev.find(p => p.key === f.key)
       return old && old.display_value !== f.display_value
     })
     if (hasChanges) {
       setVals(buildInitial())
+      setDirty({})
       prevFieldsRef.current = fields
     }
   }, [fields]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -473,14 +451,12 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   const personalFields = fields.filter(f => f.section === 'personal')
   const applicationFields = fields.filter(f => f.section === 'application')
 
-  // Get display choices (Tamil if available)
   function getChoices(f) {
     if (isTamil && f.choices_ta && f.choices_ta.length === (f.choices || []).length)
       return f.choices_ta
     return f.choices || []
   }
 
-  // Map Tamil display value → English for backend
   function toEnglish(f, displayVal) {
     if (!isTamil || !f.choices_ta || !f.choices) return displayVal
     const idx = f.choices_ta.indexOf(displayVal)
@@ -488,41 +464,19 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   }
 
   function handleRadio(key, displayVal, f) {
-    // Always store English value internally for language-switch safety
-    const englishVal = toEnglish(f, displayVal)
-    setVals(prev => ({ ...prev, [key]: englishVal }))
-  }
-
-  function handleCheckbox(f, displayVal) {
-    const englishVal = toEnglish(f, displayVal)
-    setVals(prev => {
-      const cur = prev[f.key] || []
-      const alreadySel = cur.includes(englishVal)
-      return {
-        ...prev,
-        [f.key]: alreadySel
-          ? cur.filter(x => x !== englishVal)
-          : [...cur, englishVal],
-      }
-    })
+    setVals(prev => ({ ...prev, [key]: toEnglish(f, displayVal) }))
   }
 
   function handleText(key, val) {
     setVals(prev => ({ ...prev, [key]: val }))
+    setDirty(prev => ({ ...prev, [key]: true }))
   }
 
-  function handleSaveAll() {
-    if (savingCount > 0 || disabled) return
-
-    // Collect only fields whose value actually changed
-    const changes = []        // English commands for backend
-    const changesDisplay = [] // Human-readable labels for user bubble (Tamil/Hindi/English)
-
+  function buildChanges() {
+    const changes = [], changesDisplay = []
     for (const f of fields) {
       const cur = vals[f.key]
-      let englishVal = ''
-      let displayVal = ''
-
+      let englishVal = '', displayVal = ''
       if (f.field_type === 'text') {
         englishVal = (cur || '').trim()
         if (!englishVal) continue
@@ -531,121 +485,77 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
         displayVal = englishVal
       } else if (f.field_type === 'radio') {
         if (!cur) continue
-        englishVal = cur  // already English
-        // Compare against display_value (normalized English) not f.value (may be "True"/"False")
+        englishVal = cur
         const origDisplay = f.display_value === '—' ? '' : (f.display_value || '')
         if (englishVal === origDisplay) continue
-        // For display, find the Tamil label if active
         const idx = f.choices ? f.choices.indexOf(englishVal) : -1
         displayVal = (isTamil && f.choices_ta && idx >= 0) ? f.choices_ta[idx] : englishVal
-      } else if (f.field_type === 'checkbox') {
-        if (!cur || cur.length === 0) continue
-        englishVal = cur.join(', ')  // already English values
-        const origVal = f.value || ''
-        if (englishVal === origVal) continue
-        // For display, map each English value to the Tamil label if active
-        displayVal = cur.map(v => {
-          const idx = f.choices ? f.choices.indexOf(v) : -1
-          return (isTamil && f.choices_ta && idx >= 0) ? f.choices_ta[idx] : v
-        }).join(', ')
       }
-
       changes.push(`change ${f.label} to ${englishVal}`)
-      const displayLabel = isTamil && f.label_ta ? f.label_ta : f.label
-      changesDisplay.push(`${displayLabel}: ${displayVal}`)
+      changesDisplay.push(`${isTamil && f.label_ta ? f.label_ta : f.label}: ${displayVal}`)
     }
+    return { changes, changesDisplay }
+  }
 
+  function handleSaveChanges() {
+    if (saving || confirmed) return
+    const { changes, changesDisplay } = buildChanges()
     if (changes.length === 0) return
-    setSavingCount(n => n + 1)
-    // Brief "Saved ✓" flash on the button, then reset so user can edit again
-    setTimeout(() => setSavingCount(n => n - 1), 1200)
-    // Build a friendly display summary for the user bubble (works for all languages)
-    const displayLines = changesDisplay.length > 0 ? changesDisplay : changes
-    const display = `✏️ ${displayLines.join(' | ')}`
-
-    // Build patched confirmation_fields so the panel re-initializes correctly if re-mounted
+    setSaving(true)
+    setTimeout(() => setSaving(false), 1400)
     const updatedFields = fields.map(f => {
       const cur = vals[f.key]
-      if (f.field_type === 'text') {
-        const v = (cur || '').trim()
-        return v ? { ...f, display_value: v, value: v } : f
-      } else if (f.field_type === 'radio') {
-        return cur ? { ...f, display_value: cur, value: cur } : f
-      } else if (f.field_type === 'checkbox') {
-        return cur?.length ? { ...f, display_value: cur.join(', '), value: cur.join(', ') } : f
-      }
+      if (f.field_type === 'text') { const v = (cur || '').trim(); return v ? { ...f, display_value: v, value: v } : f }
+      if (f.field_type === 'radio') return cur ? { ...f, display_value: cur, value: cur } : f
       return f
     })
+    setDirty({})
+    onUpdate({ command: changes.join(' | '), display: `✏️ ${changesDisplay.join(' | ')}`, updatedFields })
+  }
 
-    // Send { command, display, updatedFields } — App.jsx uses updatedFields to patch the message
-    onUpdate({ command: changes.join(' | '), display, updatedFields })
+  function handleConfirm() {
+    if (confirming || confirmed) return
+    setConfirming(true)
+    const { changes } = buildChanges()
+    // Pass unsaved changes so parent can send them before confirming
+    onConfirm(changes.length > 0 ? changes.join(' | ') : null)
   }
 
   function renderField(f) {
     const label = isTamil && f.label_ta ? f.label_ta : f.label
     const choices = getChoices(f)
     const curVal = vals[f.key]
+    const isDirtyField = dirty[f.key]
 
     return (
-      <div key={f.key} className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5 space-y-2">
-        <p className="text-[10px] text-white/40 font-medium">{label}</p>
-
+      <div key={f.key} className="space-y-1.5">
+        <p className="text-[10px] text-white/40 font-medium tracking-wide">{label}</p>
         {f.field_type === 'text' && (
           <input
             type="text"
             value={curVal || ''}
             onChange={e => handleText(f.key, e.target.value)}
-            disabled={disabled}
-            placeholder={isTamil ? 'புதிய மதிப்பை உள்ளிடுங்கள்…' : 'Enter value…'}
-            className="w-full bg-white/[0.05] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/25 focus:outline-none focus:border-purple-500/40 disabled:opacity-50"
+            disabled={confirmed}
+            placeholder={t('Enter value…', 'மதிப்பை உள்ளிடுங்கள்…')}
+            className={`w-full bg-white/[0.04] border rounded-lg px-3 py-1.5 text-xs text-white placeholder-white/25 focus:outline-none transition-colors disabled:opacity-40
+              ${isDirtyField ? 'border-purple-500/50' : 'border-white/[0.08] focus:border-white/20'}`}
           />
         )}
-
         {f.field_type === 'radio' && (
           <div className="flex flex-wrap gap-1.5">
             {choices.map((c, i) => {
-              // vals stores English; c is the display label (may be Tamil)
               const englishC = toEnglish(f, c)
               const isSelected = curVal === englishC
               return (
-                <button
-                  key={i}
-                  type="button"
-                  disabled={disabled}
+                <button key={i} type="button" disabled={confirmed}
                   onClick={() => handleRadio(f.key, c, f)}
-                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-all disabled:opacity-50
+                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-all disabled:opacity-40
                     ${isSelected
-                      ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
-                      : 'border-white/15 text-white/50 hover:border-white/30 hover:text-white/80'
+                      ? 'border-purple-400/70 bg-purple-500/20 text-purple-200 font-medium'
+                      : 'border-white/[0.12] text-white/45 hover:border-white/25 hover:text-white/75'
                     }`}
                 >
-                  {c}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {f.field_type === 'checkbox' && (
-          <div className="flex flex-wrap gap-1.5">
-            {choices.map((c, i) => {
-              // vals stores English; compare against English equivalent of display label
-              const englishC = toEnglish(f, c)
-              const sel = (curVal || []).includes(englishC)
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => handleCheckbox(f, c)}
-                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 disabled:opacity-50
-                    ${sel
-                      ? 'border-purple-400/60 bg-purple-500/20 text-purple-200'
-                      : 'border-white/15 text-white/50 hover:border-white/30 hover:text-white/80'
-                    }`}
-                >
-                  {sel && <span className="text-[9px] text-purple-300">✓</span>}
-                  {c}
+                  {isSelected && <span className="mr-1 text-purple-400 text-[9px]">✓</span>}{c}
                 </button>
               )
             })}
@@ -658,107 +568,63 @@ function ConfirmationFieldsPanel({ fields, language, onUpdate, disabled }) {
   function renderSection(title, sectionFields) {
     if (sectionFields.length === 0) return null
     return (
-      <div className="space-y-1.5">
-        <p className="text-[10px] uppercase tracking-widest text-white/25 font-semibold px-1 pt-1">{title}</p>
-        {sectionFields.map(renderField)}
+      <div className="space-y-3">
+        <p className="text-[10px] uppercase tracking-widest text-white/20 font-semibold">{title}</p>
+        <div className="space-y-3">{sectionFields.map(renderField)}</div>
       </div>
     )
   }
 
+  const hasPendingChanges = buildChanges().changes.length > 0
+
   return (
-    <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3 space-y-3">
-      <p className="text-[11px] text-white/40 font-semibold">
-        {isTamil ? '📋 விவரங்களை திருத்தவும்' : '📋 Edit your details'}
-      </p>
+    <div className={`mt-3 rounded-2xl border bg-white/[0.018] p-4 space-y-4 transition-all
+      ${confirmed ? 'border-emerald-500/20 opacity-60' : 'border-white/[0.07]'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className={`w-1.5 h-1.5 rounded-full ${confirmed ? 'bg-emerald-400' : 'bg-purple-400'}`} />
+          <p className="text-xs font-semibold text-white/60">
+            {confirmed
+              ? t('✓ Confirmed', '✓ உறுதிப்படுத்தப்பட்டது')
+              : t('Review & Edit', 'சரிபார்க்கவும் & திருத்தவும்')
+            }
+          </p>
+        </div>
+        {!confirmed && hasPendingChanges && (
+          <span className="text-[10px] text-amber-400/80 bg-amber-400/10 border border-amber-400/20 rounded-full px-2 py-0.5">
+            {t('Unsaved changes', 'சேமிக்கப்படாத மாற்றங்கள்')}
+          </span>
+        )}
+      </div>
 
-      {renderSection(isTamil ? 'விண்ணப்ப விவரங்கள்' : 'Application Details', applicationFields)}
-      {renderSection(isTamil ? 'தனிப்பட்ட விவரங்கள்' : 'Personal Details', personalFields)}
+      {renderSection(t('Personal Details', 'தனிப்பட்ட விவரங்கள்'), personalFields)}
+      {personalFields.length > 0 && applicationFields.length > 0 && <div className="border-t border-white/[0.05]" />}
+      {renderSection(t('Application Options', 'விண்ணப்ப விருப்பங்கள்'), applicationFields)}
 
-      {/* ── Save All button ──────────────────────────────────────────── */}
-      {!disabled && (
-        <div className="pt-2 border-t border-white/[0.06]">
-          <button
-            type="button"
-            onClick={handleSaveAll}
-            disabled={savingCount > 0}
-            className="w-full py-2 rounded-xl text-sm font-semibold transition-all
-              bg-purple-600/25 border border-purple-500/40 text-purple-200
-              hover:bg-purple-600/40 hover:border-purple-400/60
-              active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {savingCount > 0
-              ? (isTamil ? '✓ புதுப்பிக்கப்பட்டது' : '✓ Updated')
-              : (isTamil ? '💾 அனைத்தையும் சேமி' : '💾 Save Changes')}
+      {!confirmed && (
+        <div className="flex gap-2 pt-1 border-t border-white/[0.05]">
+          {hasPendingChanges && (
+            <button type="button" onClick={handleSaveChanges} disabled={saving}
+              className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]
+                bg-white/[0.05] border border-white/[0.10] text-white/60
+                hover:bg-white/[0.08] hover:text-white/80 disabled:opacity-50">
+              {saving
+                ? t('✓ Saved', '✓ சேமிக்கப்பட்டது')
+                : t('💾 Save Changes', '💾 மாற்றங்களை சேமி')
+              }
+            </button>
+          )}
+          <button type="button" onClick={handleConfirm} disabled={confirming}
+            className={`py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]
+              bg-emerald-500/15 border border-emerald-500/40 text-emerald-300
+              hover:bg-emerald-500/25 hover:border-emerald-400/60 disabled:opacity-50
+              ${hasPendingChanges ? 'flex-1' : 'w-full'}`}>
+            {confirming
+              ? t('Confirming…', 'உறுதிப்படுத்துகிறது…')
+              : t('✓ Confirm & Proceed', '✓ உறுதிப்படுத்தி தொடரவும்')
+            }
           </button>
         </div>
-      )}
-    </div>
-  )
-}
-
-// ── Details summary card — shows all collected fields in chat ────────────
-function DetailsCard({ fields, language }) {
-  if (!fields || fields.length === 0) return null
-  const isTamil = language === 'ta'
-  const isHindi = language === 'hi'
-
-  const applicationFields = fields.filter(f => f.section === 'application')
-  const personalFields = fields.filter(f => f.section === 'personal')
-
-  const sectionTitle = (en, ta, hi) => {
-    if (isTamil) return ta
-    if (isHindi) return hi
-    return en
-  }
-
-  function renderValue(f) {
-    const val = f.display_value
-    if (!val || val === '—') {
-      return <span className="text-white/25 italic text-xs">—</span>
-    }
-    return <span className="text-white font-medium text-xs">{val}</span>
-  }
-
-  function renderSection(title, sectionFields) {
-    if (sectionFields.length === 0) return null
-    return (
-      <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-widest text-purple-400/60 font-semibold px-0.5 pt-1">
-          {title}
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {sectionFields.map(f => {
-            const label = isTamil && f.label_ta ? f.label_ta : f.label
-            return (
-              <div key={f.key}
-                className="flex flex-col gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.025] px-2.5 py-2">
-                <span className="text-[10px] text-white/35">{label}</span>
-                {renderValue(f)}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="mt-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-3">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-        <p className="text-xs text-white/60 font-semibold">
-          {sectionTitle('Your Application Details', 'உங்கள் விண்ணப்ப விவரங்கள்', 'आपके आवेदन विवरण')}
-        </p>
-      </div>
-
-      {renderSection(
-        sectionTitle('Application Options', 'விண்ணப்ப விருப்பங்கள்', 'आवेदन विकल्प'),
-        applicationFields
-      )}
-      {renderSection(
-        sectionTitle('Personal Details', 'தனிப்பட்ட விவரங்கள்', 'व्यक्तिगत विवरण'),
-        personalFields
       )}
     </div>
   )
@@ -769,23 +635,52 @@ function DetailsCollectionForm({ fields, onSubmit }) {
   const [values, setValues] = React.useState(() =>
     Object.fromEntries(fields.map(f => [f.key, '']))
   )
-  const allFilled = fields.every(f => values[f.key]?.trim())
+  // For radio fields, any selected value counts as filled; text fields need non-empty string
+  const allFilled = fields.every(f =>
+    f.type === 'radio' ? !!values[f.key] : values[f.key]?.trim()
+  )
 
   return (
     <div className="mt-3 rounded-2xl border border-purple-500/20 bg-purple-500/[0.04] p-4 space-y-3">
       <p className="text-[11px] text-purple-300/70 font-semibold uppercase tracking-widest">Personal Details</p>
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         {fields.map(f => (
-          <div key={f.key} className="space-y-1">
+          <div key={f.key} className="space-y-1.5">
             <label className="text-xs text-white/50">{f.label}</label>
-            <input
-              type={f.type || 'text'}
-              placeholder={f.placeholder || ''}
-              value={values[f.key]}
-              onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}
-              onKeyDown={e => { if (e.key === 'Enter' && allFilled) onSubmit(values) }}
-              className="w-full bg-white/[0.05] border border-white/[0.10] rounded-xl px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-purple-500/60 transition-colors"
-            />
+
+            {f.type === 'radio' && f.options ? (
+              /* ── Toggle button group for radio fields (e.g. Title) ── */
+              <div className="flex flex-wrap gap-2">
+                {f.options.map(opt => {
+                  const isSelected = values[f.key] === opt
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setValues(v => ({ ...v, [f.key]: opt }))}
+                      className={`text-xs px-3.5 py-1.5 rounded-full border font-medium transition-all active:scale-95
+                        ${isSelected
+                          ? 'border-purple-400/70 bg-purple-500/25 text-purple-200 shadow-sm shadow-purple-500/20'
+                          : 'border-white/[0.12] text-white/50 hover:border-white/30 hover:text-white/80 hover:bg-white/[0.04]'
+                        }`}
+                    >
+                      {isSelected && <span className="mr-1 text-purple-400 text-[9px]">✓</span>}
+                      {opt}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              /* ── Text / tel / email inputs ── */
+              <input
+                type={f.type || 'text'}
+                placeholder={f.placeholder || ''}
+                value={values[f.key]}
+                onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter' && allFilled) onSubmit(values) }}
+                className="w-full bg-white/[0.05] border border-white/[0.10] rounded-xl px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-purple-500/60 transition-colors"
+              />
+            )}
           </div>
         ))}
       </div>
@@ -829,7 +724,10 @@ function DocUploadPrompt({ sessionId, userId, currentDoc, uploadedDocs, onDocUpl
         method: 'POST', body: form,
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       })
-      if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || errData.message || `Upload failed (${res.status})`)
+      }
       const data = await res.json()
       onDocUploaded(currentDoc.key, file.name, data)
     } catch (e) {
@@ -961,109 +859,152 @@ function SubmitApplicationButton({ sessionId, userId, language, onPaymentLink })
 
 // ── Final review panel with Proceed button ─────────────────────────────────
 function FinalReviewPanel({ sessionId, userId, confirmationFields, uploadedDocs, language, onPaymentLink }) {
-  const [loading, setLoading] = React.useState(false)
+  const [status, setStatus] = React.useState('submitting') // 'submitting' | 'done' | 'error'
   const [error, setError] = React.useState(null)
+  const isTamil = language === 'ta'
 
-  async function handleProceed() {
-    setLoading(true); setError(null)
+  // Auto-trigger as soon as the panel mounts
+  React.useEffect(() => {
+    let cancelled = false
+    async function autoSubmit() {
+      try {
+        const res = await fetch('/api/finalize-application', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            user_id: userId,
+            trigger_automation: true,
+          }),
+        })
+        const data = await res.json()
+        if (cancelled) return
+        if (!res.ok) throw new Error(data.detail || data.message || 'Finalize failed')
+        setStatus('done')
+        onPaymentLink(data)
+      } catch (e) {
+        if (!cancelled) { setStatus('error'); setError(e.message) }
+      }
+    }
+    autoSubmit()
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleRetry() {
+    setStatus('submitting'); setError(null)
     try {
       const res = await fetch('/api/finalize-application', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({
-          session_id: sessionId,
-          user_id: userId,
-          trigger_automation: true,
-        })
+        body: JSON.stringify({ session_id: sessionId, user_id: userId, trigger_automation: true }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Finalize failed')
+      if (!res.ok) throw new Error(data.detail || data.message || 'Finalize failed')
+      setStatus('done')
       onPaymentLink(data)
     } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
+      setStatus('error'); setError(e.message)
     }
   }
-
-  const isTamil = language === 'ta'
 
   return (
     <div className="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <div className={`w-1.5 h-1.5 rounded-full ${status === 'error' ? 'bg-red-400' : 'bg-emerald-400'}`} />
         <p className="text-xs text-emerald-300/80 font-semibold uppercase tracking-widest">
-          {isTamil ? 'இறுதி சமர்ப்பிப்பு' : 'Ready to Submit'}
+          {status === 'submitting'
+            ? (isTamil ? 'விண்ணப்பம் சமர்ப்பிக்கிறது…' : 'Submitting Application…')
+            : status === 'done'
+            ? (isTamil ? '✓ சமர்ப்பிக்கப்பட்டது' : '✓ Submitted')
+            : (isTamil ? 'பிழை' : 'Error')
+          }
         </p>
       </div>
 
       {/* Uploaded docs summary */}
-      <div className="space-y-1">
-        <p className="text-[11px] text-white/40">Documents uploaded:</p>
-        <div className="flex flex-wrap gap-2">
-          {DOC_SEQUENCE.map(d => {
-            const done = uploadedDocs.includes(d.key)
-            if (!done && d.optional) return null
-            return (
-              <span key={d.key}
-                className={`text-[11px] px-2.5 py-1 rounded-full border font-medium ${
-                  done
-                    ? 'text-emerald-300 bg-emerald-400/10 border-emerald-400/25'
-                    : 'text-red-300/60 bg-red-400/5 border-red-400/15'
-                }`}>
-                {done ? '✓' : '✗'} {d.label}
-              </span>
-            )
-          })}
-        </div>
+      <div className="flex flex-wrap gap-2">
+        {DOC_SEQUENCE.map(d => {
+          const done = uploadedDocs.includes(d.key)
+          if (!done && d.optional) return null
+          return (
+            <span key={d.key}
+              className={`text-[11px] px-2.5 py-1 rounded-full border font-medium ${
+                done
+                  ? 'text-emerald-300 bg-emerald-400/10 border-emerald-400/25'
+                  : 'text-red-300/60 bg-red-400/5 border-red-400/15'
+              }`}>
+              {done ? '✓' : '✗'} {d.label}
+            </span>
+          )
+        })}
       </div>
 
-      {error && (
-        <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-          {error}
+      {status === 'submitting' && (
+        <div className="flex items-center gap-3 py-2">
+          <span className="w-5 h-5 border-2 border-emerald-400/40 border-t-emerald-400 rounded-full animate-spin flex-shrink-0" />
+          <p className="text-xs text-white/50">
+            {isTamil
+              ? 'NSDL போர்ட்டலை நிரப்புகிறது. சற்று நேரம் ஆகலாம்…'
+              : 'Auto-filling the NSDL portal. This may take a minute…'}
+          </p>
         </div>
       )}
 
-      <button
-        onClick={handleProceed}
-        disabled={loading}
-        className="w-full py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.98]
-          bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
-          border border-emerald-500/40 text-white shadow-lg shadow-emerald-900/30
-          disabled:opacity-50 disabled:cursor-not-allowed"
-        style={{ fontFamily: 'Archivo, sans-serif' }}
-      >
-        {loading
-          ? <span className="flex items-center justify-center gap-2">
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Submitting Application…
-            </span>
-          : (isTamil ? '🚀 விண்ணப்பத்தை சமர்ப்பி' : '🚀 Proceed & Submit Application')
-        }
-      </button>
+      {status === 'error' && (
+        <div className="space-y-2">
+          <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+            {error}
+          </p>
+          <button
+            onClick={handleRetry}
+            className="w-full py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98]
+              bg-emerald-600/20 border border-emerald-500/40 text-emerald-300
+              hover:bg-emerald-600/30"
+          >
+            {isTamil ? '🔄 மீண்டும் முயற்சி' : '🔄 Retry'}
+          </button>
+        </div>
+      )}
 
-      <p className="text-[10px] text-white/25 text-center">
+      <p className="text-[10px] text-white/20 text-center">
         {isTamil
           ? 'இது NSDL போர்ட்டலில் தானாகவே படிவத்தை நிரப்பும்'
-          : 'This will auto-fill the NSDL portal and return your payment link'}
+          : 'Auto-fills the NSDL portal and returns your payment link'}
       </p>
     </div>
   )
 }
 
-function Message({ msg, onFollowup, language }) {
+function Message({ msg, onFollowup, onUpdateMsg, language, sessionId, userId }) {
   const isUser = msg.role === 'user'
   const [usedFollowup, setUsedFollowup] = React.useState(null)
   const [checkedOptions, setCheckedOptions] = React.useState([])
   const [optionSubmitted, setOptionSubmitted] = React.useState(false)
   const [confirmUsed, setConfirmUsed] = React.useState(null) // 'yes' | 'no'
-  // Doc-by-doc upload state (for messages at documents step)
-  const [uploadedDocs, setUploadedDocs] = React.useState([])
-  const [currentDocIdx, setCurrentDocIdx] = React.useState(0)
-  const [showFinalReview, setShowFinalReview] = React.useState(false)
+  // Doc-by-doc upload state — seed from msg._uploadedDocs so it survives re-renders
+  const [uploadedDocs, setUploadedDocs] = React.useState(() => msg._uploadedDocs || [])
+  const [currentDocIdx, setCurrentDocIdx] = React.useState(() => {
+    // Resume from where we left off based on already-uploaded docs
+    const done = msg._uploadedDocs || []
+    const nextIdx = DOC_SEQUENCE.findIndex(d => !done.includes(d.key))
+    return nextIdx === -1 ? DOC_SEQUENCE.length : nextIdx
+  })
+  const requiredKeys = DOC_SEQUENCE.filter(d => !d.optional).map(d => d.key)
+  const allRequiredDone = requiredKeys.every(k => (msg._uploadedDocs || []).includes(k))
+  const [showFinalReview, setShowFinalReview] = React.useState(allRequiredDone)
+
+  // Auto-trigger final review when all required docs are uploaded
+  React.useEffect(() => {
+    if (showFinalReview) return
+    const allDone = requiredKeys.every(k => uploadedDocs.includes(k))
+    if (allDone) setShowFinalReview(true)
+  }, [uploadedDocs]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!msg.content && !msg.streaming) return null
 
   if (isUser) {
@@ -1115,14 +1056,27 @@ function Message({ msg, onFollowup, language }) {
   return (
     <div className="px-2 w-full max-w-2xl text-white/90">
       <div className="space-y-0.5">
+        {/* ── Final submit button at summary step — shown ABOVE content ── */}
+        {!msg.streaming && msg.show_submit && (
+          <div className="mb-3">
+            <SubmitApplicationButton
+              sessionId={msg._sessionId || sessionId}
+              userId={msg._userId || userId}
+              language={language}
+              onPaymentLink={(data) => {
+                const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
+                const successMsg = paymentUrl
+                  ? `✅ Application submitted successfully!\n\n💳 **[Click here to pay →](${paymentUrl})**\n\nYour acknowledgment number will be emailed to you after payment.`
+                  : `✅ Application submitted! The browser automation is running.\n\n${data?.message || ''}`
+                onFollowup(`__payment_result__${successMsg}`, msg.id)
+              }}
+            />
+          </div>
+        )}
+
         {msg.content ? renderMarkdown(msg.content) : null}
         {msg.streaming && (
           <span className="inline-block w-2 h-4 ml-0.5 bg-white/60 rounded-sm animate-pulse align-middle" />
-        )}
-
-        {/* ── Details summary card — shown at confirmation step ── */}
-        {!msg.streaming && msg.confirmation_fields && confirmUsed === null && (
-          <DetailsCard fields={msg.confirmation_fields} language={language} />
         )}
 
         {/* ── Missing Fields Form — for manual data entry after document upload ── */}
@@ -1154,18 +1108,20 @@ function Message({ msg, onFollowup, language }) {
             fields={msg.form_fields}
             onSubmit={(values) => {
               setOptionSubmitted(true)
-              // Build a natural language message with all values
               const parts = Object.entries(values)
-                .filter(([, v]) => v && v.trim())
+                .filter(([, v]) => v && (typeof v === 'string' ? v.trim() : true))
                 .map(([k, v]) => {
                   const labels = {
+                    title: 'my title is',
                     full_name: 'my name is',
                     grandfather_name: "grandfather's name is",
                     mother_name: "mother's name is",
                     email: 'email is',
                     salary: 'annual income is',
+                    mobile: 'mobile number is',
                   }
-                  return `${labels[k] || k} ${v.trim()}`
+                  const val = typeof v === 'string' ? v.trim() : v
+                  return `${labels[k] || k} ${val}`
                 })
               if (parts.length > 0) {
                 onFollowup(parts.join(', '), msg.id)
@@ -1174,51 +1130,28 @@ function Message({ msg, onFollowup, language }) {
           />
         )}
 
-        {/* ── Confirmation fields panel (inline per-field update buttons) ── */}
-        {/* Stays open and editable until the user clicks "Yes, proceed" */}
-        {!msg.streaming && msg.confirmation_fields && confirmUsed === null && (
+        {/* ── Confirmation panel — single editable panel with Confirm button ── */}
+        {!msg.streaming && msg.confirmation_fields && (
           <ConfirmationFieldsPanel
             fields={msg.confirmation_fields}
             language={language}
+            confirmed={confirmUsed === 'yes'}
             onUpdate={(updatePayload) => {
-              // Never lock the panel — just send the update and let the user keep editing
+              // onFollowup in App.jsx patches msg.confirmation_fields via updatedFields
               onFollowup(updatePayload, msg.id)
             }}
-            disabled={false}
+            onConfirm={(pendingChanges) => {
+              setConfirmUsed('yes')
+              if (pendingChanges) {
+                onFollowup(
+                  { command: pendingChanges + ' | Yes, proceed', display: '✏️ Updated & confirmed' },
+                  msg.id
+                )
+              } else {
+                onFollowup('Yes, proceed', msg.id)
+              }
+            }}
           />
-        )}
-
-        {/* ── Confirm action buttons (Confirm / Change something) ── */}
-        {/* Always shown alongside the edit panel until a final decision is made */}
-        {!msg.streaming && msg.confirm_action && confirmUsed === null && (
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={() => { setConfirmUsed('yes'); onFollowup('Yes, proceed', msg.id) }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 hover:border-emerald-400/60 active:scale-95 transition-all"
-            >
-              <span className="text-emerald-400">✓</span> Confirm
-            </button>
-            <button
-              onClick={() => { setConfirmUsed('no'); onFollowup('No, I need to change something', msg.id) }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/[0.04] border border-white/20 text-white/70 hover:bg-white/[0.08] hover:border-white/30 active:scale-95 transition-all"
-            >
-              <span className="text-white/40">✎</span> Change something
-            </button>
-          </div>
-        )}
-
-        {/* Confirm used — show greyed state (panel is already hidden via confirmUsed === null check above) */}
-        {!msg.streaming && msg.confirm_action && confirmUsed !== null && (
-          <div className="flex gap-3 pt-4 opacity-40 pointer-events-none">
-            <div className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border",
-              confirmUsed === 'yes'
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                : "bg-white/[0.04] border-white/20 text-white/70"
-            )}>
-              {confirmUsed === 'yes' ? <><span className="text-emerald-400">✓</span> Confirmed</> : <><span className="text-white/40">✎</span> Change something</>}
-            </div>
-          </div>
         )}
 
         {/* Interactive options UI */}
@@ -1313,55 +1246,51 @@ function Message({ msg, onFollowup, language }) {
           </div>
         )}
 
-
-        {/* ── Final submit button at summary step ── */}
-        {!msg.streaming && msg.show_submit && (
-          <SubmitApplicationButton
-            sessionId={msg._sessionId}
-            userId={msg._userId}
-            language={language}
-            onPaymentLink={(data) => {
-              const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
-              const successMsg = paymentUrl
-                ? `✅ Application submitted successfully!\n\n💳 **[Click here to pay →](${paymentUrl})**\n\nYour acknowledgment number will be emailed to you after payment.`
-                : `✅ Application submitted! The browser automation is running.\n\n${data?.message || ''}`
-              onFollowup(`__payment_result__${successMsg}`, msg.id)
-            }}
-          />
-        )}
-
         {!msg.streaming && msg.elapsed_ms != null && (
           <p className="text-[10px] text-neutral-600 pt-1">{msg.elapsed_ms}ms</p>
         )}
 
         {/* ── Doc-by-doc upload (documents step) ── */}
         {!msg.streaming && msg.open_upload && !showFinalReview && (() => {
-          const currentDoc = DOC_SEQUENCE[currentDocIdx]
+          // Merge local state with persisted _uploadedDocs for resilience across re-renders
+          const allUploaded = [...new Set([...uploadedDocs, ...(msg._uploadedDocs || [])])]
+          const nextDocIdx = DOC_SEQUENCE.findIndex(d => !allUploaded.includes(d.key))
+          const currentDoc = nextDocIdx === -1 ? null : DOC_SEQUENCE[nextDocIdx]
+
+          // All required docs done — transition to final review on next render
           if (!currentDoc) return null
+
           return (
             <DocUploadPrompt
-              key={`${msg.id}-${currentDocIdx}`}
-              sessionId={msg._sessionId}
-              userId={msg._userId}
+              key={`${msg.id}-doc-${nextDocIdx}`}
+              sessionId={msg._sessionId || sessionId}
+              userId={msg._userId || userId}
               currentDoc={currentDoc}
-              uploadedDocs={uploadedDocs}
+              uploadedDocs={allUploaded}
               onDocUploaded={(docKey, filename, data) => {
-                const next = [...uploadedDocs, docKey]
+                const next = [...new Set([...allUploaded, docKey])]
                 setUploadedDocs(next)
-                // Advance to next doc or show final review
-                const nextIdx = currentDocIdx + 1
-                if (nextIdx < DOC_SEQUENCE.length) {
-                  setCurrentDocIdx(nextIdx)
-                } else {
+                onUpdateMsg && onUpdateMsg(msg.id, { _uploadedDocs: next })
+                if (data?.show_submit || data?.complete) {
                   setShowFinalReview(true)
+                  return
+                }
+                const stillPending = DOC_SEQUENCE.findIndex(d => !next.includes(d.key))
+                if (stillPending === -1) {
+                  setShowFinalReview(true)
+                } else {
+                  setCurrentDocIdx(stillPending)
                 }
               }}
               onSkip={() => {
-                const nextIdx = currentDocIdx + 1
-                if (nextIdx < DOC_SEQUENCE.length) {
-                  setCurrentDocIdx(nextIdx)
-                } else {
+                const next = [...new Set([...allUploaded, currentDoc.key])]
+                setUploadedDocs(next)
+                onUpdateMsg && onUpdateMsg(msg.id, { _uploadedDocs: next })
+                const stillPending = DOC_SEQUENCE.findIndex(d => !next.includes(d.key))
+                if (stillPending === -1) {
                   setShowFinalReview(true)
+                } else {
+                  setCurrentDocIdx(stillPending)
                 }
               }}
             />
@@ -1369,12 +1298,12 @@ function Message({ msg, onFollowup, language }) {
         })()}
 
         {/* ── Final review + Proceed button ── */}
-        {!msg.streaming && (showFinalReview || (msg.open_upload && uploadedDocs.length >= 3)) && (
+        {!msg.streaming && (showFinalReview || (msg.open_upload && [...new Set([...uploadedDocs, ...(msg._uploadedDocs || [])])].length >= DOC_SEQUENCE.filter(d => !d.optional).length)) && (
           <FinalReviewPanel
-            sessionId={msg._sessionId}
-            userId={msg._userId}
+            sessionId={msg._sessionId || sessionId}
+            userId={msg._userId || userId}
             confirmationFields={msg._confirmationFields}
-            uploadedDocs={uploadedDocs}
+            uploadedDocs={[...new Set([...uploadedDocs, ...(msg._uploadedDocs || [])])]}
             language={language}
             onPaymentLink={(data) => {
               const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
@@ -1387,6 +1316,73 @@ function Message({ msg, onFollowup, language }) {
         )}
       </div>
     </div>
+  )
+}
+
+// ── Navbar Submit Button ──────────────────────────────────────────────────
+function NavbarSubmitButton({ sessionId, userId, enabled = false, onResult }) {
+  const [submitting, setSubmitting] = React.useState(false)
+
+  async function handleSubmit() {
+    if (submitting || !sessionId || !enabled) return
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/finalize-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+          trigger_automation: true,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || data.message || 'Failed')
+      const paymentUrl = data?.payment_info?.url || data?.payment_info?.payment_url
+      onResult(paymentUrl
+        ? `✅ Application submitted!\n\n💳 **[Click here to pay →](${paymentUrl})**\n\nYour acknowledgment number will be emailed after payment.`
+        : `✅ Application submitted! ${data?.message || 'The automation is running — browser will open shortly.'}`)
+    } catch (e) {
+      onResult(`⚠️ Could not start automation: ${e.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!enabled) {
+    return (
+      <button
+        disabled
+        title="Complete all details and upload documents to enable"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap
+          bg-white/[0.03] border border-white/[0.06] text-white/20 cursor-not-allowed"
+      >
+        🚀 Submit to NSDL
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleSubmit}
+      disabled={submitting}
+      title="All details and documents collected — click to submit your PAN application to NSDL"
+      className={cn(
+        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap',
+        submitting
+          ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/50 cursor-not-allowed'
+          : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 hover:border-emerald-400/60 active:scale-95 animate-pulse-once'
+      )}
+    >
+      {submitting ? (
+        <><span className="w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin flex-shrink-0" /> Submitting…</>
+      ) : (
+        <>🚀 Submit to NSDL</>
+      )}
+    </button>
   )
 }
 
@@ -1430,6 +1426,8 @@ export default function App() {
   }, [user])
   const [agentConsent, setAgentConsent] = useState(null)
   const [consentError, setConsentError] = useState(null)
+  // Tracks whether all details + documents are complete — enables the navbar submit button
+  const [applicationReady, setApplicationReady] = useState(false)
   // Voice response toggle - when enabled, agent responds with voice even for text input
   // Default to true for better voice experience - users can disable if needed
   const [voiceResponseEnabled, setVoiceResponseEnabled] = useState(() => {
@@ -1455,6 +1453,7 @@ export default function App() {
   const activeTTSSourceRef = useRef(null)  // currently playing BufferSourceNode — stopped on new TTS
   const activeTTSAbortRef = useRef(null)   // AbortController for in-flight TTS fetch
   const bottomRef = useRef(null)
+  const scrollContainerRef = useRef(null) // scrollable messages area — scrolled directly
 
   // Create (or reuse) the shared TTS AudioContext
   function _getTTSAudioCtx() {
@@ -1491,7 +1490,14 @@ export default function App() {
   }
   
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll the messages container to the bottom whenever messages change or
+    // loading state changes. Using scrollTop on the container directly is more
+    // reliable than scrollIntoView when content streams in rapidly — it avoids
+    // the browser landing on an intermediate position under the fixed input bar.
+    const el = scrollContainerRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
   }, [messages, loading])
 
   function handleLogin(userData) {
@@ -1561,6 +1567,8 @@ export default function App() {
       const historyMsgs = (data.history || []).map((m, i) => ({
         id: i, role: m.role === 'assistant' ? 'bot' : m.role,
         content: m.content, sources: [], followups: [],
+        _sessionId: id,
+        _userId: user?.id,
       }))
 
       // ── Resume banner: inject a synthetic bot message if flow is in progress ─
@@ -1682,7 +1690,25 @@ export default function App() {
     setSessionId(null); sessionIdRef.current = null; setStarted(false); setSessions([])
   }
 
-  // ── Shared AudioContext for TTS playback (bypasses autoplay policy) ──────
+  // ── Poll flow-state to update applicationReady flag ─────────────────────
+  useEffect(() => {
+    if (!sessionId || !user?.id) { setApplicationReady(false); return }
+
+    async function checkReadiness() {
+      try {
+        const res = await fetch(
+          `/api/chat/flow-status/${user.id}/${sessionId}`,
+          { credentials: 'include' }
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        setApplicationReady(data.application_ready || data.complete || false)
+      } catch { /* ignore */ }
+    }
+
+    checkReadiness()
+    // Re-check whenever messages update (new bot message may have advanced the flow)
+  }, [sessionId, user?.id, messages.length]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const unlock = () => {
       const ctx = audioCtxTTSRef.current
@@ -1793,7 +1819,6 @@ export default function App() {
     if (!options?.choices?.length) return ''
     const choiceList = options.choices
     if (language === 'ta') return 'உங்கள் விருப்பங்கள்: ' + choiceList.join(', ') + '.'
-    if (language === 'hi') return 'आपके विकल्प हैं: ' + choiceList.join(', ') + '.'
     const readable = choiceList.map(c => c.replace(/\s*\/\s*/g, ' or '))
     if (readable.length === 1) return `Your option is: ${readable[0]}.`
     const last = readable[readable.length - 1]
@@ -1889,7 +1914,7 @@ export default function App() {
         const freshFields = data.confirmation_fields || null
         setMessages(prev => prev.map(m => {
           if (m.id === botId) {
-            return { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: data.guided === true && !!(data.options || data.confirm_action), streaming: false, elapsed_ms: data.elapsed_ms, confirmation_fields: freshFields }
+            return { ...m, content: reply, sources: data.sources || [], followups: data.followups || [], options: data.options || null, confirm_action: data.confirm_action || false, guided: data.guided === true && !!(data.options || data.confirm_action || data.form_fields), streaming: false, elapsed_ms: data.elapsed_ms, confirmation_fields: freshFields, form_fields: data.form_fields || null, missing_fields_form: data.missing_fields_form || null, show_submit: data.show_submit || false, _sessionId: requestSid, _userId: user?.id }
           }
           // Sync all older confirmation panels with the fresh field data
           if (freshFields && m.confirmation_fields) {
@@ -2096,22 +2121,37 @@ export default function App() {
 
     const detectDocType = (filename) => {
       const name = filename.toLowerCase()
+      const ext = name.split('.').pop()
+      const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext)
+
       if (name.includes('aadhaar') || name.includes('aadhar')) return 'aadhaar'
       if (name.includes('driving') || name.includes('license') || name.includes('licence') || name.includes('dl')) return 'driving_license'
-      if (name.includes('photo') || name.includes('photograph') || name.includes('pic') || name.includes('selfie') || name.includes('image')) return 'profile_photo'
+      if (name.includes('photo') || name.includes('photograph') || name.includes('pic') || name.includes('selfie') || name.includes('image') || name.includes('portrait') || name.includes('face')) return 'photograph'
       if (name.includes('sign') || name.includes('signature')) return 'signature'
+
+      // Check message text for hints
       if (messageText) {
         const msg = messageText.toLowerCase()
         if (msg.includes('aadhaar') || msg.includes('aadhar')) return 'aadhaar'
         if (msg.includes('driving') || msg.includes('license') || msg.includes('dl')) return 'driving_license'
-        if (msg.includes('photo') || msg.includes('photograph') || msg.includes('pic')) return 'profile_photo'
+        if (msg.includes('photo') || msg.includes('photograph') || msg.includes('pic') || msg.includes('my photo') || msg.includes('my picture')) return 'photograph'
         if (msg.includes('sign') || msg.includes('signature')) return 'signature'
+        if (msg.includes('aadhaar') || msg.includes('identity')) return 'aadhaar'
       }
-      // Default to unknown - let backend detect
+
+      // Default: if it's an image file with no other hint, treat as photograph
+      // (plain face photos often have no recognizable filename)
+      if (isImage) return 'photograph'
+
+      // PDFs with no hint — likely Aadhaar or driving license
+      if (ext === 'pdf') return 'aadhaar'
+
       return 'unknown'
     }
 
     let allOk = true
+    const uploadedDocKeys = []  // track doc types successfully uploaded this batch
+    let anyShowSubmit = false
     for (const file of fileList) {
       const docType = detectDocType(file.name)
 
@@ -2140,6 +2180,15 @@ export default function App() {
         return
       }
 
+      // Track which doc type was confirmed uploaded (use server-detected type if available)
+      const confirmedDocType = result.data?.detected_doc_type || docType
+      if (confirmedDocType && confirmedDocType !== 'unknown') {
+        uploadedDocKeys.push(confirmedDocType)
+      }
+      if (result.data?.show_submit || result.data?.complete) {
+        anyShowSubmit = true
+      }
+
       botMessages.push({
         msg: result.agentMessage,
         requiresCompletion: result.data?.requires_completion,
@@ -2154,12 +2203,27 @@ export default function App() {
     // Check if any results require manual completion
     const firstResultWithMissingFields = botMessages.find(m => m.requiresCompletion)
     
-    setMessages(prev => [...prev, {
-      id: nextId(), role: 'bot',
-      content: botMessages.map(m => m.msg).join('\n\n'),
-      sources: [], followups: [],
-      missing_fields_form: firstResultWithMissingFields?.missingFieldsForm || null
-    }])
+    setMessages(prev => {
+      // Merge newly uploaded doc keys with any already tracked in previous messages
+      const existingDocKeys = prev.flatMap(m => m._uploadedDocs || [])
+      const allUploadedDocs = [...new Set([...existingDocKeys, ...uploadedDocKeys])]
+      const requiredDocKeys = ['photograph', 'signature', 'aadhaar']
+      const allDocsNowDone = requiredDocKeys.every(k => allUploadedDocs.includes(k))
+
+      return [...prev, {
+        id: nextId(), role: 'bot',
+        content: botMessages.map(m => m.msg).join('\n\n'),
+        sources: [], followups: [],
+        missing_fields_form: firstResultWithMissingFields?.missingFieldsForm || null,
+        // Track uploaded docs so canSubmit can detect completion
+        _uploadedDocs: uploadedDocKeys,
+        _sessionId: sessionId,
+        _userId: user?.id,
+        // If all required docs are now uploaded, signal submit-ready
+        show_submit: anyShowSubmit || allDocsNowDone,
+        complete: anyShowSubmit || allDocsNowDone,
+      }]
+    })
   }
 
   return (
@@ -2200,7 +2264,7 @@ export default function App() {
 
             {/* Main area — shifts right when sidebar open on desktop */}
             <div className={cn(
-              'flex flex-col flex-1 min-h-[100svh] transition-all duration-200',
+              'flex flex-col flex-1 min-h-[100svh] overflow-hidden transition-all duration-200',
               sidebarOpen ? 'md:ml-60' : 'ml-0'
             )}>
 
@@ -2216,11 +2280,31 @@ export default function App() {
 
                 {/* Right: Controls */}
                 <div className="flex items-center gap-2 flex-shrink-0">
+
+                  {/* ── Submit to NSDL — always visible, enabled when all details + docs ready ── */}
+                  {(() => {
+                    // Also check frontend signals for immediate response (before backend confirms)
+                    const frontendReady = messages.some(m => m.show_submit || m.complete)
+                    const requiredDocKeys = ['photograph', 'signature', 'aadhaar']
+                    const uploadedDocKeys = messages.flatMap(m => m._uploadedDocs || [])
+                    const allDocsUploaded = requiredDocKeys.every(k => uploadedDocKeys.includes(k))
+                    const canSubmit = applicationReady || frontendReady || allDocsUploaded
+                    if (!started) return null
+                    return (
+                      <NavbarSubmitButton
+                        sessionId={sessionId}
+                        userId={user?.id}
+                        enabled={canSubmit}
+                        onResult={(msg) => setMessages(prev => [...prev, {
+                          id: nextId(), role: 'bot', content: msg, sources: [], followups: [],
+                        }])}
+                      />
+                    )
+                  })()}
                   {/* ── Language switcher ─────────────────────────────── */}
                   <div className="flex items-center gap-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg p-0.5">
                     {[
                       { code: 'en', label: 'EN' },
-                      { code: 'hi', label: 'हिं' },
                       { code: 'ta', label: 'தமி' },
                     ].map(({ code, label }) => (
                       <button
@@ -2235,7 +2319,7 @@ export default function App() {
                             ? 'bg-purple-600 text-white shadow-sm'
                             : 'text-white/40 hover:text-white/70'
                         )}
-                        title={code === 'en' ? 'English' : code === 'hi' ? 'Hindi' : 'Tamil'}
+                        title={code === 'en' ? 'English' : 'Tamil'}
                       >
                         {label}
                       </button>
@@ -2311,8 +2395,14 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Scrollable messages */}
-              <div className="flex flex-col flex-1 pt-20 pb-40 px-4 sm:px-6">
+              {/* Scrollable messages — this div owns the scroll, not the page body.
+                  overflow-y-auto + fixed height keeps the latest message visible
+                  above the fixed input bar regardless of how many messages arrive. */}
+              <div
+                ref={scrollContainerRef}
+                className="flex flex-col flex-1 overflow-y-auto pt-20 pb-40 px-4 sm:px-6"
+                style={{ height: '100svh' }}
+              >
                 <div className="w-full max-w-2xl mx-auto flex flex-col flex-1">
 
                   {/* Landing */}
@@ -2320,13 +2410,11 @@ export default function App() {
                     <div className="flex flex-col items-center justify-center flex-1 text-center gap-4 min-h-[60vh]">
                       <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight shiny-text"
                         style={{ fontFamily: 'Syne, sans-serif' }}>
-                        {language === 'ta' ? 'நான் உங்களுக்கு எப்படி உதவலாம்?' : language === 'hi' ? 'मैं आपकी कैसे मदद करूँ?' : 'What can I help you with?'}
+                        {language === 'ta' ? 'நான் உங்களுக்கு எப்படி உதவலாம்?'  : 'What can I help you with?'}
                       </h2>
                       <p className="text-sm max-w-sm mx-auto leading-relaxed text-neutral-500">
                         {language === 'ta'
                           ? 'PAN Card, Aadhaar இணைப்பு, TAN, TDS அல்லது ஆவண தேவைகள் பற்றி கேளுங்கள்.'
-                          : language === 'hi'
-                          ? 'PAN Card, Aadhaar लिंकिंग, TAN, TDS या दस्तावेज़ आवश्यकताओं के बारे में पूछें।'
                           : 'Ask me anything about PAN cards, Aadhaar linking, TAN, TDS, or document requirements.'
                         }
                       </p>
@@ -2336,7 +2424,13 @@ export default function App() {
                   {/* Messages */}
                   <div className="space-y-5 sm:space-y-6">
                     {messages.map(msg => (
-                      <Message key={msg.id} msg={msg} language={language} onFollowup={(q, msgId) => {
+                      <Message key={msg.id} msg={msg} language={language}
+                        sessionId={sessionId}
+                        userId={user?.id}
+                        onUpdateMsg={(msgId, patch) => {
+                          setMessages(prev => prev.map(m => m.id === msgId ? { ...m, ...patch } : m))
+                        }}
+                        onFollowup={(q, msgId) => {
                         // q can be a string or { command, display } object from Save All
                         if (q && typeof q === 'object' && q.command) {
                           if (msgId && q.updatedFields) {
@@ -2412,8 +2506,6 @@ export default function App() {
                     placeholder={
                       language === 'ta'
                         ? 'PAN Card பற்றி கேளுங்கள் அல்லது ஆவணங்களை இணைக்கவும்...'
-                        : language === 'hi'
-                        ? 'PAN Card के बारे में पूछें या दस्तावेज़ संलग्न करें...'
                         : 'Ask about PAN cards, or attach documents with your details...'
                     }
                     draftValue={drafts[sessionId] ?? ''}

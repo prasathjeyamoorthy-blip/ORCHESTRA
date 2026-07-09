@@ -68,6 +68,17 @@ class PANApplicationWorkflow:
     def _navigate_to_registration(self) -> None:
         """Navigate to registration page and handle cookies."""
         print("[*] Navigating to registration page...")
+
+        # Brief warm-up visit — establishes a real browsing history so
+        # Google's reCAPTCHA risk engine treats this session as lower-risk.
+        try:
+            self.page.goto("https://www.google.com", wait_until="domcontentloaded", timeout=15000)
+            BrowserManager.wait(self.page, 1500)
+            self.page.goto("https://www.incometax.gov.in", wait_until="domcontentloaded", timeout=15000)
+            BrowserManager.wait(self.page, 1000)
+        except Exception:
+            pass  # warm-up is best-effort
+
         self.page.goto(PAN_REGISTRATION_URL)
         self.page.wait_for_load_state("networkidle")
         BrowserManager.wait(self.page, 2000)
@@ -88,6 +99,15 @@ class PANApplicationWorkflow:
     def _handle_captcha(self) -> None:
         """Solve reCAPTCHA if present."""
         print("[*] Handling CAPTCHA...")
+        # Wait for reCAPTCHA iframes to load before handing off to the solver
+        print("[*] Waiting for reCAPTCHA to load...")
+        for _ in range(20):
+            if any("recaptcha" in f.url for f in self.page.frames):
+                print("[*] reCAPTCHA iframe detected")
+                break
+            BrowserManager.wait(self.page, 1000)
+        else:
+            print("[!] reCAPTCHA iframe not detected after 20s — attempting solve anyway")
         solver = CaptchaSolver(self.page)
         solver.solve()
     

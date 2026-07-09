@@ -6,19 +6,17 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
 
-# Audio processing (main_simple.py uses only wave from stdlib)
-# For production/CLI agents that need these:
-# av==17.1.0
-# numpy>=2.0.0        # Updated for Python 3.14 compatibility
-# sounddevice==0.4.6  # For microphone input (CLI recording)
-# scipy>=1.14.0       # Updated for Python 3.14 compatibility
+# Audio processing
+numpy>=2.0.0
+
+# Audio decoding (required by pan-rag/api/voice.py to decode webm/ogg/wav → WAV)
+av==13.1.0
+# sounddevice==0.4.6  # For microphone input (CLI recording only)
+# scipy>=1.14.0       # If using audio signal processing
 
 # Sarvam AI SDK for STT/TTS
 # Note: sarvamai 0.1.5 requires pydantic-core>=2.18.2
 sarvamai==0.1.5
-
-# NVIDIA RIVA for STT (NVIDIA NIM integration)
-nvidia-riva-client==2.14.0
 
 # HTTP clients for service connectivity
 httpx==0.26
@@ -31,4 +29,3 @@ hiredis==2.2.3
 # Utilities
 pydantic>=2.7
 pydantic-settings>=2.1.0
-

@@ -59,10 +59,26 @@ def main():
             print(f"\n[ERROR] Application failed: {e}")
             import traceback
             traceback.print_exc()
+            # Take a screenshot so the failure state is visible
+            try:
+                import datetime
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_path = f"failure_{ts}.png"
+                page.screenshot(path=screenshot_path, full_page=True)
+                print(f"[*] Failure screenshot saved: {screenshot_path}")
+            except Exception:
+                pass
+            # Keep browser open for 60 seconds so the developer can inspect the state
+            print("[*] Browser will stay open for 60 seconds for inspection...")
+            try:
+                page.wait_for_timeout(60_000)
+            except Exception:
+                pass
             return 1
         
         finally:
-            # Cleanup
+            # Cleanup — only runs after the 60s wait above on failure,
+            # or immediately on success
             context.close()
             browser.close()
     

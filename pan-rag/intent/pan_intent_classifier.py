@@ -267,15 +267,19 @@ def _pass3_llm(question: str) -> Optional[PANIntent]:
     try:
         import os
         from openai import OpenAI
+        from config import LLM_API_KEY, LLM_BASE_URL, LLM_PROVIDER
 
-        api_key  = os.getenv("NVIDIA_API_KEY")
-        base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-        model    = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
+        # Use a small/fast model for classification — just needs a label output
+        _CLASSIFY_MODELS = {
+            "groq":   os.getenv("GROQ_CLASSIFY_MODEL", "llama-3.1-8b-instant"),
+            "nvidia": os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct"),
+        }
+        model = _CLASSIFY_MODELS.get(LLM_PROVIDER, "llama-3.1-8b-instant")
 
-        if not api_key:
+        if not LLM_API_KEY:
             return None
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": _LLM_CLASSIFY_PROMPT.format(question=question)}],

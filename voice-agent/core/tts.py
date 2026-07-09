@@ -1,70 +1,55 @@
 """
-core/tts.py — Text to Speech via NVIDIA NIM (nvidia/magpie-tts-multilingual)
+core/tts.py — Text to Speech via Sarvam AI (bulbul:v3)
 """
 
+import io
 import re
+import base64
+import wave
 import numpy as np
 import sounddevice as sd
 
 import config
 
-try:
-    import riva.client as riva
-    _RIVA_OK = True
-except ImportError:
-    _RIVA_OK = False
 
-_GRPC_SERVER = "grpc.nvcf.nvidia.com:443"
-_FUNCTION_ID = "877104f7-e885-42b9-8de8-f6e4c6303969"
+# ── Lazy Sarvam client ────────────────────────────────────────
+_sarvam_client = None
 
-# Sentence-ending punctuation for splitting
-_SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
+def _get_client():
+    global _sarvam_client
+    if _sarvam_client is None:
+        from sarvamai import SarvamAI
+        _sarvam_client = SarvamAI(api_subscription_key=config.SARVAM_API_KEY)
+        print("  TTS → Sarvam AI bulbul:v3")
+    return _sarvam_client
 
 
 class TextToSpeech:
 
     def __init__(self):
-        if not _RIVA_OK:
-            raise ImportError("nvidia-riva-client is not installed. Run: pip install nvidia-riva-client")
+        _get_client()
+        print("  ✅ TTS ready (Sarvam bulbul:v3)")
 
-        auth = riva.Auth(
-            uri=_GRPC_SERVER,
-            use_ssl=True,
-            metadata_args=[
-                ["function-id",   _FUNCTION_ID],
-                ["authorization", f"Bearer {config.TTS_API_KEY}"],
-            ],
-        )
-        self._tts = riva.SpeechSynthesisService(auth)
-        print("  TTS → NVIDIA NIM magpie-tts-multilingual  (cloud gRPC)")
-        print(f"  Voice: {config.TTS_VOICE}")
-        print("  ✅ TTS ready")
-
-    # ── Text cleaning ──────────────────────────────────────────────
+    # ── Text cleaning ──────────────────────────────────────────
 
     def clean(self, text: str) -> str:
         """Strip markdown/symbols and convert to natural spoken text."""
-        # Remove think tags
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-        # Strip markdown formatting
         text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
         text = re.sub(r'#{1,6}\s*', '', text)
         text = re.sub(r'`{1,3}[^`]*`{1,3}', '', text)
         text = re.sub(r'---+', '', text)
-        # Links → just the label
         text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
         text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
-        # List markers → natural flow (keep the text, remove the bullet)
         text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.MULTILINE)
         text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
 
-        # Currency — spoken naturally
+        # Currency
         text = re.sub(r'₹\s*([\d,]+)', lambda m: m.group(1).replace(',', '') + ' rupees', text)
         text = re.sub(r'Rs\.?\s*([\d,]+)', lambda m: m.group(1).replace(',', '') + ' rupees', text)
 
-        # Abbreviations → spoken form
+        # Abbreviations
         _ABBREVS = {
-            r'\bPAN\b':     'PAN',          # keep as-is, TTS handles it
             r'\bTDS\b':     'T D S',
             r'\bTCS\b':     'T C S',
             r'\bNSDL\b':    'N S D L',
@@ -80,38 +65,26 @@ class TextToSpeech:
             r'\bi\.e\.\b':  'that is',
             r'\betc\.\b':   'and so on',
             r'\bvs\.\b':    'versus',
-            r'\bw/o\b':     'without',
-            r'\bw/\b':      'with',
             r'\b&\b':       'and',
         }
         for pattern, replacement in _ABBREVS.items():
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
-        # Numbers to words (skip years and very large numbers)
-        text = _numbers_to_words(text)
-
-        # Collapse whitespace
         text = re.sub(r'\n+', ' ', text)
         text = re.sub(r'\s{2,}', ' ', text)
         return text.strip()
 
     def split_sentences(self, text: str) -> list[str]:
-        """
-        Split into chunks that fit within the TTS model's 400-char limit.
-        Splits on sentence boundaries first, then hard-splits long chunks.
-        """
-        # Split on sentence-ending punctuation
+        """Split into chunks ≤ 350 chars (safe under Sarvam's 500-char limit)."""
         raw = re.split(r'(?<=[.!?])\s+', text)
         chunks = []
         for s in raw:
             s = s.strip()
             if not s:
                 continue
-            # Hard split if a single sentence exceeds 350 chars (safe margin under 400)
             if len(s) <= 350:
                 chunks.append(s)
             else:
-                # Split on clause boundaries: comma, semicolon
                 parts = re.split(r'(?<=[,;])\s+', s)
                 current = ""
                 for part in parts:
@@ -120,7 +93,6 @@ class TextToSpeech:
                     else:
                         if current:
                             chunks.append(current)
-                        # If single part still too long, split by words
                         if len(part) > 350:
                             words = part.split()
                             current = ""
@@ -138,105 +110,112 @@ class TextToSpeech:
 
         return [c for c in chunks if c.strip()]
 
-    # ── Synthesis ──────────────────────────────────────────────────
+    # ── Synthesis ──────────────────────────────────────────────
 
-    def _synthesise(self, text: str) -> bytes | None:
+    def _synthesise(self, text: str, language: str = "en") -> bytes | None:
         """
-        Synthesise text → raw LINEAR_PCM bytes (22050 Hz, mono, 16-bit).
-        Returns None on failure instead of raising so the caller can skip.
+        Synthesise one chunk → raw WAV bytes via Sarvam bulbul:v3.
+        Returns None on failure so the caller can skip the chunk.
         """
         text = text.strip()
         if not text:
             return None
+
         try:
-            resp = self._tts.synthesize(
-                text,
-                voice_name=config.TTS_VOICE,
-                language_code=config.TTS_LANGUAGE,
-                encoding=riva.AudioEncoding.LINEAR_PCM,
-                sample_rate_hz=config.TTS_SAMPLE_RATE,
+            client = _get_client()
+            cfg = config.SARVAM_VOICE_CONFIGS.get(language, config.SARVAM_VOICE_CONFIGS["en"])
+
+            response = client.text_to_speech.convert(
+                model=config.SARVAM_TTS_MODEL,
+                text=text,
+                target_language_code=cfg["tts_language"],
+                speaker=cfg["tts_speaker"],
+                speech_sample_rate=config.TTS_SAMPLE_RATE,
+                pace=1.0,
             )
-            return resp.audio if resp.audio else None
+
+            if not (hasattr(response, "audios") and response.audios):
+                print(f"[TTS] No audio returned for: {text[:60]!r}")
+                return None
+
+            wav_chunks = [base64.b64decode(chunk) for chunk in response.audios]
+
+            if len(wav_chunks) == 1:
+                return wav_chunks[0]
+
+            # Multiple chunks — merge PCM into one WAV
+            pcm_parts = []
+            params = None
+            for wav_bytes in wav_chunks:
+                buf = io.BytesIO(wav_bytes)
+                with wave.open(buf, "rb") as wf:
+                    if params is None:
+                        params = wf.getparams()
+                    pcm_parts.append(wf.readframes(wf.getnframes()))
+
+            merged = io.BytesIO()
+            with wave.open(merged, "wb") as wf:
+                wf.setparams(params)
+                for pcm in pcm_parts:
+                    wf.writeframes(pcm)
+            return merged.getvalue()
+
         except Exception as e:
             print(f"[TTS] Synthesis error for text '{text[:60]}...': {e}")
             return None
 
-    def _play_pcm(self, pcm_bytes: bytes):
-        """Play raw 16-bit mono PCM through sounddevice (CLI mode)."""
-        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        sd.play(samples, samplerate=config.TTS_SAMPLE_RATE)
+    def _play_wav(self, wav_bytes: bytes):
+        """Play WAV bytes through sounddevice (CLI mode)."""
+        buf = io.BytesIO(wav_bytes)
+        with wave.open(buf, "rb") as wf:
+            sample_rate = wf.getframerate()
+            pcm = wf.readframes(wf.getnframes())
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        sd.play(samples, samplerate=sample_rate)
         sd.wait()
 
-    def speak(self, text: str):
+    def speak(self, text: str, language: str = "en"):
         """CLI mode: clean → split → synthesise → play each sentence."""
         clean_text = self.clean(text)
         if not clean_text:
             return
         for sentence in self.split_sentences(clean_text):
             if sentence.strip():
-                pcm = self._synthesise(sentence)
-                if pcm:
-                    self._play_pcm(pcm)
+                wav = self._synthesise(sentence, language)
+                if wav:
+                    self._play_wav(wav)
 
-    def synthesise_full(self, text: str) -> bytes:
+    def synthesise_full(self, text: str, language: str = "en") -> bytes:
         """
         Server mode: clean → split → synthesise all sentences → return
-        concatenated raw PCM bytes ready to be wrapped in a WAV container.
-        Returns empty bytes if synthesis fails entirely.
+        concatenated WAV bytes. Returns empty bytes if synthesis fails.
         """
         clean_text = self.clean(text)
         if not clean_text:
             return b""
 
-        all_pcm = b""
+        pcm_parts = []
+        params = None
+
         for sentence in self.split_sentences(clean_text):
             sentence = sentence.strip()
             if not sentence:
                 continue
-            pcm = self._synthesise(sentence)
-            if pcm:
-                all_pcm += pcm
+            wav = self._synthesise(sentence, language)
+            if not wav:
+                continue
+            buf = io.BytesIO(wav)
+            with wave.open(buf, "rb") as wf:
+                if params is None:
+                    params = wf.getparams()
+                pcm_parts.append(wf.readframes(wf.getnframes()))
 
-        return all_pcm
+        if not pcm_parts or params is None:
+            return b""
 
-
-# ── Number → words ─────────────────────────────────────────────────────────────
-
-def _num_to_words(n: int) -> str:
-    if n == 0:
-        return "zero"
-    ones = ["", "one", "two", "three", "four", "five", "six", "seven",
-            "eight", "nine", "ten", "eleven", "twelve", "thirteen",
-            "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
-    tens = ["", "", "twenty", "thirty", "forty", "fifty",
-            "sixty", "seventy", "eighty", "ninety"]
-
-    def _below_1000(num):
-        if num == 0:   return ""
-        elif num < 20: return ones[num]
-        elif num < 100:
-            r = ones[num % 10]
-            return tens[num // 10] + (" " + r if r else "")
-        else:
-            r = _below_1000(num % 100)
-            return ones[num // 100] + " hundred" + (" " + r if r else "")
-
-    parts = []
-    if n >= 10_000_000: parts.append(_below_1000(n // 10_000_000) + " crore");  n %= 10_000_000
-    if n >= 100_000:    parts.append(_below_1000(n // 100_000) + " lakh");      n %= 100_000
-    if n >= 1_000:      parts.append(_below_1000(n // 1_000) + " thousand");    n %= 1_000
-    if n > 0:           parts.append(_below_1000(n))
-    return " ".join(parts)
-
-
-def _numbers_to_words(text: str) -> str:
-    def _replace(m):
-        raw = m.group(0).replace(",", "")
-        try:
-            n = int(raw)
-        except ValueError:
-            return m.group(0)
-        if 1900 <= n <= 2099: return m.group(0)   # keep years as digits
-        if len(raw) >= 12:    return m.group(0)   # skip huge numbers
-        return _num_to_words(n)
-    return re.sub(r'\b[\d,]+\b', _replace, text)
+        merged = io.BytesIO()
+        with wave.open(merged, "wb") as wf:
+            wf.setparams(params)
+            for pcm in pcm_parts:
+                wf.writeframes(pcm)
+        return merged.getvalue()

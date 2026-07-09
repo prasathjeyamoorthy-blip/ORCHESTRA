@@ -21,9 +21,13 @@ export function useDocumentDownload() {
     const mek = getSessionKey();
     if (!mek) { onNotLoggedIn(); return []; }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { onNotLoggedIn(); return []; }
+
     const { data, error } = await supabase
       .from("document_meta")
       .select("id, storage_path, original_filename, original_mime_type, file_size_bytes, created_at")
+      .eq("user_id", user.id)        // always scope to current user
       .order("created_at", { ascending: false });
 
     if (error || !data) return [];
@@ -125,5 +129,48 @@ export function useDocumentDownload() {
     }
   }
 
-  return { listDocuments, download, downloading, error };
+  /**
+   * Delete a document — removes the encrypted blob from Storage
+   * and the metadata row from document_meta.
+   */
+  async function deleteDocument(
+    doc: DocumentMeta,
+    onNotLoggedIn: () => void,
+  ): Promise<boolean> {
+    setError(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { onNotLoggedIn(); return false; }
+
+      // 1. Delete encrypted blob from Storage
+      const { error: storageErr } = await supabase.storage
+        .from("documents")
+        .remove([doc.storagePath]);
+
+      if (storageErr) {
+        // Non-fatal — blob may already be gone; proceed to clean up metadata
+        console.warn("[deleteDocument] Storage remove error:", storageErr.message);
+      }
+
+      // 2. Delete metadata row — this is the source of truth for the UI list
+      const { error: dbErr } = await supabase
+        .from("document_meta")
+        .delete()
+        .eq("id", doc.id)
+        .eq("user_id", user.id);   // RLS double-check
+
+      if (dbErr) {
+        setError("Failed to delete document record.");
+        return false;
+      }
+
+      return true;
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+      return false;
+    }
+  }
+
+  return { listDocuments, download, deleteDocument, downloading, error };
 }

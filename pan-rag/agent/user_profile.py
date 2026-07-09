@@ -75,6 +75,13 @@ def save_user_profile(user_id: str, profile_data: Dict[str, Any]) -> bool:
         if profile_data.get("mother_name"):  data["mother_name"]  = profile_data["mother_name"]
         if profile_data.get("email"):        data["email"]        = profile_data["email"]
         if profile_data.get("phone"):        data["phone"]        = profile_data["phone"]
+        if profile_data.get("mobile"):       data["phone"]        = profile_data["mobile"]   # mobile → phone column
+        if profile_data.get("title"):
+            # Store title inside pan_preferences JSONB since there's no dedicated column
+            pan_prefs = profile_data.get("pan_preferences") or {}
+            if isinstance(pan_prefs, dict):
+                pan_prefs["title"] = profile_data["title"]
+            profile_data["pan_preferences"] = pan_prefs
         if profile_data.get("salary") or profile_data.get("annual_income"):
             data["annual_income"] = profile_data.get("salary") or profile_data.get("annual_income")
 
@@ -132,9 +139,12 @@ def save_flow_to_profile(user_id: str, flow_state: Dict[str, Any]) -> bool:
         "full_name": flow_state.get("full_name"),
         "mother_name": flow_state.get("mother_name"),
         "email": flow_state.get("email"),
-        "phone": flow_state.get("phone"),
+        "phone": flow_state.get("mobile") or flow_state.get("phone"),
         "salary": flow_state.get("salary"),
-        "pan_preferences": extract_pan_preferences(flow_state),
+        "pan_preferences": {
+            **extract_pan_preferences(flow_state),
+            "title": flow_state.get("title"),
+        },
     }
     
     return save_user_profile(user_id, profile_data)
@@ -184,6 +194,14 @@ def prefill_flow_from_profile(user_id: str, flow_state: Dict[str, Any]) -> Dict[
     if not flow_state.get("phone") and profile.get("phone"):
         flow_state["phone"] = profile["phone"]
         print(f"[user_profile] Prefilled phone: {profile['phone']}")
+
+    if not flow_state.get("mobile") and profile.get("mobile"):
+        flow_state["mobile"] = profile["mobile"]
+        print(f"[user_profile] Prefilled mobile: {profile['mobile']}")
+
+    if not flow_state.get("title") and profile.get("title"):
+        flow_state["title"] = profile["title"]
+        print(f"[user_profile] Prefilled title: {profile['title']}")
     
     if not flow_state.get("salary") and profile.get("annual_income"):
         flow_state["salary"] = profile["annual_income"]
@@ -193,3 +211,5 @@ def prefill_flow_from_profile(user_id: str, flow_state: Dict[str, Any]) -> Dict[
     # are intentionally NOT prefilled here. They are asked explicitly each session
     # via the bulk-review / saved-preferences prompt so the user can change them.
     # Silently loading them would skip the questions and send the user to documents.
+
+    return flow_state

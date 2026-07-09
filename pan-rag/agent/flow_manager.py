@@ -19,15 +19,113 @@ class FlowManager:
         self.session_id = session_id
         self.user_id = user_id
         self.state = self._load()
+        # Rebuild pending_docs from collected_docs (handles disk load + server restarts)
+        if self.state.get("service_id") and not self.state.get("complete"):
+            self._rebuild_pending_docs()
         # If no local file, try to recover from Upstash (server restart)
         if not self._path().exists():
             self.load_from_memory()
+            # Rebuild again after memory restore
+            if self.state.get("service_id") and not self.state.get("complete"):
+                self._rebuild_pending_docs()
 
     # ── State persistence ────────────────────────────────────────
     def _path(self) -> Path:
         # Include user_id in path to prevent cross-user collisions
         safe_user_id = self.user_id.replace("/", "_").replace("\\", "_")[:50]
         return SESSIONS_DIR / safe_user_id / f"{self.session_id}.json"
+
+    def _rebuild_pending_docs(self):
+        """
+        Recalculate pending_docs from collected_docs.
+        Also scans the upload directory to recover documents uploaded but lost from state.
+        Called after loading from disk or memory to ensure consistency.
+        """
+        if not self.state.get("service_id"):
+            return
+        service = get_service(self.state["service_id"])
+        if not service:
+            return
+        all_doc_keys = list(service.get("documents", {}).keys())
+
+        # Build collected types from state
+        collected_types = {d.get("doc_type", "") for d in self.state.get("collected_docs", [])}
+
+        # Also scan upload directory to recover docs uploaded but lost from state
+        try:
+            from pathlib import Path
+            upload_dir = Path(__file__).parent.parent / "storage" / "uploads" / self.session_id
+            if upload_dir.exists():
+                # Map filename patterns to doc types
+                # Files are renamed by routes.py to {doc_type}_{timestamp}.{ext}
+                # but legacy or panel uploads may have original filenames
+                _EXACT_PREFIXES = {
+                    "aadhaar": "aadhaar",
+                    "photograph": "photograph",
+                    "signature": "signature",
+                    "driving_license": "driving_license",
+                }
+                _FUZZY_PATTERNS = [
+                    (["sign", "jsign", "applicant_sign"], "signature"),
+                    (["aadhaar", "aadhar", "jaadhar"], "aadhaar"),
+                    (["photo", "photograph", "jphoto", "portrait", "face", "selfie", "pic"], "photograph"),
+                    (["driving", "license", "dl", "licence"], "driving_license"),
+                ]
+
+                # Track image files that didn't match any pattern — candidate for photograph
+                unmatched_images = []
+
+                for f in upload_dir.iterdir():
+                    if not f.is_file():
+                        continue
+                    fname = f.stem.lower()  # filename without extension
+                    ext = f.suffix.lower().lstrip(".")
+
+                    # Try exact prefix match first (renamed files)
+                    matched_type = None
+                    for prefix, doc_key in _EXACT_PREFIXES.items():
+                        if fname.startswith(prefix):
+                            matched_type = doc_key
+                            break
+
+                    # Try fuzzy pattern match (original filenames)
+                    if not matched_type:
+                        for patterns, doc_key in _FUZZY_PATTERNS:
+                            if any(p in fname for p in patterns):
+                                matched_type = doc_key
+                                break
+
+                    # Track unmatched image files (likely photographs with non-descriptive names)
+                    if not matched_type and ext in ("jpg", "jpeg", "png", "webp"):
+                        unmatched_images.append(f)
+
+                    if matched_type and matched_type not in collected_types:
+                        collected_types.add(matched_type)
+                        self.state["collected_docs"].append({
+                            "filename": f.name,
+                            "doc_type": matched_type,
+                        })
+                        print(f"[FlowManager] Recovered from disk: {matched_type} ({f.name})")
+
+                # If photograph is still missing but we have unmatched image files,
+                # the most recent one is likely the applicant photograph
+                if "photograph" not in collected_types and unmatched_images:
+                    # Use the most recently modified image
+                    best = max(unmatched_images, key=lambda f: f.stat().st_mtime)
+                    collected_types.add("photograph")
+                    self.state["collected_docs"].append({
+                        "filename": best.name,
+                        "doc_type": "photograph",
+                    })
+                    print(f"[FlowManager] Recovered photograph from unmatched image: {best.name}")
+        except Exception as e:
+            print(f"[FlowManager] _rebuild_pending_docs scan error: {e}")
+
+        # pending = all doc keys that haven't been covered yet
+        self.state["pending_docs"] = [k for k in all_doc_keys if k not in collected_types]
+        # Also rebuild covered_categories
+        if not self.state.get("covered_categories"):
+            self.state["covered_categories"] = list(collected_types)
 
     def _load(self) -> dict:
         path = self._path()
@@ -57,6 +155,8 @@ class FlowManager:
             "full_name"          : None,   # Full name as in Aadhaar
             "grandfather_name"   : None,   # Grandfather's name
             "mother_name"        : None,   # Mother's name
+            "title"              : None,   # Title: Mr / Mrs / Ms / Dr
+            "mobile"             : None,   # 10-digit mobile number
             "email"              : None,   # Email for correspondence
             "email_source"       : None,   # "account" | "new"
             "salary"             : None,   # Annual income / salary
@@ -220,10 +320,9 @@ class FlowManager:
         service   = get_service(self.state["service_id"])
         rules     = service.get("smart_rules", {})
 
-        self.state["collected_docs"].append({
-            "filename": filename,
-            "doc_type": doc_type,
-        })
+        # Deduplicate: replace existing entry for this doc_type rather than appending
+        existing = [d for d in self.state["collected_docs"] if d.get("doc_type") != doc_type]
+        self.state["collected_docs"] = existing + [{"filename": filename, "doc_type": doc_type}]
 
         doc_lower = doc_type.lower()
         categories_covered = []

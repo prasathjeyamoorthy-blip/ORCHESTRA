@@ -2,12 +2,16 @@ const router = require('express').Router();
 const { createClient } = require('@supabase/supabase-js');
 const verifyToken = require('../middleware/verifyToken');
 const multer = require('multer');
+const crypto = require('crypto');
 const { encryptFile, decryptFile, encryptMetadata, decryptMetadata, deriveKey, generateSalt } = require('../utils/encryption');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+// Maximum documents a user can store
+const MAX_DOCUMENTS = 4;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,8 +35,48 @@ router.post('/', verifyToken, upload.single('file'), async (req, res) => {
 
   const userId = req.user.id;
   const encrypt = req.body.encrypt === 'true' || req.body.encrypt === true;
-  const userSecret = req.body.userSecret; // User's encryption secret (derived from password or OTP)
-  
+  const userSecret = req.body.userSecret;
+  const docType = (req.body.doc_type || '').toLowerCase() || null;
+
+  // ── 1. Check document count limit (max 4) ────────────────────
+  const { count, error: countError } = await supabase
+    .from('user_files')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (!countError && count >= MAX_DOCUMENTS) {
+    return res.status(400).json({
+      error: `Maximum ${MAX_DOCUMENTS} documents allowed. Please delete an existing document before uploading a new one.`,
+      code: 'MAX_DOCUMENTS_REACHED',
+      current_count: count,
+      max_allowed: MAX_DOCUMENTS,
+    });
+  }
+
+  // ── 2. Compute SHA-256 hash of the original file bytes ───────
+  const fileHash = crypto
+    .createHash('sha256')
+    .update(req.file.buffer)
+    .digest('hex');
+
+  // ── 3. Check if same file content already exists for this user ─
+  const { data: existing, error: hashError } = await supabase
+    .from('user_files')
+    .select('id, file_name, uploaded_at')
+    .eq('user_id', userId)
+    .eq('file_hash', fileHash)
+    .limit(1);
+
+  if (!hashError && existing && existing.length > 0) {
+    const dupe = existing[0];
+    return res.status(409).json({
+      error: 'This document has already been uploaded.',
+      code: 'DUPLICATE_DOCUMENT',
+      existing_file: dupe.file_name,
+      uploaded_at: dupe.uploaded_at,
+    });
+  }
+
   let fileBuffer = req.file.buffer;
   let encryptionMetadata = {};
   let originalFilename = req.file.originalname;
@@ -91,15 +135,17 @@ router.post('/', verifyToken, upload.single('file'), async (req, res) => {
     return res.status(500).json({ error: `Upload failed: ${storageError.message}` });
   }
 
-  // Save file record with encryption metadata
+  // Save file record with encryption metadata + hash + doc_type
   const { data, error: dbError } = await supabase
     .from('user_files')
     .insert({
       user_id: userId,
-      file_name: encrypt ? 'encrypted_file' : originalFilename, // Hide real filename if encrypted
+      file_name: encrypt ? 'encrypted_file' : originalFilename,
       file_path: filePath,
       file_size: fileBuffer.length,
       mime_type: encrypt ? 'application/octet-stream' : req.file.mimetype,
+      file_hash: fileHash,
+      doc_type: docType || null,
       ...encryptionMetadata
     })
     .select()

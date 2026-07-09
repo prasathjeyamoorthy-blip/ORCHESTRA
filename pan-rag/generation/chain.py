@@ -225,24 +225,25 @@ def _parse_profile_from_context(user_context: str) -> dict:
         return True
 
     patterns = {
-        "name":         r"-\s*Name:\s*(.+)",
-        "gender":       r"-\s*Gender:\s*(.+)",
-        "dob":          r"-\s*Date of birth:\s*(.+)",
-        "father_name":  r"-\s*Father'?s?\s+name:\s*(.+)",
-        "mother_name":  r"-\s*Mother'?s?\s+name:\s*(.+)",
-        "email":        r"-\s*Email:\s*(.+)",
-        "pan_number":   r"-\s*PAN number:\s*(.+)",
-        "aadhaar":      r"-\s*Aadhaar:\s*(.+)",
-        "income":       r"-\s*Annual income:\s*(.+)",
+        "name":             r"-\s*(?:Full\s+)?[Nn]ame:\s*(.+)",
+        "gender":           r"-\s*Gender:\s*(.+)",
+        "dob":              r"-\s*Date of birth:\s*(.+)",
+        "grandfather_name": r"-\s*Grandfather'?s?\s+name:\s*(.+)",
+        "father_name":      r"-\s*Father'?s?\s+name:\s*(.+)",
+        "mother_name":      r"-\s*Mother'?s?\s+name:\s*(.+)",
+        "email":            r"-\s*Email:\s*(.+)",
+        "pan_number":       r"-\s*PAN number:\s*(.+)",
+        "aadhaar":          r"-\s*Aadhaar:\s*(.+)",
+        "income":           r"-\s*Annual income:\s*(.+)",
         "source_of_income": r"-\s*Source of income:\s*(.+)",
-        "address":      r"-\s*Address:\s*(.+)",
+        "address":          r"-\s*Address:\s*(.+)",
     }
     for key, pat in patterns.items():
         m = re.search(pat, user_context, re.IGNORECASE)
         if m:
             val = m.group(1).strip()
             # Validate name fields — reject hallucinated values
-            if key in ("name", "father_name", "mother_name") and not _valid_name(val):
+            if key in ("name", "father_name", "mother_name", "grandfather_name") and not _valid_name(val):
                 continue
             profile[key] = val
     return profile
@@ -443,12 +444,19 @@ def _answer_from_profile(question: str, user_context: str, language: str = "en",
                     if not re.search(r'\b(mother|mom|father|dad|salary|income|email|₹)\b', seg, re.IGNORECASE):
                         m = re.match(
                             r"(?:my\s+)?(?:full\s+)?name\s*(?:is\s*)?[:\-]?\s*(.+)"
-                            r"|(?:call\s+me|i\s+am|i'm)\s+(.+)",
+                            r"|(?:call\s+me|i'm)\s+(.+)",
                             seg, re.IGNORECASE
                         )
                         if m:
                             c = _clean(m.group(1) or m.group(2) or "")
-                            if c and len(c) >= 2:
+                            # Reject if contains action/intent words — not a real name
+                            _name_reject = {
+                                "ready", "done", "fine", "good", "ok", "okay", "here",
+                                "not", "pan", "registration", "apply", "application",
+                                "going", "trying", "planning", "interested", "available",
+                                "happy", "pleased", "excited", "waiting", "looking"
+                            }
+                            if c and len(c) >= 2 and not set(c.lower().split()).intersection(_name_reject):
                                 found["name"] = c
 
                 # Email
@@ -591,6 +599,7 @@ def _answer_from_profile(question: str, user_context: str, language: str = "en",
         if profile.get("name"):         lines.append(f"- Name: **{profile['name']}**")
         if profile.get("gender"):       lines.append(f"- Gender: **{profile['gender']}**")
         if profile.get("dob"):          lines.append(f"- Date of birth: **{profile['dob']}**")
+        if profile.get("grandfather_name"): lines.append(f"- Grandfather's name: **{profile['grandfather_name']}**")
         if profile.get("father_name"):  lines.append(f"- Father's name: **{profile['father_name']}**")
         if profile.get("mother_name"):  lines.append(f"- Mother's name: **{profile['mother_name']}**")
         if profile.get("email"):        lines.append(f"- Email: **{profile['email']}**")
@@ -610,6 +619,7 @@ def _answer_from_profile(question: str, user_context: str, language: str = "en",
     if profile.get("name"):         lines.append(f"- Name: **{profile['name']}**")
     if profile.get("gender"):       lines.append(f"- Gender: **{profile['gender']}**")
     if profile.get("dob"):          lines.append(f"- Date of birth: **{profile['dob']}**")
+    if profile.get("grandfather_name"): lines.append(f"- Grandfather's name: **{profile['grandfather_name']}**")
     if profile.get("father_name"):  lines.append(f"- Father's name: **{profile['father_name']}**")
     if profile.get("mother_name"):  lines.append(f"- Mother's name: **{profile['mother_name']}**")
     if profile.get("email"):        lines.append(f"- Email: **{profile['email']}**")
@@ -1019,7 +1029,12 @@ class RAGChain:
             r"|\b(what\s+details?|which\s+details?)\s+(do\s+you\s+have|did\s+i\s+give|have\s+you\s+(got|collected|stored))"
             r"|\b(show|tell|list|display)\s+(me\s+)?(what\s+)?(you\s+)?(know|have|collected|stored|remember)\s+(about\s+me|on\s+me)"
             r"|\bwhat\s+do\s+you\s+know\s+about\s+me\b"
-            r"|\bwhat\s+have\s+i\s+(told|given|shared|provided)\s+(you|so\s+far)\b",
+            r"|\bwhat\s+have\s+i\s+(told|given|shared|provided)\s+(you|so\s+far)\b"
+            r"|\bdo\s+you\s+(remember|recall|know|have)\s+(my\s+)?(name|details?|info|salary|email|mother)\b"
+            r"|\bdo\s+you\s+(remember|know)\s+me\b"
+            r"|\bwho\s+am\s+i\b"
+            r"|\bdid\s+you\s+(save|store|get|record|note)\s+my\b"
+            r"|\bhave\s+you\s+(saved|stored|got|recorded)\s+my\b",
             re.IGNORECASE,
         )
         if _STORED_DETAIL_Q.search(question):
@@ -1039,6 +1054,9 @@ class RAGChain:
                     "intent"    : "pan_query",
                     "language"  : language,
                     "followups" : agent_response.get("followups", []),
+                    "options"   : agent_response.get("options"),
+                    "field_buttons": agent_response.get("field_buttons"),
+                    "confirmation_fields": agent_response.get("confirmation_fields"),
                 }
 
         # ── 3b. Memory questions — check BEFORE social/unrelated handlers ──

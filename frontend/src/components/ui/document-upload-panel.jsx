@@ -67,11 +67,38 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded, onNotLo
   const refs = useRef({})
 
   // Encrypted Supabase upload — mirrors each file into document_meta for the panel
-  const { upload: encryptAndSave } = useDocumentUpload()
+  const { upload: encryptAndSave, error: uploadHookError } = useDocumentUpload()
 
   const uploadStages = STAGES.filter(s => s.id !== 'verification')
   const uploaded = uploadStages.filter(s => uploads[s.id]).length
   const allDone = uploaded === uploadStages.length
+
+  async function notifyFlowManager(stageId, filename, extractedData = null) {
+    try {
+      const userId = localStorage.getItem('userId') || localStorage.getItem('user_id') || ''
+      const body = {
+        session_id: sessionId || 'anonymous',
+        doc_type: stageId,
+        filename: filename,
+        user_id: userId,
+      }
+      // If caller provides confirmed plain extraction data, include it so
+      // pan-rag can update the Redis cache with the verified version.
+      if (extractedData && typeof extractedData === 'object') {
+        body.extracted_data = extractedData
+      }
+      await fetch('/api/record-document', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify(body),
+      })
+    } catch (e) {
+      console.warn('[document-upload-panel] notifyFlowManager failed:', e.message)
+    }
+  }
 
   async function handleFile(stageId, file) {
     if (!file) return
@@ -103,6 +130,8 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded, onNotLo
       if (result.status === 'extracted_for_verification') {
         // Document extracted successfully
         setUploads(p => ({ ...p, [stageId]: file.name }))
+        // Notify pan-rag flow manager regardless of missing fields
+        await notifyFlowManager(stageId, file.name)
         
         // If there are missing fields, show the missing fields form first
         if (result.missing_fields && result.missing_fields.length > 0) {
@@ -135,18 +164,22 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded, onNotLo
       } else if (result.status === 'profile_photo_validated') {
         // Profile photo validated, no extraction needed
         setUploads(p => ({ ...p, [stageId]: file.name }))
+        // Notify pan-rag flow manager that this doc was uploaded
+        await notifyFlowManager(stageId, file.name)
       } else if (result.status === 'success') {
         // Direct success (backward compatibility)
         setUploads(p => ({ ...p, [stageId]: file.name }))
+        await notifyFlowManager(stageId, file.name)
       } else {
         throw new Error(result.message || result.error || 'Processing failed')
       }
 
-      // 2. Also encrypt and save to Supabase document_meta so it appears in the
-      //    Encrypted Documents panel, synced to the current user.
-      encryptAndSave(file, onNotLoggedIn || (() => {})).catch(() => {
-        // Silent — extraction succeeded; encryption is best-effort
-      })
+      // 2. Encrypt and save to Supabase document_meta (hash-checked + 4-doc limit enforced)
+      const saved = await encryptAndSave(file, onNotLoggedIn || (() => {}))
+      if (!saved && uploadHookError) {
+        // Duplicate or limit — show as a non-blocking warning on this stage
+        setErrors(p => ({ ...p, [stageId]: uploadHookError }))
+      }
     } catch (error) {
       setErrors(p => ({ ...p, [stageId]: error.message || 'Upload failed — try again' }))
       setPreviews(p => { const n = { ...p }; delete n[stageId]; return n })
@@ -194,6 +227,14 @@ export function DocumentUploadPanel({ sessionId, onClose, onAllUploaded, onNotLo
 
   async function handleVerificationComplete(result) {
     if (result.status === 'success') {
+      // Update Redis cache with the user-confirmed plain data.
+      // This must happen AFTER verification so finalize-application gets
+      // the corrected version, not the raw VLM result stored during upload.
+      if (verificationData?.stageId) {
+        const confirmedFields = result.confirmed_fields || verificationData.extractedFields
+        await notifyFlowManager(verificationData.stageId, uploads[verificationData.stageId] || 'unknown', confirmedFields)
+      }
+
       setShowVerification(false)
       setVerificationData(null)
       // Move to next document or complete

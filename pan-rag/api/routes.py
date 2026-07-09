@@ -180,6 +180,8 @@ def get_flow_state(user_id: str, session_id: str):
     if s.get("mother_name"):       completed["mother_name"]       = s["mother_name"]
     if s.get("email"):             completed["email"]             = s["email"]
     if s.get("salary"):            completed["salary"]            = s["salary"]
+    if s.get("title"):             completed["title"]             = s["title"]
+    if s.get("mobile"):            completed["mobile"]            = s["mobile"]
 
     # What's still missing for the current step
     missing_for_step = []
@@ -194,10 +196,14 @@ def get_flow_state(user_id: str, session_id: str):
         "active": True,
         "service_id": s.get("service_id"),
         "current_step": step,
+        "complete": s.get("complete", False) or step == "summary",
         "step_labels": _STEP_LABELS.get(step, {"en": step, "ta": step}),
         "completed_fields": completed,
         "missing_for_step": missing_for_step,
         "language": s.get("preferred_language", "en"),
+        # Pending docs — so frontend knows what's still needed
+        "pending_docs": fm.state.get("pending_docs", []),
+        "collected_docs_count": len(fm.state.get("collected_docs", [])),
     }
 
 
@@ -537,6 +543,9 @@ async def upload_document(
     message: str = Form(default=""),
     user_id: str = Form(default="anonymous"),
 ):
+    # Normalize empty/missing user_id to "anonymous"
+    if not user_id or not user_id.strip():
+        user_id = "anonymous"
     # Save file locally with document type in filename
     dest = UPLOAD_DIR / session_id
     dest.mkdir(parents=True, exist_ok=True)
@@ -601,40 +610,56 @@ async def upload_document(
                 type_normalization = {
                     "aadhaar_card": "aadhaar",
                     "aadhaar": "aadhaar",
+                    "aadhar": "aadhaar",
+                    "aadhar_card": "aadhaar",
                     "profile_photo": "photograph",
                     "photograph": "photograph",
+                    "photo": "photograph",
+                    "applicant_photo": "photograph",
+                    "applicant_photograph": "photograph",
+                    "face_photo": "photograph",
+                    "passport_photo": "photograph",
                     "signature": "signature",
+                    "applicant_signature": "signature",
+                    "sign": "signature",
                     "driving_license": "driving_license",
+                    "driver_license": "driving_license",
+                    "dl": "driving_license",
                 }
-                
+
                 # "other_document" fallback logic:
-                # VLMs can't reliably classify signatures — they often return other_document.
-                # 1. If VLM description mentions "signature" → treat as signature
-                # 2. If user explicitly said the doc_type is signature → trust it
-                # 3. If filename contains "sign" → treat as signature
                 if detected_type == "other_document":
                     fname_lower = file.filename.lower()
                     user_hint = doc_type.lower()
+
                     if "signature" in vlm_description or "sign" in vlm_description:
                         detected_doc_type = "signature"
                         print(f"      ℹ️ VLM description mentions signature → overriding other_document to: signature")
-                    elif user_hint in ("signature", "sign"):
+                    elif user_hint in ("signature", "sign", "applicant_signature"):
                         detected_doc_type = "signature"
-                        print(f"      ℹ️ User doc_type hint is '{user_hint}' → overriding other_document to: signature")
+                        print(f"      ℹ️ User doc_type hint is '{user_hint}' → overriding to: signature")
                     elif "sign" in fname_lower:
                         detected_doc_type = "signature"
-                        print(f"      ℹ️ Filename contains 'sign' → overriding other_document to: signature")
+                        print(f"      ℹ️ Filename contains 'sign' → overriding to: signature")
+                    elif user_hint in ("photograph", "photo", "profile_photo", "applicant_photo"):
+                        detected_doc_type = "photograph"
+                        print(f"      ℹ️ User doc_type hint is '{user_hint}' → overriding to: photograph")
+                    elif any(w in fname_lower for w in ("photo", "photograph", "portrait", "face")):
+                        detected_doc_type = "photograph"
+                        print(f"      ℹ️ Filename suggests photo → overriding to: photograph")
                     else:
-                        # Keep user-provided type if the VLM can't figure it out
-                        fallback = type_normalization.get(doc_type.lower(), doc_type.lower())
-                        if fallback and fallback != "unknown":
-                            detected_doc_type = fallback
-                            print(f"      ℹ️ other_document — falling back to user hint: {detected_doc_type}")
-                        else:
-                            detected_doc_type = detected_type
+                        # Fall back to normalized user hint
+                        fallback = type_normalization.get(user_hint, user_hint)
+                        detected_doc_type = fallback if fallback != "unknown" else detected_type
+                        print(f"      ℹ️ other_document — falling back to user hint: {detected_doc_type}")
                 else:
                     detected_doc_type = type_normalization.get(detected_type, detected_type)
-                    print(f"      ℹ️ Detected document type: {detected_type} → normalized to: {detected_doc_type} (user said: {doc_type})")
+                    # If VLM type not in map, try user hint as fallback
+                    if detected_doc_type == detected_type and detected_type not in type_normalization:
+                        user_fallback = type_normalization.get(doc_type.lower(), doc_type.lower())
+                        if user_fallback != doc_type.lower():
+                            detected_doc_type = user_fallback
+                    print(f"      ℹ️ Detected: {detected_type} → normalized to: {detected_doc_type} (user said: {doc_type})")
             
             # Rename file to match detected type
             if detected_doc_type != doc_type or detected_doc_type != "unknown":
@@ -665,14 +690,61 @@ async def upload_document(
                     or extraction_result.get("extracted")
                     or {}
                 )
+                TTL = 60 * 60 * 24 * 30  # 30 days — long enough to survive cross-session use
+                # Write under session-scoped key (primary)
                 mm._setex(
                     f"extraction:{session_id}:{detected_doc_type}",
-                    60 * 60 * 24 * 7,
+                    TTL,
                     _json.dumps(cache_data)
                 )
-                print(f"      ✓ Extraction result cached in Redis with key: extraction:{session_id}:{detected_doc_type}")
+                # Also write under user-scoped key (fallback for cross-session finalize)
+                if user_id and user_id != "anonymous":
+                    mm._setex(
+                        f"extraction:{user_id}:{detected_doc_type}",
+                        TTL,
+                        _json.dumps(cache_data)
+                    )
+                    print(f"      ✓ Extraction cached: session key + user key for {detected_doc_type}")
+                else:
+                    print(f"      ✓ Extraction cached: session key for {detected_doc_type}")
             except Exception as cache_err:
                 print(f"      ⚠️ Could not cache extraction result: {cache_err}")
+
+            # Also persist to Supabase for permanent storage — survives Redis TTL expiry.
+            # This is a backup write; confirm_save will overwrite with user-verified data later.
+            # Only save Aadhaar (contains personal data); skip photo/signature.
+            if detected_doc_type == "aadhaar" and user_id and user_id != "anonymous" and cache_data:
+                try:
+                    from supabase import create_client as _sb_create
+                    _sb_url = os.getenv("SUPABASE_URL", "")
+                    _sb_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")
+                    if _sb_url and _sb_key:
+                        import base64 as _b64
+                        from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
+                        _enc_key_b64 = os.getenv("DATA_ENCRYPTION_KEY", "")
+                        if _enc_key_b64:
+                            _enc_key = _b64.b64decode(_enc_key_b64)
+                            _nonce = os.urandom(12)
+                            _plain = _json.dumps(cache_data, separators=(",", ":")).encode()
+                            _ct = _AESGCM(_enc_key).encrypt(_nonce, _plain, None)
+                            _encrypted = _b64.b64encode(_nonce + _ct).decode()
+                        else:
+                            _encrypted = _json.dumps(cache_data)
+
+                        _sb = _sb_create(_sb_url, _sb_key)
+                        # Upsert keyed on (auth_id, doc_type) — won't duplicate
+                        _sb.table("pan_extractions").upsert({
+                            "auth_id":        user_id,
+                            "doc_type":       detected_doc_type,
+                            "extracted_data": _encrypted,
+                            "session_id":     session_id,
+                            "updated_at":     __import__('datetime').datetime.utcnow().isoformat(),
+                        }, on_conflict="auth_id,doc_type").execute()
+                        print(f"      ✓ Aadhaar extraction persisted to Supabase pan_extractions")
+                except Exception as _sb_save_err:
+                    # Non-fatal — Redis is the primary store, Supabase is just backup
+                    # Table may not exist yet if migration hasn't been run
+                    print(f"      ⚠️ Could not persist to Supabase pan_extractions: {_sb_save_err}")
         else:
             agent_error = response.json().get("error", "Document agent returned an error")
             print(f"\n❌ Document agent error [{doc_type}]: {agent_error}")
@@ -686,7 +758,7 @@ async def upload_document(
     # ── Extract form fields from the accompanying message text ──
     if message.strip():
         from agent.flow_manager import FlowManager
-        fm = FlowManager(session_id)
+        fm = FlowManager(session_id, user_id)
         if fm.has_active_flow():
             merge_form_fields(fm, message)
 
@@ -712,36 +784,115 @@ async def upload_document(
     if extraction_result and extraction_result.get("status") == "missing_fields":
         missing_fields = extraction_result.get("missing_fields", [])
         extracted_fields = extraction_result.get("extracted_fields", {})
-        
+
+        # Pre-fill missing fields from FlowManager state (e.g. mobile already collected in chat)
+        try:
+            from agent.flow_manager import FlowManager as _FM
+            _fm = _FM(session_id, user_id or "anonymous")
+            _prefill_map = {
+                "mobile_number": _fm.state.get("mobile"),
+                "phone":         _fm.state.get("mobile"),
+                "email":         _fm.state.get("email"),
+            }
+            # Only keep fields that are actually missing and have a prefill value
+            missing_fields = [
+                {**f, "prefill": _prefill_map.get(f["field"]) or ""}
+                for f in missing_fields
+            ]
+            # If mobile was already collected, remove it from missing list entirely
+            missing_fields = [
+                f for f in missing_fields
+                if not (f["field"] in ("mobile_number", "phone") and _fm.state.get("mobile"))
+            ]
+        except Exception:
+            pass
+
         # Build user-friendly message about missing fields
         missing_field_names = [field["label"] for field in missing_fields]
         if missing_field_names:
             chat_message = f"📄 Document processed! I extracted some information, but need you to provide the missing details:\n\n**Missing:** {', '.join(missing_field_names)}\n\nPlease fill in the form below to complete your document verification."
-        
-        # Prepare missing fields form for frontend
-        missing_fields_form = {
-            "fields": missing_fields,
-            "extracted_fields": extracted_fields,
-            "session_id": session_id,
-            "auth_id": extraction_result.get("auth_id") or session_id,
-            "quality_score": extraction_result.get("quality_score")
-        }
+        else:
+            # All missing fields were pre-filled from flow state — no form needed
+            chat_message = f"📄 Document processed successfully — all fields extracted."
+
+        # Only show form if there are still missing fields after pre-fill
+        if missing_fields:
+            missing_fields_form = {
+                "fields": missing_fields,
+                "extracted_fields": extracted_fields,
+                "session_id": session_id,
+                "auth_id": extraction_result.get("auth_id") or session_id,
+                "quality_score": extraction_result.get("quality_score"),
+            }
 
     return {
         "filename": file.filename,
-        "stored_filename": stored_filename,  # Show the actual stored filename
-        "detected_doc_type": detected_doc_type,  # Show what was detected
-        "user_provided_doc_type": doc_type,  # Show what user said
+        "stored_filename": stored_filename,
+        "detected_doc_type": detected_doc_type,
+        "user_provided_doc_type": doc_type,
         "session_id": session_id,
         "message": chat_message,
         "complete": flow_result.get("complete", False),
-        # Full extraction payload for frontend use
+        "show_submit": flow_result.get("show_submit", False),
         "extraction": extraction_result if extraction_result else None,
         "verified": extraction_result.get("status") == "success" if extraction_result else False,
         "validation_errors": extraction_result.get("validation_errors", []),
-        # Missing fields form for user completion
         "missing_fields_form": missing_fields_form,
         "requires_completion": extraction_result.get("status") == "missing_fields" if extraction_result else False,
+    }
+
+
+@router.post("/record-document")
+async def record_document_in_flow(request_data: dict):
+    """
+    Lightweight endpoint: record a document in FlowManager without re-running extraction.
+    Called by document-upload-panel.jsx after pan_verification succeeds,
+    so the flow knows the document was uploaded even when the panel (not chat) was used.
+
+    Also accepts optional `extracted_data` — plain dict of VLM/confirmed fields.
+    If provided, updates the Redis extraction cache so finalize-application reads
+    the latest verified data instead of a stale or encrypted version.
+    """
+    session_id     = request_data.get("session_id")
+    user_id        = request_data.get("user_id", "anonymous") or "anonymous"
+    doc_type       = request_data.get("doc_type", "")
+    filename       = request_data.get("filename", "unknown")
+    extracted_data = request_data.get("extracted_data")   # optional plain dict
+
+    if not session_id or not doc_type:
+        raise HTTPException(status_code=400, detail="session_id and doc_type are required")
+
+    # Update Redis extraction cache if caller provided plain extracted data
+    if extracted_data and isinstance(extracted_data, dict) and extracted_data:
+        try:
+            from memory.memory_manager import MemoryManager
+            import json as _json
+            mm = MemoryManager()
+            TTL = 60 * 60 * 24 * 30  # 30 days
+            # Session-scoped key (primary)
+            mm._setex(f"extraction:{session_id}:{doc_type}", TTL, _json.dumps(extracted_data))
+            # User-scoped key (cross-session fallback)
+            if user_id and user_id != "anonymous":
+                mm._setex(f"extraction:{user_id}:{doc_type}", TTL, _json.dumps(extracted_data))
+                print(f"[record-document] ✓ Updated Redis cache for {doc_type} (session + user keys)")
+            else:
+                print(f"[record-document] ✓ Updated Redis cache for {doc_type} (session key only)")
+        except Exception as cache_err:
+            print(f"[record-document] ⚠️ Could not update Redis cache: {cache_err}")
+
+    from agent.receptionist import handle_document_upload
+    flow_result = handle_document_upload(
+        session_id=session_id,
+        filename=filename,
+        doc_type=doc_type,
+        user_id=user_id,
+    )
+    return {
+        "status": "ok",
+        "doc_type": doc_type,
+        "complete": flow_result.get("complete", False),
+        "show_submit": flow_result.get("show_submit", False),
+        "message": flow_result.get("answer", ""),
     }
 
 
@@ -800,13 +951,32 @@ async def complete_document_with_missing_fields(request_data: dict):
         
         # Return response
         if completion_result and completion_result.get("status") == "success":
+            # Update Redis cache with the corrected plain data so finalize-application
+            # reads the user-verified version, not the stale original VLM result.
+            corrected_data = completion_result.get("aadhaar_data", {})
+            if corrected_data and session_id:
+                try:
+                    from memory.memory_manager import MemoryManager
+                    import json as _json
+                    mm = MemoryManager()
+                    TTL = 60 * 60 * 24 * 30  # 30 days
+                    # Session-scoped key
+                    mm._setex(f"extraction:{session_id}:aadhaar", TTL, _json.dumps(corrected_data))
+                    # User-scoped key — survives session changes
+                    auth_id = request_data.get("auth_id", "")
+                    if auth_id and auth_id != "anonymous":
+                        mm._setex(f"extraction:{auth_id}:aadhaar", TTL, _json.dumps(corrected_data))
+                    print(f"[complete_document] ✓ Updated Redis cache with corrected aadhaar data")
+                except Exception as cache_err:
+                    print(f"[complete_document] ⚠️ Could not update Redis cache: {cache_err}")
+
             return {
                 "status": "success",
                 "message": "✅ Document verification completed successfully! All required information has been saved.",
                 "session_id": session_id,
                 "doc_id": completion_result.get("doc_id"),
                 "completed_fields": completion_result.get("completed_fields", []),
-                "extracted_data": completion_result.get("aadhaar_data", {})
+                "extracted_data": corrected_data,
             }
         else:
             error_message = completion_error or "Document completion failed"
@@ -869,113 +1039,415 @@ async def finalize_application(request_data: dict):
         print(f"      Documents collected: {len(state.get('collected_docs', []))}")
         
         # ── Step 2: Load document extraction results ─────────────────────────
-        # Documents are stored in storage/uploads/{session_id}/
+        # Documents are stored in storage/uploads/{session_id}/.
+        # If the user finalized from a DIFFERENT session than the one they uploaded
+        # from, we fall back to scanning ALL upload dirs for this user.
         upload_dir = UPLOAD_DIR / session_id
-        if not upload_dir.exists():
-            raise HTTPException(
-                status_code=400,
-                detail="No documents found. Please upload required documents first."
-            )
-        
+        if not upload_dir.exists() or not list(upload_dir.glob("*")):
+            # Scan all session dirs and use the most recently modified one
+            # that has files belonging to this user's flow (collected_docs list)
+            print(f"[2/7] ⚠ Upload dir for session {session_id} empty — scanning all sessions...")
+            best_dir = None
+            best_mtime = 0
+            for candidate in UPLOAD_DIR.iterdir():
+                if candidate.is_dir() and list(candidate.glob("*")):
+                    mtime = candidate.stat().st_mtime
+                    if mtime > best_mtime:
+                        best_mtime = mtime
+                        best_dir = candidate
+            if best_dir:
+                upload_dir = best_dir
+                print(f"[2/7] ↳ Using upload dir from session: {upload_dir.name}")
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No documents found. Please upload required documents first."
+                )
+
         # Collect all uploaded files
         uploaded_files = list(upload_dir.glob("*"))
         print(f"\n[2/7] ✓ Found {len(uploaded_files)} uploaded files")
         for f in uploaded_files:
             print(f"      - {f.name}")
-        
+
         # Load extraction results from memory (stored during upload)
         from memory.memory_manager import MemoryManager
         mm = MemoryManager()
+
+        # Build doc_types to look up — from flow state collected_docs,
+        # falling back to inferring from filenames if list is empty
+        doc_types_to_load = [d.get("doc_type") for d in state.get("collected_docs", []) if d.get("doc_type")]
+        if not doc_types_to_load:
+            # Infer doc types from uploaded filenames
+            _FNAME_TO_TYPE = {
+                "aadhaar": "aadhaar", "aadhar": "aadhaar", "jaadhar": "aadhaar",
+                "photo": "photograph", "jphoto": "photograph",
+                "sign": "signature", "jsign": "signature",
+                "driving": "driving_license", "license": "driving_license",
+            }
+            for f in uploaded_files:
+                fname = f.name.lower()
+                for keyword, dtype in _FNAME_TO_TYPE.items():
+                    if keyword in fname and dtype not in doc_types_to_load:
+                        doc_types_to_load.append(dtype)
+            print(f"[2/7] ↳ Inferred doc types from filenames: {doc_types_to_load}")
+
+        # Determine the upload session id for building file path references
+        upload_session_id = upload_dir.name
         
         # Collect extracted data for each document type
         extraction_data = {}
-        for doc in state.get("collected_docs", []):
-            doc_type = doc.get("doc_type", "unknown")
-            filename = doc.get("filename", "")
-            
-            # Try to load extraction result from Redis
-            key = f"extraction:{session_id}:{doc_type}"
-            cached = mm._get(key)
+        for doc_type in doc_types_to_load:
+            # Primary: session-scoped key (same session as upload)
+            cached = mm._get(f"extraction:{upload_session_id}:{doc_type}")
+
+            # Fallback 1: current session key (if re-uploaded in this session)
+            if not cached and upload_session_id != session_id:
+                cached = mm._get(f"extraction:{session_id}:{doc_type}")
+
+            # Fallback 2: user-scoped key (cross-session, written on every upload)
+            if not cached and user_id and user_id != "anonymous":
+                user_key = f"extraction:{user_id}:{doc_type}"
+                cached = mm._get(user_key)
+                if cached:
+                    print(f"      ↳ Loaded {doc_type} from user-scoped key (cross-session fallback)")
+
             if cached:
                 extraction_data[doc_type] = json.loads(cached)
-        
+
+        # Fallback 3: Supabase pan_extractions table (written on every upload)
+        # AND documents table (written on confirm_save) — permanent storage.
+        if "aadhaar" not in extraction_data and user_id and user_id != "anonymous":
+            print(f"      ↳ Redis miss for aadhaar — trying Supabase...")
+            try:
+                from supabase import create_client as _sb_create
+                _sb_url = os.getenv("SUPABASE_URL", "")
+                _sb_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")
+                if _sb_url and _sb_key:
+                    _sb = _sb_create(_sb_url, _sb_key)
+
+                    def _try_decrypt(raw_ed):
+                        """Decrypt if encrypted blob, else parse as JSON."""
+                        if isinstance(raw_ed, dict):
+                            return raw_ed
+                        if not isinstance(raw_ed, str):
+                            return {}
+                        try:
+                            import base64 as _b64
+                            from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
+                            _key_b64 = os.getenv("DATA_ENCRYPTION_KEY", "")
+                            if _key_b64:
+                                _raw = _b64.b64decode(raw_ed)
+                                _key = _b64.b64decode(_key_b64)
+                                _plain = _AESGCM(_key).decrypt(_raw[:12], _raw[12:], None).decode()
+                                return json.loads(_plain)
+                        except Exception:
+                            pass
+                        try:
+                            return json.loads(raw_ed)
+                        except Exception:
+                            return {}
+
+                    recovered = None
+
+                    # Try pan_extractions first (written on every upload — most up to date)
+                    try:
+                        resp = _sb.table("pan_extractions") \
+                                   .select("extracted_data") \
+                                   .eq("auth_id", user_id) \
+                                   .eq("doc_type", "aadhaar") \
+                                   .order("updated_at", desc=True) \
+                                   .limit(1).execute()
+                        if resp.data:
+                            recovered = _try_decrypt(resp.data[0].get("extracted_data"))
+                            if recovered:
+                                print(f"      ✓ Recovered from pan_extractions table")
+                    except Exception as _t1:
+                        # Table may not exist yet — silently skip
+                        print(f"      ↳ pan_extractions table not available: {_t1}")
+
+                    # Try documents table (written on confirm_save — user-verified data)
+                    if not recovered:
+                        try:
+                            resp = _sb.table("documents") \
+                                       .select("extracted_data") \
+                                       .eq("auth_id", user_id) \
+                                       .eq("doc_type", "aadhaar") \
+                                       .order("created_at", desc=True) \
+                                       .limit(1).execute()
+                            if resp.data:
+                                recovered = _try_decrypt(resp.data[0].get("extracted_data"))
+                                if recovered:
+                                    print(f"      ✓ Recovered from documents table")
+                        except Exception:
+                            pass
+
+                    if recovered:
+                        extraction_data["aadhaar"] = recovered
+                        # Re-cache in Redis (30 days) so future calls are fast
+                        mm._setex(
+                            f"extraction:{user_id}:aadhaar",
+                            60 * 60 * 24 * 30,
+                            json.dumps(recovered)
+                        )
+                        print(f"      ✓ Re-cached in Redis for future use")
+                    else:
+                        print(f"      ⚠ No aadhaar data found in Supabase for user {user_id[:8]}...")
+            except Exception as _sb_err:
+                print(f"      ⚠ Supabase fallback failed: {_sb_err}")
         print(f"\n[3/7] ✓ Loaded extraction data for {len(extraction_data)} document types")
         for doc_type in extraction_data.keys():
             print(f"      - {doc_type}")
         
         # ── Step 3: Merge all data into automation_agent schema ──────────────
         print(f"\n[4/7] ⚙️  Merging data into automation_agent schema...")
-        
-        # Helper function to split full name with South Indian initial logic
+
+        # ── Helper: decrypt field values encrypted by pan_verification ───────
+        def _decrypt_field(v: str) -> str:
+            """
+            If a string value looks like an AES-256-GCM base64 blob
+            (nonce[12] + ciphertext, base64-encoded), decrypt it.
+            Otherwise return as-is.
+            """
+            if not isinstance(v, str) or len(v) < 20 or not v.endswith("="):
+                return v
+            try:
+                import base64 as _b64
+                raw = _b64.b64decode(v)
+                if len(raw) < 13:
+                    return v
+                key_b64 = os.getenv("DATA_ENCRYPTION_KEY")
+                if not key_b64:
+                    return v
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                key = _b64.b64decode(key_b64)
+                if len(key) != 32:
+                    return v
+                aesgcm = AESGCM(key)
+                nonce, ct = raw[:12], raw[12:]
+                plain = aesgcm.decrypt(nonce, ct, None).decode("utf-8")
+                # Strip surrounding JSON quotes if value was json.dumps'd as string
+                if plain.startswith('"') and plain.endswith('"'):
+                    plain = plain[1:-1]
+                return plain
+            except Exception:
+                return v  # not encrypted — return original
+
+        def _decrypt_dict(data: dict) -> dict:
+            """Decrypt all string field values in an extraction dict."""
+            return {k: _decrypt_field(v) if isinstance(v, str) else v
+                    for k, v in (data or {}).items()}
+
+        # Helper function to split full name
         def split_name(full_name):
             """
-            Split name following South Indian conventions:
-            
-            Rules:
-            1. Single name (e.g., "Akash") → goes to LAST NAME (first="", middle="", last="Akash")
-            2. Two names (e.g., "Akash Raja") → first=last name, last=first name (first="Raja", middle="", last="Akash")
-            3. Three+ names with initial (e.g., "Anand R Ajaanand") → first=last, middle=middle, last=first initial
-               - "Anand R Ajaanand" → first="Ajaanand", middle="R", last="Anand"
-            4. Three names no initial (e.g., "John Michael Doe") → normal western order
-               - "John Michael Doe" → first="John", middle="Michael", last="Doe"
-            
-            Returns: (first_name, middle_name, last_name)
+            Split a name into (first, middle, last) following NSDL form rules:
+
+            1 word   "LOHIT"       → first="LOHIT",  middle="",   last="L"
+                                      (single name: use first letter as last-name initial)
+            2 words  "LOHIT G"     → first="LOHIT",  middle="",   last="G"
+                                      (second word is the initial / last name)
+            3+ words "LOHIT G K"   → first="LOHIT",  middle="G",  last="K"
+                                      (words between first and last become middle)
             """
             if not full_name:
                 return "", "", ""
-            
-            parts = full_name.strip().split()
-            
+            parts = [p.upper() for p in full_name.strip().split() if p]
             if len(parts) == 1:
-                # Single name goes to last name
-                return "", "", parts[0]
-            
-            elif len(parts) == 2:
-                # Two names: reverse order (South Indian convention)
-                # "Akash Raja" → first="Raja", last="Akash"
-                return parts[1], "", parts[0]
-            
-            elif len(parts) == 3:
-                # Three names: check if middle is an initial
-                middle = parts[1]
-                if len(middle) == 1 or (len(middle) == 2 and middle[1] == '.'):
-                    # Has initial: South Indian order (last first middle_initial)
-                    # "Anand R Ajaanand" → first="Ajaanand", middle="R", last="Anand"
-                    return parts[2], middle.replace('.', ''), parts[0]
-                else:
-                    # No initial: Western order (first middle last)
-                    # "John Michael Doe" → first="John", middle="Michael", last="Doe"
-                    return parts[0], parts[1], parts[2]
-            
-            else:
-                # More than 3 parts: treat as Western (first, middle parts, last)
-                return parts[0], " ".join(parts[1:-1]), parts[-1]
+                # Single word — use first letter as last-name initial, middle empty
+                return parts[0], "", parts[0][0]
+            if len(parts) == 2:
+                # Two words — no middle name
+                return parts[0], "", parts[1]
+            # Three or more — middle = everything between first and last
+            return parts[0], " ".join(parts[1:-1]), parts[-1]
         
-        # Get Aadhaar extraction if available
-        aadhaar_data = extraction_data.get("aadhaar", {})
-        driving_license_data = extraction_data.get("driving_license", {})
+        # Get Aadhaar extraction if available — decrypt any encrypted field values
+        aadhaar_data = _decrypt_dict(extraction_data.get("aadhaar", {}))
+        driving_license_data = _decrypt_dict(extraction_data.get("driving_license", {}))
+
+        if not aadhaar_data:
+            print(f"\n[WARNING] No Aadhaar extraction data found in Redis for session {session_id}")
+            print(f"      DOB, address, Aadhaar number and gender will be blank.")
+            print(f"      Collected docs: {[d.get('doc_type') for d in state.get('collected_docs', [])]}")
+            # Try alternative keys
+            for alt_key in ['aadhar', 'aadhaar_card', 'other_document']:
+                alt = _decrypt_dict(extraction_data.get(alt_key, {}))
+                if alt and (alt.get("aadhaar_number") or alt.get("aadhar_number") or alt.get("dob")):
+                    print(f"      Found usable data under key '{alt_key}' — using as aadhaar_data")
+                    aadhaar_data = alt
+                    break
         
         # Build the 30-field data.json schema
-        full_name = state.get("full_name") or aadhaar_data.get("name", "")
-        first, middle, last = split_name(full_name)
-        
+
+        # ── Applicant name: use Aadhaar-extracted first/middle/last directly.
+        # The full_name collected from chat is NOT used for splitting here —
+        # Aadhaar extraction gives pre-split fields that are more reliable.
+        #
+        # NSDL South Indian convention:
+        #   first  = given name  (e.g. "LOHIT")
+        #   middle = middle name if exists, else ""
+        #   last   = father's initial (e.g. "G" from father "GOPALAKRISHNAN")
+        #
+        # Fallback chain for last name:
+        #   1. Aadhaar last_name field (if VLM split it)
+        #   2. First letter of father_name from Aadhaar (S/O line)
+        #   3. First letter of grandfather_name from chat
+        #   4. First letter of applicant's own first name (absolute last resort)
+        first  = (aadhaar_data.get("first_name")  or "").upper()
+        middle = (aadhaar_data.get("middle_name") or "").upper()
+        last   = (aadhaar_data.get("last_name")   or "").upper()
+        if not first:
+            # last-resort: split the full name field from Aadhaar
+            first, middle, last = split_name(aadhaar_data.get("name", ""))
+        # If last is still empty, derive from father's name (South Indian convention)
+        if first and not last:
+            _father_for_initial = (
+                aadhaar_data.get("father_name", "")
+                or aadhaar_data.get("father_first_name", "")
+                or state.get("grandfather_name", "")
+            ).strip()
+            last = _father_for_initial[0].upper() if _father_for_initial else first[0]
+
         # Get parent names
-        grandfather_name = state.get("grandfather_name", "")
-        gf_first, gf_middle, gf_last = split_name(grandfather_name)
+        # Father name — read from C/O / S/O / D/O / W/O line on Aadhaar card.
+        # The card prints a single name string (e.g. "S/O: GOPALAKRISHNAN").
+        # The VLM is asked to split it, but for single-word names it may return
+        # father_last_name as null — so only trust the VLM split when both
+        # first AND last are present. Otherwise fall through to split_name().
+        # If split also can't produce a last name (single-word father name),
+        # use the first letter of chat's grandfather_name as the last name initial.
+        # Fallback chain:
+        #   1. VLM pre-split (only if both first_name AND last_name are non-null)
+        #   2. split_name(aadhaar father_name full string)
+        #   3. split_name(chat grandfather_name)  ← last resort
+        _vlm_f_first = aadhaar_data.get("father_first_name") or ""
+        _vlm_f_last  = aadhaar_data.get("father_last_name")  or ""
+        if _vlm_f_first and _vlm_f_last:
+            f_first  = _vlm_f_first.upper()
+            f_middle = (aadhaar_data.get("father_middle_name") or "").upper()
+            f_last   = _vlm_f_last.upper()
+        else:
+            _father_full = (
+                aadhaar_data.get("father_name")
+                or state.get("grandfather_name", "")
+            )
+            f_first, f_middle, f_last = split_name(_father_full)
+            # split_name already applies the single-name rule (last = initial).
+            # Extra fallback: if last still empty, use grandfather_name initial.
+            if f_first and not f_last:
+                _gf_name = state.get("grandfather_name", "").strip()
+                f_last = _gf_name[0].upper() if _gf_name else f_first[0]
+
+        # Mother name — chat is primary (always collected as required field).
+        # Aadhaar rarely prints mother's name, so it's a fallback only.
+        # Same VLM trust rule as father: only use VLM pre-split when both
+        # first AND last are non-null.
+        #
+        # Splitting rules for mother name:
+        #   1 word  "DIVYA"         → first="DIVYA",  middle="",  last=father_initial (fallback)
+        #   2 words "DIVYA G"       → first="DIVYA",  middle="",  last="G"  (initial is last name)
+        #   3+words "DIVYA G KUMAR" → first="DIVYA",  middle="G", last="KUMAR"
+        #   Middle name only exists when there's a word between first and last.
+        #
+        # Fallback chain:
+        #   1. VLM pre-split from Aadhaar (only if both first + last non-null)
+        #   2. split by word count from chat mother_name (primary — always collected)
+        #   3. split from aadhaar mother_name (rare fallback)
+        _vlm_m_first = aadhaar_data.get("mother_first_name") or ""
+        _vlm_m_last  = aadhaar_data.get("mother_last_name")  or ""
+        if _vlm_m_first and _vlm_m_last:
+            m_first  = _vlm_m_first.upper()
+            m_middle = (aadhaar_data.get("mother_middle_name") or "").upper()
+            m_last   = _vlm_m_last.upper()
+        else:
+            _mother_full = (
+                state.get("mother_name")
+                or aadhaar_data.get("mother_name", "")
+            )
+            _mother_parts = [p.upper() for p in _mother_full.strip().split() if p]
+            if len(_mother_parts) == 0:
+                m_first = m_middle = m_last = ""
+            elif len(_mother_parts) == 1:
+                # Single word — first name only, last name = father's initial (set below)
+                m_first  = _mother_parts[0]
+                m_middle = ""
+                m_last   = ""
+            elif len(_mother_parts) == 2:
+                # Two words — first name + initial/last name (no middle)
+                # e.g. "DIVYA G" → first="DIVYA", middle="", last="G"
+                m_first  = _mother_parts[0]
+                m_middle = ""
+                m_last   = _mother_parts[1]
+            else:
+                # Three or more words — first, middle(s), last
+                # e.g. "DIVYA G KUMAR" → first="DIVYA", middle="G", last="KUMAR"
+                m_first  = _mother_parts[0]
+                m_middle = " ".join(_mother_parts[1:-1])
+                m_last   = _mother_parts[-1]
+
+            # For single-word names where last name is still empty,
+            # use first letter of father's name as last name initial.
+            # Final fallback: use first letter of the mother's own first name.
+            if not m_last:
+                _father_name = aadhaar_data.get("father_name", "").strip()
+                if _father_name:
+                    m_last = _father_name[0].upper()
+                elif m_first:
+                    m_last = m_first[0]
         
-        mother_name = state.get("mother_name") or aadhaar_data.get("mother_name", "")
-        m_first, m_middle, m_last = split_name(mother_name)
+        # DOB: Aadhaar is primary — it is mandatory and always present.
+        # Driving license is secondary (uploaded only as optional age proof).
+        # Note: DOB is never collected through chat — flow_manager has no dob field,
+        #       and even if user_profile has a dob from casual chat mention, it is
+        #       unreliable (user-typed) so we deliberately ignore it here.
+        # Cross-check: if both docs are present and agree → use Aadhaar value.
+        #              if they differ → still trust Aadhaar (official ID).
+        #              if Aadhaar has no dob → fall back to driving license.
+        aadhaar_dob  = aadhaar_data.get("dob", "")
+        dl_dob       = driving_license_data.get("dob", "")
+        dob = aadhaar_dob or dl_dob
+        if aadhaar_dob and dl_dob and aadhaar_dob != dl_dob:
+            print(f"[finalize] DOB mismatch — Aadhaar: {aadhaar_dob!r}, DL: {dl_dob!r} — using Aadhaar")
+
+        # Normalize DOB to DD/MM/YYYY (NSDL form mask format).
+        # VLM may return various formats: "23/02/2007", "23-02-2007", "2007-02-23".
+        def _normalize_dob(d: str) -> str:
+            if not d:
+                return ""
+            d = d.strip()
+            # Already DD/MM/YYYY
+            import re as _re
+            if _re.match(r"^\d{2}/\d{2}/\d{4}$", d):
+                return d
+            # DD-MM-YYYY → DD/MM/YYYY
+            if _re.match(r"^\d{2}-\d{2}-\d{4}$", d):
+                return d.replace("-", "/")
+            # YYYY-MM-DD (ISO) → DD/MM/YYYY
+            m = _re.match(r"^(\d{4})-(\d{2})-(\d{2})$", d)
+            if m:
+                return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+            # YYYY/MM/DD → DD/MM/YYYY
+            m = _re.match(r"^(\d{4})/(\d{2})/(\d{2})$", d)
+            if m:
+                return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+            return d  # return as-is if unknown format
+
+        dob = _normalize_dob(dob)
         
-        father_name = aadhaar_data.get("father_name", "")
-        f_first, f_middle, f_last = split_name(father_name)
-        
-        # DOB: Prefer driving license, then Aadhaar, then user input
-        dob = driving_license_data.get("dob") or aadhaar_data.get("dob", "")
-        
-        # Get Aadhaar number and split it
-        aadhaar_number = (aadhaar_data.get("aadhar_number") or "").replace(" ", "").replace("-", "")
-        aadhaar_first_8 = aadhaar_number[:8] if len(aadhaar_number) >= 8 else ""
-        aadhaar_last_4 = aadhaar_number[-4:] if len(aadhaar_number) >= 4 else ""
+        # Aadhaar number — read directly from Aadhaar extraction.
+        # VLM returns field as "aadhar_number" (may also be "aadhaar_number").
+        # Format may be masked: "XXXX XXXX 1234" → strip spaces/dashes before splitting.
+        # first_8: positions 0-7  (may be "XXXXXXXX" if masked — that's correct for NSDL form)
+        # last_4:  positions 8-11 (always visible even on masked cards)
+        aadhaar_raw = (
+            aadhaar_data.get("aadhar_number")
+            or aadhaar_data.get("aadhaar_number")
+            or ""
+        )
+        aadhaar_number  = aadhaar_raw.replace(" ", "").replace("-", "")
+        aadhaar_first_8 = aadhaar_number[:8]  if len(aadhaar_number) >= 8  else ""
+        aadhaar_last_4  = aadhaar_number[-4:] if len(aadhaar_number) >= 4  else ""
         
         # Map delivery mode to automation_agent format
         delivery_mode = state.get("delivery_mode", "")
@@ -983,31 +1455,64 @@ async def finalize_application(request_data: dict):
         
         # Build complete data.json
         automation_data = {
-            "first_name": first or aadhaar_data.get("first_name", ""),
-            "last_name": last or aadhaar_data.get("last_name", ""),
-            "middle_name": middle or aadhaar_data.get("middle_name", ""),
+            "first_name": first,
+            "last_name": last,
+            "middle_name": middle,
             "dob": dob,
-            "email": state.get("email", ""),
-            "phone": aadhaar_data.get("phone") or aadhaar_data.get("mobile_number", ""),
+            "email": (
+                # Use exactly what the user typed/confirmed in chat — no case modification.
+                # state["email"] is set in two ways:
+                #   email_source="account" → user confirmed their login email (from _account_email)
+                #   email_source="new"     → user typed a custom email (preserved as-is)
+                state.get("email", "")
+            ),
+            # phone: use exactly what the user provided in chat (10-digit, +91 stripped by regex)
+            "phone": state.get("mobile", ""),
             "aadhaar_first_8": aadhaar_first_8,
             "aadhaar_last_4": aadhaar_last_4,
             "name_on_aadhaar": aadhaar_data.get("name", ""),
             "gender": aadhaar_data.get("gender", ""),
-            "father_first_name": f_first or aadhaar_data.get("father_first_name", ""),
-            "father_last_name": f_last or aadhaar_data.get("father_last_name", ""),
-            "mother_first_name": m_first or aadhaar_data.get("mother_first_name", ""),
-            "mother_middle_name": m_middle or aadhaar_data.get("mother_middle_name", ""),
+            "father_first_name": f_first,
+            "father_last_name": f_last,
+            "mother_first_name": m_first,
+            "mother_middle_name": m_middle,
             "mother_last_name": m_last,
-            "residential_status": state.get("residential_status", "Resident"),
-            "flat_room_door": aadhaar_data.get("flat_room_door", ""),
+            "residential_status": (
+                # Pure chat — dedicated flow step (radio choice).
+                # Values: "Resident", "Non-resident", "Resident but not ordinarily resident"
+                # form_filler does exact radio match on this value.
+                state.get("residential_status", "Resident")
+            ),
+            "source_of_income": (
+                # Pure chat — dedicated flow step (radio choice).
+                # May contain Tamil suffix e.g. "Salary | சம்பளம்"
+                # form_filler strips Tamil via .split("|")[0].strip() before clicking.
+                state.get("source_of_income", "No income")
+            ),
+            "address_for_comm": (
+                # Pure chat — dedicated flow step (radio choice).
+                # May contain Tamil suffix e.g. "Residence | வீடு"
+                # form_filler strips Tamil via .split("|")[0].strip() before clicking.
+                state.get("address_for_comm", "Residence")
+            ),
+            # ── Address fields — all from Aadhaar extraction only.
+            # Never collected in chat. VLM splits address exactly as printed on card.
+            # Note: form_filler fills #rCountry with area_locality (it's the Town/City
+            #       field on NSDL form, despite the misleading element ID).
+            "flat_room_door":  aadhaar_data.get("flat_room_door", ""),
             "building_village": aadhaar_data.get("building_village", ""),
             "road_street_post": aadhaar_data.get("road_street_post", ""),
-            "area_locality": aadhaar_data.get("area_locality", ""),
-            "country": aadhaar_data.get("country", "INDIA"),
-            "state": aadhaar_data.get("state", ""),
-            "pin_code": aadhaar_data.get("pincode", ""),
-            "verifier_place": "",  # TODO: Add to FlowManager if needed
-            "verifier_designation": "",  # TODO: Add to FlowManager if needed
+            "area_locality":   aadhaar_data.get("area_locality", ""),
+            "country":         aadhaar_data.get("country", "India"),
+            "state":           aadhaar_data.get("state", ""),
+            "pin_code":        aadhaar_data.get("pincode", ""),
+            # verifier_place — place of signing, best approximation is the
+            # district or locality from Aadhaar address
+            "verifier_place": (
+                aadhaar_data.get("district")
+                or aadhaar_data.get("area_locality", "")
+            ),
+            "verifier_designation": "",   # left blank — "Self" selected via dropdown
             "delivery_option": delivery_option,
             "photo_file": "",
             "signature_file": "",
@@ -1035,11 +1540,31 @@ async def finalize_application(request_data: dict):
         }
         
         # De-duplicate: keep only the LAST entry per doc_type, skip other_document
+        # First build from flow state collected_docs
         seen = {}
         for doc in state.get("collected_docs", []):
             dt = doc.get("doc_type", "").lower()
             if dt and dt != "other_document":
-                seen[dt] = doc  # later upload of same type overwrites earlier
+                seen[dt] = doc
+
+        # If collected_docs is empty (different session), infer from upload_dir filenames
+        if not seen:
+            _FNAME_TO_TYPE = {
+                "aadhaar": "aadhaar", "aadhar": "aadhaar", "jaadhar": "aadhaar",
+                "photo": "photograph", "jphoto": "photograph",
+                "sign": "signature",   "jsign": "signature",
+                "driving": "driving_license",
+            }
+            for f in upload_dir.glob("*"):
+                if not f.is_file():
+                    continue
+                fname = f.name.lower()
+                for keyword, dtype in _FNAME_TO_TYPE.items():
+                    if keyword in fname and dtype not in seen:
+                        seen[dtype] = {"doc_type": dtype, "filename": f.name}
+                        break
+            if seen:
+                print(f"      ℹ️ collected_docs empty — inferred from filenames: {list(seen.keys())}")
         
         files_copied = 0
         for doc_type, doc in seen.items():
@@ -1074,14 +1599,19 @@ async def finalize_application(request_data: dict):
         
         # ── Step 5: Write automation_agent/INPUT.json ─────────────────────────
         print(f"\n[6/7] 💾 Writing automation_agent/INPUT.json...")
-        
+
+        import datetime as _dt
+        # Stamp with metadata so we know when and from which session it was built
+        automation_data["_last_updated"] = _dt.datetime.now().isoformat()
+        automation_data["_session_id"]   = session_id
+
         input_json_path = automation_agent_dir / "INPUT.json"
         with open(input_json_path, "w", encoding="utf-8") as f:
             json.dump(automation_data, f, indent=4, ensure_ascii=False)
-        
+
         print(f"      ✓ Written to {input_json_path}")
-        print(f"      ℹ️ Review this file before running automation")
-        
+        print(f"      ℹ️ Data is preserved in INPUT.json after automation completes")
+
         # Also write to data.json for backward compatibility
         data_json_path = automation_agent_dir / "data.json"
         with open(data_json_path, "w", encoding="utf-8") as f:

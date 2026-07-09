@@ -34,7 +34,8 @@ async def startup_event():
     """Pre-load RAG chain at startup."""
     print("Pre-loading RAG chain...")
     get_chain()
-    print(f"✅ RAG chain ready — model: {os.getenv('LLM_MODEL', 'meta/llama-3.1-70b-instruct')} via NVIDIA NIM")
+    from config import LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL
+    print(f"✅ RAG chain ready — provider: {LLM_PROVIDER.upper()} | model: {LLM_MODEL}")
 
 
 if __name__ == "__main__":

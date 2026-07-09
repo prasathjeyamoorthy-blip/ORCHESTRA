@@ -44,6 +44,10 @@ class DataHandler:
         data["isd_code"] = DEFAULT_ISD_CODE
         data["isd_label"] = DEFAULT_ISD_LABEL
 
+        # Remove metadata keys added by finalize/server (not form fields)
+        for _meta_key in ("_last_updated", "_session_id"):
+            data.pop(_meta_key, None)
+
         print(f"[+] Loaded data from {json_file}")
         return data
     

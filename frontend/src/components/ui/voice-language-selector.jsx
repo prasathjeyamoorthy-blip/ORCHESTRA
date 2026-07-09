@@ -16,12 +16,6 @@ export function VoiceLanguageSelector({ currentLanguage = 'en', onLanguageChange
       name: 'Tamil', 
       nativeName: 'தமிழ்',
       icon: '🇮🇳'
-    },
-    { 
-      code: 'hi', 
-      name: 'Hindi', 
-      nativeName: 'हिन्दी',
-      icon: '🇮🇳'
     }
   ];
 

@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils'
 const LANGUAGES = [
   { code: 'en', label: 'EN', full: 'English' },
   { code: 'ta', label: 'தமிழ்', full: 'Tamil' },
-  { code: 'hi', label: 'हिंदी', full: 'Hindi' },
 ]
 
 export function LanguageSwitcher({ value, onChange }) {

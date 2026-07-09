@@ -11,6 +11,17 @@ export interface UploadedDocument {
   fileSizeBytes: number;
 }
 
+const MAX_DOCUMENTS = 4;
+
+/** Compute a SHA-256 hex digest of the file's raw bytes in the browser */
+async function computeFileHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function useDocumentUpload() {
   const [uploading, setUploading] = useState(false);
   const [error,     setError]     = useState<string | null>(null);
@@ -26,17 +37,46 @@ export function useDocumentUpload() {
 
     setUploading(true);
     try {
-      // 1. Encrypt the file in the browser
-      const encryptedBlob = await encryptFile(file, mek);
-
-      // 2. Build storage path
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { onNotLoggedIn(); return null; }
 
+      // ── 1. Check document count limit ────────────────────────
+      const { count } = await supabase
+        .from("document_meta")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+
+      if ((count ?? 0) >= MAX_DOCUMENTS) {
+        setError(`Maximum ${MAX_DOCUMENTS} documents allowed. Delete an existing document first.`);
+        return null;
+      }
+
+      // ── 2. Compute hash of original file bytes ────────────────
+      const fileHash = await computeFileHash(file);
+
+      // ── 3. Check for duplicate by hash ───────────────────────
+      const { data: existing } = await supabase
+        .from("document_meta")
+        .select("id, original_filename")
+        .eq("user_id", user.id)
+        .eq("file_hash", fileHash)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        setError(
+          `This document is already stored (${existing[0].original_filename}). ` +
+          `Duplicate uploads are not allowed.`
+        );
+        return null;
+      }
+
+      // ── 4. Encrypt the file in the browser ───────────────────
+      const encryptedBlob = await encryptFile(file, mek);
+
+      // ── 5. Build storage path and upload ─────────────────────
       const uuid        = crypto.randomUUID();
       const storagePath = `${user.id}/${uuid}-encrypted`;
 
-      // 3. Upload encrypted blob to private bucket
       const { error: uploadErr } = await supabase.storage
         .from("documents")
         .upload(storagePath, encryptedBlob, {
@@ -49,7 +89,7 @@ export function useDocumentUpload() {
         return null;
       }
 
-      // 4. Save metadata directly to DB (RLS ensures user_id matches)
+      // ── 6. Save metadata with hash ───────────────────────────
       const { data: meta, error: metaErr } = await supabase
         .from("document_meta")
         .insert({
@@ -58,11 +98,14 @@ export function useDocumentUpload() {
           original_filename:  file.name,
           original_mime_type: file.type || "application/octet-stream",
           file_size_bytes:    file.size,
+          file_hash:          fileHash,
         })
         .select("id")
         .single();
 
       if (metaErr) {
+        // Clean up uploaded blob if metadata save fails
+        await supabase.storage.from("documents").remove([storagePath]);
         setError("Metadata save failed: " + metaErr.message);
         return null;
       }

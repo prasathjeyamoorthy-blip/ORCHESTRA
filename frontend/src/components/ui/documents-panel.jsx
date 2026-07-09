@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Download, FileText, Loader2, ShieldCheck, AlertCircle, Lock, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { X, Download, FileText, Loader2, ShieldCheck, AlertCircle, Lock, Eye, EyeOff, RefreshCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDocumentDownload } from '../../hooks/useDocumentDownload'
 import { supabase } from '../../lib/supabase'
@@ -116,12 +116,14 @@ function PasswordModal({ doc, onConfirm, onCancel, error, loading }) {
 
 // ── Main panel ────────────────────────────────────────────────────
 export function DocumentsPanel({ open, onClose, onNotLoggedIn }) {
-  const { listDocuments, download, downloading, error } = useDocumentDownload()
-  const [docs, setDocs]             = useState([])
-  const [fetching, setFetching]     = useState(false)
-  const [pendingDoc, setPendingDoc] = useState(null)
-  const [pwError, setPwError]       = useState(null)
-  const [userName, setUserName]     = useState('')
+  const { listDocuments, download, deleteDocument, downloading, error } = useDocumentDownload()
+  const [docs, setDocs]               = useState([])
+  const [fetching, setFetching]       = useState(false)
+  const [pendingDoc, setPendingDoc]   = useState(null)
+  const [pwError, setPwError]         = useState(null)
+  const [userName, setUserName]       = useState('')
+  const [deletingId, setDeletingId]   = useState(null)   // id of doc being deleted
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null) // id pending confirmation
 
   // ── Load documents ──────────────────────────────────────────────
   const loadDocs = useCallback(async () => {
@@ -147,9 +149,13 @@ export function DocumentsPanel({ open, onClose, onNotLoggedIn }) {
     })
   }, [])
 
-  // ── Fetch when panel opens ──────────────────────────────────────
+  // ── Fetch when panel opens — always clear stale state first ─────
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // Clear docs when panel closes so stale data never shows on reopen
+      setDocs([])
+      return
+    }
     loadDocs()
   }, [open, loadDocs])
 
@@ -186,6 +192,20 @@ export function DocumentsPanel({ open, onClose, onNotLoggedIn }) {
       setPendingDoc(null)
     } else {
       setPwError(error || 'Incorrect password.')
+    }
+  }
+
+  async function handleDeleteConfirm(doc) {
+    setConfirmDeleteId(null)
+    setDeletingId(doc.id)
+    try {
+      const ok = await deleteDocument(doc, onNotLoggedIn)
+      if (ok) {
+        // Optimistic update — remove from list immediately
+        setDocs(prev => prev.filter(d => d.id !== doc.id))
+      }
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -289,6 +309,8 @@ export function DocumentsPanel({ open, onClose, onNotLoggedIn }) {
           {docs.map(doc => {
             const docType = guessDocType(doc.originalFilename)
             const icon    = DOC_ICONS[docType] || '📄'
+            const isDeleting = deletingId === doc.id
+            const isConfirming = confirmDeleteId === doc.id
             return (
               <div key={doc.id}
                 className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl px-3 py-3 transition-all group">
@@ -314,14 +336,50 @@ export function DocumentsPanel({ open, onClose, onNotLoggedIn }) {
                   </p>
                 </div>
 
-                {/* Download */}
-                <button
-                  onClick={() => handleDownloadClick(doc)}
-                  className="flex-shrink-0 p-1.5 rounded-lg text-white/25 hover:text-white hover:bg-white/[0.08] transition-all opacity-0 group-hover:opacity-100"
-                  title="Decrypt and download"
-                >
-                  <Download size={14} />
-                </button>
+                {/* Actions — always visible, not just on hover */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {/* Download */}
+                  <button
+                    onClick={() => handleDownloadClick(doc)}
+                    disabled={isDeleting}
+                    className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/[0.08] transition-all disabled:opacity-30"
+                    title="Decrypt and download"
+                  >
+                    <Download size={14} />
+                  </button>
+
+                  {/* Delete — two-step confirmation */}
+                  {isConfirming ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDeleteConfirm(doc)}
+                        className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 text-[10px] font-semibold transition-all"
+                        title="Confirm delete"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="p-1 rounded-lg text-white/30 hover:text-white/60 transition-all"
+                        title="Cancel"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(doc.id)}
+                      disabled={isDeleting}
+                      className="p-1.5 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 transition-all disabled:opacity-30"
+                      title="Delete document"
+                    >
+                      {isDeleting
+                        ? <Loader2 size={14} className="animate-spin text-rose-400" />
+                        : <Trash2 size={14} />
+                      }
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}

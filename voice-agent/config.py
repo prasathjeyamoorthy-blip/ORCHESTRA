@@ -3,18 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── API Keys ──────────────────────────────────────────────────
-# Set these in voice-agent/.env — never hardcode keys here
-NVIDIA_API_KEY  = os.getenv("NVIDIA_API_KEY")
-SARVAM_API_KEY  = os.getenv("SARVAM_API_KEY")
-ASR_API_KEY     = os.getenv("STT_API_KEY") or NVIDIA_API_KEY
-TTS_API_KEY     = os.getenv("TTS_API_KEY") or NVIDIA_API_KEY
-
-# Validate required API keys
-if not NVIDIA_API_KEY:
-    raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. Add it to voice-agent/.env:\n"
-        "  NVIDIA_API_KEY=nvapi-..."
-    )
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 
 if not SARVAM_API_KEY:
     raise EnvironmentError(
@@ -22,50 +11,57 @@ if not SARVAM_API_KEY:
         "  SARVAM_API_KEY=sk_..."
     )
 
+# ── Groq API — key pool for rotation ─────────────────────────
+GROQ_API_KEYS = [
+    k for k in [
+        os.getenv("GROQ_API_KEY1", ""),
+        os.getenv("GROQ_API_KEY2", ""),
+        os.getenv("GROQ_API_KEY3", ""),
+        os.getenv("GROQ_API_KEY4", ""),
+        os.getenv("GROQ_API_KEY5", ""),
+    ] if k
+]
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_LLM_URL  = f"{GROQ_BASE_URL}/chat/completions"
+
 # ── Voice Service Configuration ───────────────────────────────
 VOICE_AGENT_PORT = int(os.getenv("VOICE_AGENT_PORT", "8002"))
 VOICE_AGENT_HOST = os.getenv("VOICE_AGENT_HOST", "0.0.0.0")
 
-# Service endpoints and connectivity
-VOICE_SERVICE_TIMEOUT = int(os.getenv("VOICE_SERVICE_TIMEOUT", "30"))
+VOICE_SERVICE_TIMEOUT      = int(os.getenv("VOICE_SERVICE_TIMEOUT", "30"))
 VOICE_HEALTH_CHECK_INTERVAL = int(os.getenv("VOICE_HEALTH_CHECK_INTERVAL", "60"))
-VOICE_FALLBACK_ENABLED = os.getenv("VOICE_FALLBACK_ENABLED", "true").lower() == "true"
+VOICE_FALLBACK_ENABLED     = os.getenv("VOICE_FALLBACK_ENABLED", "true").lower() == "true"
 
-# ── STT/TTS Model Configuration ──────────────────────────────
-# Sarvam AI Models
+# ── Sarvam AI STT / TTS ───────────────────────────────────────
 SARVAM_STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
 SARVAM_TTS_MODEL = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
 
-# NVIDIA NIM Models
-NVIDIA_STT_MODEL = os.getenv("NVIDIA_STT_MODEL", "openai/whisper-large-v3")
-NVIDIA_TTS_MODEL = os.getenv("NVIDIA_TTS_MODEL", "nvidia/magpie-tts-multilingual")
+# TTS voice configs per language (bulbul:v3 speakers)
+SARVAM_VOICE_CONFIGS = {
+    "en": {"tts_language": "en-IN", "tts_speaker": "aditya", "stt_language": "en-IN"},
+    "ta": {"tts_language": "ta-IN", "tts_speaker": "amit",   "stt_language": "ta-IN"},
+    "hi": {"tts_language": "hi-IN", "tts_speaker": "shubh",  "stt_language": "hi-IN"},
+}
 
-# ── ASR — openai/whisper-large-v3 via NVIDIA NIM cloud gRPC ──
-# No local GPU needed — calls grpc.nvcf.nvidia.com:443
-ASR_MODEL       = "openai/whisper-large-v3"
-
-# ── TTS — nvidia/magpie-tts-multilingual via NVIDIA NIM cloud gRPC ──
-TTS_VOICE       = os.getenv("TTS_VOICE", "Magpie-Multilingual.EN-US.Aria")
-TTS_LANGUAGE    = "en-US"
 TTS_SAMPLE_RATE = 22050
+TTS_LANGUAGE    = "en-IN"   # default
 
-# ── LLM — NVIDIA NIM (meta/llama-3.3-70b-instruct) ───────────
-NVIDIA_LLM_URL  = "https://integrate.api.nvidia.com/v1/chat/completions"
-LLM_MODEL       = "meta/llama-3.3-70b-instruct"
+# ── LLM (CLI agent mode) ──────────────────────────────────────
+LLM_MODEL       = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 LLM_TEMPERATURE = 0.75
-LLM_MAX_TOKENS  = 150   # Reduced from 280 for faster, more concise responses
+LLM_MAX_TOKENS  = 150
 
-# Legacy aliases (kept so any remaining references don't break)
+# ── Legacy aliases (kept so any remaining references don't break) ─
 OLLAMA_MODEL       = LLM_MODEL
 OLLAMA_TEMPERATURE = LLM_TEMPERATURE
 OLLAMA_MAX_TOKENS  = LLM_MAX_TOKENS
 OLLAMA_CTX         = 4096
 
 # ── Mic / Recording Settings ──────────────────────────────────
-SAMPLE_RATE        = 16000
-SILENCE_THRESHOLD  = 0.01
-SILENCE_DURATION   = 1.2
-MAX_RECORD_SECS    = 30
+SAMPLE_RATE       = 16000
+SILENCE_THRESHOLD = 0.01
+SILENCE_DURATION  = 1.2
+MAX_RECORD_SECS   = 30
 
 # ── Agent Personality ─────────────────────────────────────────
 SYSTEM_PROMPT = """You are Aria, a friendly PAN card voice assistant. Keep responses SHORT and DIRECT - 1 to 2 sentences maximum for speed.

@@ -325,7 +325,10 @@ export function DocumentConsentReview({
       const data = await result.json()
       
       if (data.status === 'success') {
-        onConfirm?.(data)
+        // Pass both the API response AND the confirmed plain fields back.
+        // The parent (document-upload-panel) uses confirmed_fields to update
+        // the Redis extraction cache with user-verified plain text data.
+        onConfirm?.({ ...data, confirmed_fields: { ...extractedFields, ...formData } })
       } else {
         setFieldErrors({ general: data.message || data.error || 'Failed to save document' })
       }

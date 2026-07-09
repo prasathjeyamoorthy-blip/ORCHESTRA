@@ -1,5 +1,5 @@
 """
-core/stt.py — Speech to Text via NVIDIA NIM (openai/whisper-large-v3)
+core/stt.py — Speech to Text via Sarvam AI (saaras:v3)
 """
 
 import os
@@ -10,14 +10,17 @@ import sounddevice as sd
 
 import config
 
-try:
-    import riva.client as riva
-    _RIVA_OK = True
-except ImportError:
-    _RIVA_OK = False
 
-_GRPC_SERVER = "grpc.nvcf.nvidia.com:443"
-_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
+# ── Lazy Sarvam client ────────────────────────────────────────
+_sarvam_client = None
+
+def _get_client():
+    global _sarvam_client
+    if _sarvam_client is None:
+        from sarvamai import SarvamAI
+        _sarvam_client = SarvamAI(api_subscription_key=config.SARVAM_API_KEY)
+        print("  STT → Sarvam AI saaras:v3")
+    return _sarvam_client
 
 
 def _read_wav_info(path: str) -> tuple[bytes, int, int]:
@@ -29,25 +32,14 @@ def _read_wav_info(path: str) -> tuple[bytes, int, int]:
 class SpeechToText:
 
     def __init__(self):
-        if not _RIVA_OK:
-            raise ImportError("nvidia-riva-client is not installed. Run: pip install nvidia-riva-client")
+        # Eagerly validate key and init client on startup
+        _get_client()
+        print("  ✅ STT ready (Sarvam saaras:v3)")
 
-        auth = riva.Auth(
-            uri=_GRPC_SERVER,
-            use_ssl=True,
-            metadata_args=[
-                ["function-id",   _FUNCTION_ID],
-                ["authorization", f"Bearer {config.ASR_API_KEY}"],
-            ],
-        )
-        self._asr = riva.ASRService(auth)
-        print("  STT → NVIDIA NIM whisper-large-v3  (cloud gRPC)")
-        print("  ✅ STT ready")
-
-    # ── Recording (CLI mode only) ──────────────────────────────────
+    # ── Recording (CLI mode only) ──────────────────────────────
 
     def record(self) -> str:
-        """Records from mic until silence. Returns path to temp WAV."""
+        """Record from mic until silence. Returns path to temp WAV."""
         print("\n🎤 Listening... (speak now)")
 
         recorded_chunks = []
@@ -89,49 +81,36 @@ class SpeechToText:
             wf.writeframes(audio_i16.tobytes())
         return tmp
 
-    # ── Transcription ──────────────────────────────────────────────
+    # ── Transcription ──────────────────────────────────────────
 
-    def transcribe(self, audio_path: str, delete_after: bool = False) -> str:
+    def transcribe(self, audio_path: str, language: str = "en",
+                   delete_after: bool = False) -> str:
         """
-        Transcribe a WAV file. Reads actual sample rate from the file header
-        so it works with any valid WAV regardless of how it was created.
+        Transcribe a WAV file using Sarvam AI saaras:v3.
 
         Args:
             audio_path:   Path to a 16-bit mono WAV file.
+            language:     Language code — "en", "ta", or "hi".
             delete_after: If True, delete the file after transcription.
-                          Server.py manages its own cleanup, so pass False
-                          from there to avoid double-delete errors.
         """
         try:
-            pcm_bytes, sample_rate, channels = _read_wav_info(audio_path)
+            client = _get_client()
+            cfg = config.SARVAM_VOICE_CONFIGS.get(language, config.SARVAM_VOICE_CONFIGS["en"])
+            lang_code = cfg["stt_language"]
 
-            if not pcm_bytes:
-                print("[STT] Empty audio — nothing to transcribe")
-                return ""
+            with open(audio_path, "rb") as f:
+                response = client.speech_to_text.transcribe(
+                    file=f,
+                    model=config.SARVAM_STT_MODEL,
+                    mode="transcribe",
+                    language_code=lang_code,
+                )
 
-            asr_config = riva.RecognitionConfig(
-                language_code="en-IN",          # Indian English — better accent handling
-                max_alternatives=1,
-                enable_automatic_punctuation=True,
-                audio_channel_count=channels,   # use actual channel count from file
-                sample_rate_hertz=sample_rate,  # use actual rate from file
-                encoding=riva.AudioEncoding.LINEAR_PCM,
-            )
-
-            resp = self._asr.offline_recognize(pcm_bytes, asr_config)
-
-            if not resp.results:
-                return ""
-
-            transcript = " ".join(
-                r.alternatives[0].transcript
-                for r in resp.results
-                if r.alternatives
-            ).strip()
-
-            # Basic cleanup — remove filler artifacts whisper sometimes adds
-            transcript = transcript.strip(" .,")
-            return transcript
+            if hasattr(response, "transcript"):
+                return (response.transcript or "").strip()
+            if isinstance(response, dict):
+                return (response.get("transcript") or "").strip()
+            return str(response).strip()
 
         except Exception as e:
             print(f"[STT] Transcription error: {e}")
@@ -143,7 +122,7 @@ class SpeechToText:
                 except OSError:
                     pass
 
-    def listen(self) -> str:
+    def listen(self, language: str = "en") -> str:
         """CLI pipeline: record mic → transcribe → return text."""
         audio_path = self.record()
-        return self.transcribe(audio_path, delete_after=True)
+        return self.transcribe(audio_path, language=language, delete_after=True)

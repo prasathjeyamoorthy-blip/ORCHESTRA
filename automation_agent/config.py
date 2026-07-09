@@ -12,10 +12,9 @@ BROWSER_ARGS = [
     '--disable-dev-shm-usage',
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-web-security',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--allow-running-insecure-content',
-    '--disable-features=VizDisplayCompositor'
+    # NOTE: Do NOT add --disable-web-security or --disable-features=IsolateOrigins
+    # Those flags break cross-origin iframes (reCAPTCHA loads from google.com in
+    # a sandboxed iframe — killing isolation prevents it from loading entirely).
 ]
 
 BROWSER_VIEWPORT = {'width': 1366, 'height': 768}
@@ -44,28 +43,49 @@ BROWSER_CONTEXT_CONFIG = {
 }
 
 STEALTH_SCRIPT = """
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined
-    });
-    
+    // Hide webdriver flag — primary automation detection signal
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // Fake plugin list (real browsers always have plugins)
     Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
+        get: () => {
+            const arr = [
+                { name: 'Chrome PDF Plugin' },
+                { name: 'Chrome PDF Viewer' },
+                { name: 'Native Client' },
+            ];
+            arr.__proto__ = PluginArray.prototype;
+            return arr;
+        }
     });
-    
+
+    // Fake languages
     Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en']
     });
-    
+
+    // Full chrome object (reCAPTCHA checks window.chrome.app)
     window.chrome = {
-        runtime: {}
+        app: {
+            isInstalled: false,
+            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+        },
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
     };
-    
-    const originalQuery = window.navigator.permissions.query;
+
+    // Fix Notification permission probe (used by reCAPTCHA)
+    const _origQuery = window.navigator.permissions.query;
     window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission }) :
-            originalQuery(parameters)
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : _origQuery(parameters)
     );
+
+    // Remove automation-related properties from navigator
+    delete navigator.__proto__.webdriver;
 """
 
 # URLs

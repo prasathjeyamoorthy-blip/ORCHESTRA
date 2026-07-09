@@ -199,13 +199,13 @@ def llm_transliterate(text: str) -> Optional[str]:
         import requests
         import os
         from dotenv import load_dotenv
-        
+        from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+
         load_dotenv()
-        api_key = os.getenv("NVIDIA_API_KEY")
-        
-        if not api_key:
+
+        if not LLM_API_KEY:
             return None
-        
+
         prompt = f"""Convert this Tanglish (Tamil written in English) to proper Tamil script:
 
 Input: "{text}"
@@ -217,15 +217,15 @@ Rules:
 4. Output only the converted text, nothing else
 
 Output:"""
-        
+
         response = requests.post(
-            "https://integrate.api.nvidia.com/v1/chat/completions",
+            f"{LLM_BASE_URL}/chat/completions",
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {LLM_API_KEY}",
                 "Content-Type": "application/json"
             },
             json={
-                "model": "meta/llama-3.3-70b-instruct",
+                "model": LLM_MODEL,
                 "messages": [
                     {"role": "user", "content": prompt}
                 ],
