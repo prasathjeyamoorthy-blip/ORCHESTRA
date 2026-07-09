@@ -1,5 +1,4 @@
 # User data - NEVER commit
-data.json
 payment_link.json
 payment_page_*.png
 
