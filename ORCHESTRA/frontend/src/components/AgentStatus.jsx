@@ -8,8 +8,9 @@ export default function AgentStatus({ onChunk }) {
     abortRef.current = new AbortController();
     setIsGenerating(true);
 
+    const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:8001";
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch(`${apiBase}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),

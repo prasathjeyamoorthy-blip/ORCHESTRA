@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, Optional
 import os
 import re
 import time
@@ -9,26 +9,52 @@ import sys
 import traceback
 import threading as _threading
 import asyncio as _asyncio
+import json
 from collections import deque
 
 from fastapi.middleware.cors import CORSMiddleware
-from agent import agentic_rag, documents_node
+from agent import agentic_rag, documents_node, generate_response_stream
+from guardrails import check_guardrail
+
+try:
+    from supabase_db import save_message, fetch_user_history
+except Exception as _e:
+    print(f"[app] Note: supabase_db functions optional: {_e}")
+    save_message, fetch_user_history = None, None
 
 app = FastAPI(title="ORCHESTRA Main Server")
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+if allowed_origins_env:
+    if allowed_origins_env.strip() == "*":
+        ALLOWED_ORIGINS = ["*"]
+    else:
+        ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://[REPLACE_WITH_ELASTIC_IP]",
-        "http://[REPLACE_WITH_ELASTIC_IP]:80"
-    ],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
+    allow_credentials=True if ALLOWED_ORIGINS != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── Session store ──────────────────────────────────────────────────────────────
 SESSIONS: Dict[str, dict] = {}
+USER_PROFILES: Dict[str, dict] = {}
 
 # ── Response time warning threshold (ms) ──────────────────────────────────────
 _MAX_MS = 3000   # warn if slower than this
@@ -87,29 +113,69 @@ def _clean_answer(text: str) -> str:
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    phone_number: Optional[str] = None
+    user_id: Optional[str] = None
+    language: Optional[str] = "en"
+    encrypted_content: Optional[str] = None
 
 
 @app.post("/chat")
-def chat(req: ChatRequest):
-    state = SESSIONS.get(req.session_id) or {
-        "question": "", "intent": None, "context": None,
-        "answer": None, "applicant_category": None,
-        "stage": None, "chat_history": []
-    }
-    if not state.get("chat_history"):
-        state["chat_history"] = []
+async def chat(req: ChatRequest):
+    user_key = (
+        (req.phone_number and req.phone_number.strip())
+        or (req.user_id and req.user_id.strip())
+        or "default_user"
+    )
+
+    user_profile = USER_PROFILES.setdefault(user_key, {
+        "applicant_category": None,
+        "chat_history": [],
+        "stage": None,
+        "user_details": {}
+    })
+
+    # Retrieve existing session or initialize from cross-session user profile
+    state = SESSIONS.get(req.session_id)
+    if not state:
+        state = {
+            "question": "",
+            "intent": None,
+            "context": None,
+            "answer": None,
+            "applicant_category": user_profile.get("applicant_category"),
+            "stage": user_profile.get("stage"),
+            "chat_history": list(user_profile.get("chat_history", []))[-10:]
+        }
+    else:
+        if not state.get("applicant_category") and user_profile.get("applicant_category"):
+            state["applicant_category"] = user_profile["applicant_category"]
+        if not state.get("chat_history") and user_profile.get("chat_history"):
+            state["chat_history"] = list(user_profile["chat_history"])[-10:]
 
     previous_stage = state.get("stage")
     state["question"] = req.message
-    state["chat_history"].append({"role": "user", "content": req.message})
 
+    # Outer Guardrail Check BEFORE reaching the agent
+    is_allowed, refusal_msg = check_guardrail(req.message)
+    if not is_allowed:
+        state["chat_history"].append({"role": "user", "content": req.message})
+        state["chat_history"].append({"role": "assistant", "content": refusal_msg})
+        user_profile["chat_history"] = state["chat_history"][-10:]
+        return {
+            "answer": refusal_msg,
+            "session_id": req.session_id,
+            "applicant_category": state.get("applicant_category"),
+            "stage": state.get("stage")
+        }
+
+    state["chat_history"].append({"role": "user", "content": req.message})
     t_start = time.perf_counter()
 
     try:
         if previous_stage == "ASK_CATEGORY":
-            state = documents_node(state)
+            state = await documents_node(state)
         else:
-            state = agentic_rag.invoke(state)
+            state = await agentic_rag.ainvoke(state)
     except Exception as exc:
         tb = traceback.format_exc()
         print(f"[ERROR] /chat failed:\n{tb}")
@@ -130,7 +196,25 @@ def chat(req: ChatRequest):
         state["chat_history"].append({"role": "assistant", "content": state["answer"]})
 
     state["chat_history"] = state["chat_history"][-20:]
+
+    # ── Sync across sessions via user profile ─────────────────────────────────
+    if state.get("applicant_category"):
+        user_profile["applicant_category"] = state["applicant_category"]
+    if state.get("stage"):
+        user_profile["stage"] = state["stage"]
+
+    user_profile["chat_history"] = list(state.get("chat_history", []))[-20:]
+    USER_PROFILES[user_key] = user_profile
     SESSIONS[req.session_id] = state
+
+    # ── Optional DB persistence ───────────────────────────────────────────────
+    if save_message and req.phone_number:
+        try:
+            save_message(req.phone_number, "user", req.message, session_id=req.session_id, stage=state.get("stage"))
+            if state.get("answer"):
+                save_message(req.phone_number, "assistant", state["answer"], session_id=req.session_id, stage=state.get("stage"))
+        except Exception as _e:
+            print(f"[app] Note: message save error: {_e}")
 
     # ── Log ───────────────────────────────────────────────────────────────────
     intent = (state.get("intent") or {}).get("primary", "unknown")
@@ -149,6 +233,82 @@ def chat(req: ChatRequest):
         "stage": state.get("stage"),
         "category": state.get("applicant_category"),
     }
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest):
+    user_key = (
+        (req.phone_number and req.phone_number.strip())
+        or (req.user_id and req.user_id.strip())
+        or "default_user"
+    )
+
+    user_profile = USER_PROFILES.setdefault(user_key, {
+        "applicant_category": None,
+        "chat_history": [],
+        "stage": None,
+        "user_details": {}
+    })
+
+    state = SESSIONS.get(req.session_id)
+    if not state:
+        state = {
+            "question": "",
+            "intent": None,
+            "context": None,
+            "answer": None,
+            "applicant_category": user_profile.get("applicant_category"),
+            "stage": user_profile.get("stage"),
+            "chat_history": list(user_profile.get("chat_history", []))[-10:]
+        }
+    else:
+        if not state.get("applicant_category") and user_profile.get("applicant_category"):
+            state["applicant_category"] = user_profile["applicant_category"]
+        if not state.get("chat_history") and user_profile.get("chat_history"):
+            state["chat_history"] = list(user_profile["chat_history"])[-10:]
+
+    state["question"] = req.message
+    state["chat_history"].append({"role": "user", "content": req.message})
+
+    async def event_generator():
+        final_answer = ""
+        try:
+            async for chunk_line in generate_response_stream(state):
+                data = json.loads(chunk_line)
+                if data.get("done"):
+                    final_answer = data.get("answer", "")
+                yield chunk_line
+        except Exception as exc:
+            tb = traceback.format_exc()
+            print(f"[ERROR] /chat/stream failed: {tb}")
+            yield json.dumps({"error": str(exc), "done": True}) + "\n"
+            return
+
+        if final_answer:
+            cleaned = _clean_answer(final_answer)
+            state["answer"] = cleaned
+            state["chat_history"].append({"role": "assistant", "content": cleaned})
+
+        state["chat_history"] = state["chat_history"][-20:]
+
+        if state.get("applicant_category"):
+            user_profile["applicant_category"] = state["applicant_category"]
+        if state.get("stage"):
+            user_profile["stage"] = state["stage"]
+
+        user_profile["chat_history"] = list(state.get("chat_history", []))[-20:]
+        USER_PROFILES[user_key] = user_profile
+        SESSIONS[req.session_id] = state
+
+        if save_message and req.phone_number:
+            try:
+                save_message(req.phone_number, "user", req.message, session_id=req.session_id, stage=state.get("stage"))
+                if state.get("answer"):
+                    save_message(req.phone_number, "assistant", state["answer"], session_id=req.session_id, stage=state.get("stage"))
+            except Exception as _e:
+                print(f"[app] Note: stream message save error: {_e}")
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

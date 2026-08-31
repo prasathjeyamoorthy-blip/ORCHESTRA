@@ -20,7 +20,7 @@ const QUICK_ACTIONS = [
   { label: "General Help",        send: "general help" },
 ];
 
-export default function ChatInput({ onSend, disabled, isGenerating, onStop, showChips }) {
+export default function ChatInput({ onSend, disabled, isGenerating, onStop, showChips, currentLanguage = "en" }) {
   const [input, setInput] = useState("");
   const { ref, adjust } = useAutoResize(48, 150);
 
@@ -49,7 +49,7 @@ export default function ChatInput({ onSend, disabled, isGenerating, onStop, show
           <textarea
             ref={ref}
             value={input}
-            placeholder="Ask anything"
+            placeholder={currentLanguage === "ta" ? "எதுவும் கேளுங்கள்..." : "Ask anything..."}
             rows={1}
             onChange={e => { setInput(e.target.value); adjust(); }}
             onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}

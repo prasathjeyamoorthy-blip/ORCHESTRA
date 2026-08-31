@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 import base64
@@ -11,7 +12,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException
 
 import config
-load_dotenv()
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path, override=True)
 
 
 # ---------- PDF validation ----------
@@ -54,13 +56,20 @@ def get_image_resolution(pil_image):
     }
 
 
+# HTTP Session with connection pooling for fast repeated VLM calls
+_session = requests.Session()
+_adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
+
+
 def pil_to_base64(img):
     buffer = BytesIO()
 
     # Compress image before encoding (VERY IMPORTANT)
     img = img.convert("RGB")
-    img.thumbnail((1400, 1400))  # reduce size safely
-    img.save(buffer, format="JPEG", quality=70)
+    img.thumbnail((512, 512))  # optimal size (12k vision tokens) to stay well under 100k TPM rate limit
+    img.save(buffer, format="JPEG", quality=75)
 
     return base64.b64encode(buffer.getvalue()).decode()
 
@@ -68,20 +77,69 @@ def pil_to_base64(img):
 # keep run_vlm logic exactly as reference
 
 def run_vlm(image, text_prompt):
+    image_b64 = pil_to_base64(image)
+    groq_key = os.getenv("GROQ_API_KEY")
 
+    # Try Groq ultra-fast LPU Vision API first if key available
+    if groq_key and groq_key.startswith("gsk_"):
+        groq_url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {groq_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "qwen/qwen3.6-27b",
+            "reasoning_format": "hidden",
+            "temperature": 0,
+            "max_tokens": 450,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+        # Try up to 3 times with short sleep if 429 rate limit is hit
+        for attempt in range(3):
+            try:
+                res = requests.post(groq_url, headers=headers, json=payload, timeout=90)
+                if res.status_code == 200:
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        print(f"[run_vlm] Groq VLM extraction success! (Attempt {attempt+1})")
+                        return content
+                elif res.status_code == 429:
+                    print(f"[run_vlm] Groq VLM 429 rate limit, waiting 2.5s before retry {attempt+1}/3...")
+                    import time
+                    time.sleep(2.5)
+                else:
+                    print(f"[run_vlm] Groq VLM returned status {res.status_code}: {res.text[:150]}")
+                    break
+            except Exception as ge:
+                print(f"[run_vlm] Groq VLM call exception (attempt {attempt+1}): {ge}")
+                import time
+                time.sleep(1.5)
+
+    # Fallback to NVIDIA NIM API
     invoke_url = config.NVIDIA_API_URL
-
     headers = {
         "Authorization": f"Bearer {os.getenv('NVIDIA_META_11B')}",
         "Content-Type": "application/json"
     }
 
-    image_b64 = pil_to_base64(image)
-
     payload = {
         "model": "meta/llama-3.2-11b-vision-instruct",
         "temperature": 0,
-        "max_tokens": 800,
+        "max_tokens": 450,
         "messages": [
             {
                 "role": "user",
@@ -292,7 +350,7 @@ Return ONLY the JSON object. No explanation.
             if "aadhaar" in cert_type.lower() and _current.strip().lower() in _MISSING:
 
                 # Stage 1: regex on raw VLM text
-                _match = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]*([^\n,\"{}]+)", raw, re.IGNORECASE)
+                _match = re.search(r"(?:C/O|S/O|D/O|W/O|Father|Father\s*Name)[:\s]+([^\n,\"{}]+)", raw, re.IGNORECASE)
                 if _match:
                     _candidate = _match.group(1).strip().strip('"').strip("'")
                     if _candidate.lower() not in _MISSING:
@@ -328,6 +386,49 @@ Return ONLY the JSON object. No explanation.
     return outputs
 
 
+def run_text_llm(text_content: str) -> dict:
+    prompt = f"""
+Look at this document text and extract all relevant fields.
+
+1. Identify the certificate type. Choose ONLY from:
+   Aadhaar, Ration Card, Address Proof, PAN, Driving License,
+   Voter ID, Caste Certificate, Residence Certificate, Income Certificate
+
+2. Extract all relevant fields based on the type.
+
+Return a single JSON object. Always include "certificate_type" as the first key.
+
+For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, religion, community, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
+For Ration Card use keys: certificate_type, name, mother_name, number, district, taluk, state
+For Driving License use keys: certificate_type, name, dob, dl_number, address, state, pincode
+For Address Proof use keys: certificate_type, username, father_name, religion, community, door_no, address, street_name, pincode, from_date, to_date, state, district, taluk, count_of_residence_years
+For PAN use keys: certificate_type, name, father_name, dob, pan_number
+For Voter ID use keys: certificate_type, name, father_name, dob, voter_id
+
+Return ONLY the JSON object. No explanation.
+
+Document Text:
+{text_content}
+"""
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key and groq_key.startswith("gsk_"):
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "temperature": 0,
+                "max_tokens": 450,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=15)
+            if res.status_code == 200:
+                return parse_vlm_output(res.json()["choices"][0]["message"]["content"])
+        except Exception as e:
+            print(f"[run_text_llm] Groq text LLM failed: {e}")
+    return None
+
+
 def extract_from_pdf(pdf_path: str) -> list:
     """Extract data from a PDF (or image) file.
 
@@ -336,6 +437,26 @@ def extract_from_pdf(pdf_path: str) -> list:
     """
     # --- validate the file first ---
     if _is_valid_pdf(pdf_path):
+        # Fast path: Try extracting digital text directly using pypdf
+        try:
+            try:
+                import pypdf
+            except ImportError:
+                for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
+                    if p not in sys.path:
+                        sys.path.append(p)
+                import pypdf
+
+            reader = pypdf.PdfReader(pdf_path)
+            extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            if len(extracted_text.strip()) > 50:
+                print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using fast LLM text extraction.")
+                raw_json = run_text_llm(extracted_text)
+                if raw_json:
+                    return [raw_json]
+        except Exception as te:
+            print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
+
         try:
             pages = convert_from_path(
                 pdf_path,

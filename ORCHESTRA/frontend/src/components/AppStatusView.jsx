@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { LuSearch, LuCircleCheck, LuClock, LuTriangleAlert } from "react-icons/lu";
 
-export default function AppStatusView() {
+export default function AppStatusView({ currentLanguage = "en" }) {
   const [refNo, setRefNo] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const isTa = currentLanguage === "ta";
 
   const handleCheck = async (e) => {
     e.preventDefault();
@@ -15,9 +17,9 @@ export default function AppStatusView() {
     setResult({
       ref: refNo.trim(),
       status: "pending",
-      label: "Under Review",
-      updated: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-      message: "Your application has been received and is currently under review by the concerned authority.",
+      label: isTa ? "பரிசீலனையில் உள்ளது" : "Under Review",
+      updated: new Date().toLocaleDateString(isTa ? "ta-IN" : "en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+      message: isTa ? "உங்கள் விண்ணப்பம் பெறப்பட்டு சம்பந்தப்பட்ட அதிகாரியால் பரிசீலிக்கப்பட்டு வருகிறது." : "Your application has been received and is currently under review by the concerned authority.",
     });
     setLoading(false);
   };
@@ -31,8 +33,8 @@ export default function AppStatusView() {
   return (
     <div className="view-page">
       <div className="view-header">
-        <h2 className="view-title">Track Application</h2>
-        <p className="view-sub">Enter your application reference number to check the current status.</p>
+        <h2 className="view-title">{isTa ? "விண்ணப்ப நிலையை அறிய" : "Track Application"}</h2>
+        <p className="view-sub">{isTa ? "உங்கள் விண்ணப்பத்தின் தற்போதைய நிலையைச் சரிபார்க்க குறிப்பு எண்ணை உள்ளிடவும்." : "Enter your application reference number to check the current status."}</p>
       </div>
 
       <form onSubmit={handleCheck} className="status-form">
@@ -40,13 +42,13 @@ export default function AppStatusView() {
           <LuSearch size={16} color="var(--text-3)" style={{ flexShrink: 0 }} />
           <input
             className="status-input"
-            placeholder="Enter reference / application number"
+            placeholder={isTa ? "குறிப்பு / விண்ணப்ப எண்ணை உள்ளிடவும்" : "Enter reference / application number"}
             value={refNo}
             onChange={e => setRefNo(e.target.value)}
           />
         </div>
         <button type="submit" className="btn-primary" disabled={loading || !refNo.trim()}>
-          {loading ? "Checking…" : "Check Status"}
+          {loading ? (isTa ? "சரிபார்க்கப்படுகிறது…" : "Checking…") : (isTa ? "நிலையைச் சரிபார்க்கவும்" : "Check Status")}
         </button>
       </form>
 
@@ -59,18 +61,18 @@ export default function AppStatusView() {
               <span>{result.label}</span>
             </div>
             <div className="status-result-body">
-              <div className="status-row"><span>Reference No.</span><strong>{result.ref}</strong></div>
-              <div className="status-row"><span>Last Updated</span><strong>{result.updated}</strong></div>
-              <div className="status-row"><span>Remarks</span><span style={{ color: "var(--text-2)", fontSize: "0.8125rem" }}>{result.message}</span></div>
+              <div className="status-row"><span>{isTa ? "குறிப்பு எண்" : "Reference No."}</span><strong>{result.ref}</strong></div>
+              <div className="status-row"><span>{isTa ? "கடைசியாக புதுப்பிக்கப்பட்டது" : "Last Updated"}</span><strong>{result.updated}</strong></div>
+              <div className="status-row"><span>{isTa ? "குறிப்புகள்" : "Remarks"}</span><span style={{ color: "var(--text-2)", fontSize: "0.8125rem" }}>{result.message}</span></div>
             </div>
           </div>
         );
       })()}
 
       <p className="view-note">
-        You can also track your application directly on the{" "}
+        {isTa ? "உங்கள் விண்ணப்பத்தை நேரடியாக " : "You can also track your application directly on the "}
         <a href="https://www.tnesevai.tn.gov.in/citizen/trackApplication" target="_blank" rel="noreferrer">
-          TNeGA e-Sevai portal
+          {isTa ? "TNeGA இ-சேவை தளத்திலும் தொடரலாம்" : "TNeGA e-Sevai portal"}
         </a>.
       </p>
     </div>

@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MdOutlineCloudUpload, MdDeleteOutline } from "react-icons/md";
-import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader } from "react-icons/lu";
+import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader, LuEye, LuEyeOff, LuCalendar } from "react-icons/lu";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -23,10 +23,299 @@ const STEPS = [
   { id: "documents",   title: "Documents" },
 ];
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+function DarkCalendarPopover({ value, onSelect, onClose }) {
+  const popoverRef = useRef(null);
+
+  // Parse initial selected date from DD/MM/YYYY
+  const parseInitialDate = () => {
+    if (value && typeof value === "string") {
+      const parts = value.split("/");
+      if (parts.length === 3) {
+        const d = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const y = parseInt(parts[2], 10);
+        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+          return { month: m, year: y };
+        }
+      }
+    }
+    const today = new Date();
+    return { month: today.getMonth(), year: today.getFullYear() };
+  };
+
+  const initial = parseInitialDate();
+  const [viewMonth, setViewMonth] = useState(initial.month);
+  const [viewYear, setViewYear] = useState(initial.year);
+
+  // Close on outer click
+  useEffect(() => {
+    const handleOuter = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        onClose?.();
+      }
+    };
+    document.addEventListener("mousedown", handleOuter);
+    return () => document.removeEventListener("mousedown", handleOuter);
+  }, [onClose]);
+
+  const prevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear(v => v - 1);
+    } else {
+      setViewMonth(v => v - 1);
+    }
+  };
+
+  const nextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear(v => v + 1);
+    } else {
+      setViewMonth(v => v + 1);
+    }
+  };
+
+  // Generate calendar days (6 rows x 7 cols = 42 cells)
+  const firstDayIdx = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInCurrentMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+  const cells = [];
+  // Trailing days from previous month
+  for (let i = firstDayIdx - 1; i >= 0; i--) {
+    cells.push({
+      day: daysInPrevMonth - i,
+      month: viewMonth === 0 ? 11 : viewMonth - 1,
+      year: viewMonth === 0 ? viewYear - 1 : viewYear,
+      isCurrentMonth: false,
+    });
+  }
+  // Days of current month
+  for (let d = 1; d <= daysInCurrentMonth; d++) {
+    cells.push({
+      day: d,
+      month: viewMonth,
+      year: viewYear,
+      isCurrentMonth: true,
+    });
+  }
+  // Leading days of next month
+  const totalSoFar = cells.length;
+  for (let n = 1; n <= 42 - totalSoFar; n++) {
+    cells.push({
+      day: n,
+      month: viewMonth === 11 ? 0 : viewMonth + 1,
+      year: viewMonth === 11 ? viewYear + 1 : viewYear,
+      isCurrentMonth: false,
+    });
+  }
+
+  const today = new Date();
+  const isToday = (c) => c.day === today.getDate() && c.month === today.getMonth() && c.year === today.getFullYear();
+
+  const isSelected = (c) => {
+    if (!value) return false;
+    const parts = value.split("/");
+    if (parts.length !== 3) return false;
+    return (
+      c.day === parseInt(parts[0], 10) &&
+      c.month === parseInt(parts[1], 10) - 1 &&
+      c.year === parseInt(parts[2], 10)
+    );
+  };
+
+  const handleSelectDay = (c) => {
+    const dayStr = String(c.day).padStart(2, "0");
+    const monthStr = String(c.month + 1).padStart(2, "0");
+    const formatted = `${dayStr}/${monthStr}/${c.year}`;
+    onSelect(formatted);
+    onClose?.();
+  };
+
+  const currentSystemYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentSystemYear - 1950 + 1 }, (_, i) => currentSystemYear - i);
+
+  return (
+    <div
+      ref={popoverRef}
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 8px)",
+        left: 0,
+        width: "285px",
+        background: "rgba(18, 18, 22, 0.97)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        border: "1px solid rgba(255, 255, 255, 0.14)",
+        borderRadius: "0.875rem",
+        boxShadow: "0 -12px 36px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)",
+        padding: "0.875rem",
+        zIndex: 1000,
+        animation: "fade-in 0.15s ease-out",
+      }}
+    >
+      {/* Header with Month/Year Selectors & Nav */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem", gap: "0.375rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+          {/* Month Select */}
+          <select
+            value={viewMonth}
+            onChange={(e) => setViewMonth(Number(e.target.value))}
+            style={{
+              background: "rgba(255, 255, 255, 0.08)",
+              color: "#ffffff",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              borderRadius: "0.375rem",
+              padding: "0.25rem 0.4rem",
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {MONTH_NAMES.map((mName, idx) => (
+              <option key={idx} value={idx} style={{ background: "#1c1c1c", color: "#ffffff" }}>
+                {mName}
+              </option>
+            ))}
+          </select>
+
+          {/* Year Select (1950 to present) */}
+          <select
+            value={viewYear}
+            onChange={(e) => setViewYear(Number(e.target.value))}
+            style={{
+              background: "rgba(255, 255, 255, 0.08)",
+              color: "#ffffff",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              borderRadius: "0.375rem",
+              padding: "0.25rem 0.4rem",
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y} style={{ background: "#1c1c1c", color: "#ffffff" }}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+          <button
+            type="button"
+            onClick={prevMonth}
+            style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "0.375rem", width: "1.65rem", height: "1.65rem",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#ffffff", cursor: "pointer", transition: "background 0.12s"
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.14)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+          >
+            <LuChevronLeft size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={nextMonth}
+            style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "0.375rem", width: "1.65rem", height: "1.65rem",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#ffffff", cursor: "pointer", transition: "background 0.12s"
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.14)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+          >
+            <LuChevronRight size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* Weekday Labels */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "0.125rem", marginBottom: "0.375rem", textAlign: "center" }}>
+        {WEEKDAYS.map((w, idx) => (
+          <span key={idx} style={{ fontSize: "0.72rem", fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>
+            {w}
+          </span>
+        ))}
+      </div>
+
+      {/* Days Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "0.125rem" }}>
+        {cells.map((c, i) => {
+          const selected = isSelected(c);
+          const currentToday = isToday(c);
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => handleSelectDay(c)}
+              style={{
+                width: "100%",
+                height: "2rem",
+                borderRadius: "0.375rem",
+                border: currentToday && !selected ? "1px solid #a855f7" : "none",
+                background: selected
+                  ? "linear-gradient(135deg, #a855f7, #6366f1)"
+                  : "transparent",
+                color: selected
+                  ? "#ffffff"
+                  : c.isCurrentMonth
+                  ? "rgba(255,255,255,0.9)"
+                  : "rgba(255,255,255,0.25)",
+                fontSize: "0.78rem",
+                fontWeight: selected || currentToday ? 700 : 400,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: selected ? "0 4px 12px rgba(168, 85, 247, 0.4)" : "none",
+                transition: "all 0.12s ease"
+              }}
+              onMouseEnter={e => {
+                if (!selected) e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+              }}
+              onMouseLeave={e => {
+                if (!selected) e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {c.day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Floating label input ──────────────────────────────────────────────────────
-function FloatingInput({ label, name, type = "text", value, onChange, maxLength }) {
+function FloatingInput({ label, name, type = "text", value, onChange, maxLength, isDate = false }) {
   const [focused, setFocused] = useState(false);
-  const active = focused || !!value;
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
+
+  const isPassword = type === "password";
+  const inputType = isPassword ? (showPassword ? "text" : "password") : type;
+  const active = focused || !!value || showCalendar;
+
+  const handleCalendarClick = () => {
+    setShowCalendar(prev => !prev);
+  };
+
   return (
     <div style={{ position: "relative", flex: 1, minWidth: 160, marginBottom: "0.25rem" }}>
       <label style={{
@@ -37,22 +326,69 @@ function FloatingInput({ label, name, type = "text", value, onChange, maxLength 
         padding: active ? "0 4px" : 0,
         pointerEvents: "none", transition: "all 0.18s ease",
         transformOrigin: "left center", whiteSpace: "nowrap",
+        zIndex: 1,
       }}>{label}</label>
       <input
-        type={type} name={name} value={value} onChange={onChange}
+        type={inputType} name={name} value={value} onChange={onChange}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         maxLength={maxLength}
         style={{
           width: "100%", boxSizing: "border-box",
-          padding: "0.75rem 0.875rem", paddingTop: active ? "1.1rem" : "0.75rem",
+          padding: "0.75rem 0.875rem",
+          paddingRight: (isPassword || isDate) ? "2.5rem" : "0.875rem",
+          paddingTop: active ? "1.1rem" : "0.75rem",
           background: C.surface2,
-          border: `1.5px solid ${focused ? "rgba(255,255,255,0.4)" : C.border}`,
+          border: `1.5px solid ${(focused || showCalendar) ? "rgba(255,255,255,0.4)" : C.border}`,
           borderRadius: "0.625rem", color: C.text, fontSize: 14,
           outline: "none", fontFamily: "inherit",
-          boxShadow: focused ? "0 0 0 3px rgba(255,255,255,0.06)" : "none",
+          boxShadow: (focused || showCalendar) ? "0 0 0 3px rgba(255,255,255,0.06)" : "none",
           transition: "border-color 0.18s, box-shadow 0.18s",
         }}
       />
+      {isPassword && (
+        <button
+          type="button"
+          onClick={() => setShowPassword(!showPassword)}
+          style={{
+            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+            background: "none", border: "none", color: C.text2, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 4, borderRadius: 4, zIndex: 2, transition: "color 0.18s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = C.text)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = C.text2)}
+          title={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? <LuEyeOff size={16} /> : <LuEye size={16} />}
+        </button>
+      )}
+      {isDate && (
+        <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}>
+          <button
+            type="button"
+            onClick={handleCalendarClick}
+            style={{
+              background: "none", border: "none", color: showCalendar ? "#ffffff" : C.text2, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 4, borderRadius: 4, transition: "color 0.18s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = C.text)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = showCalendar ? "#ffffff" : C.text2)}
+            title="Open calendar picker"
+          >
+            <LuCalendar size={17} />
+          </button>
+        </div>
+      )}
+      {isDate && showCalendar && (
+        <DarkCalendarPopover
+          value={value}
+          onSelect={(dateStr) => {
+            onChange({ target: { name, value: dateStr } });
+          }}
+          onClose={() => setShowCalendar(false)}
+        />
+      )}
     </div>
   );
 }
@@ -76,19 +412,19 @@ function StepBar({ current, total, steps }) {
             }}>
               {i < current ? <LuCheck size={13} /> : i + 1}
             </div>
-            <span style={{
-              fontSize: 10, marginTop: 5, fontWeight: i === current ? 700 : 400,
-              color: i === current ? "#ffffff" : C.text3,
-              whiteSpace: "nowrap",
-            }}>{s.title}</span>
+            <div style={{
+              fontSize: 11, fontWeight: 600,
+              color: i <= current ? C.text : C.text3,
+              marginTop: 6, transition: "color 0.25s",
+            }}>{s.title}</div>
           </div>
         ))}
       </div>
       <div style={{ height: 3, background: "#2a2a2a", borderRadius: 99, overflow: "hidden", marginTop: 4 }}>
         <div style={{
-          height: "100%", background: "#ffffff", borderRadius: 99,
-          width: `${(current / (total - 1)) * 100}%`,
-          transition: "width 0.3s ease",
+          height: "100%", width: `${((current + 1) / total) * 100}%`,
+          background: "#ffffff",
+          transition: "width 0.3s ease-in-out",
         }} />
       </div>
     </div>
@@ -139,7 +475,7 @@ function NavButtons({ step, totalSteps, onBack, onNext, onSubmit, onExit, canNex
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function DocumentChecklist({ onProceed, onExit, isProceeding, onOpenSocket, automationStatus }) {
+export default function DocumentChecklist({ onProceed, onExit, isProceeding, onOpenSocket, automationStatus, onResetAutomationStatus }) {
   const [step, setStep] = useState(0);
   const [checkedItems, setCheckedItems]   = useState({ aadharCard: false, rationCard: false, photo: false, drivingLicense: false });
   const [expandedItem, setExpandedItem]   = useState(null);
@@ -173,6 +509,45 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     { id: "drivingLicense", label: "Driving license" },
   ];
 
+  const [supabaseDocUrls, setSupabaseDocUrls] = useState({});
+
+  // ── Restore existing user documents from Supabase on mount ───────────────────
+  useEffect(() => {
+    const userPhone = sessionStorage.getItem("user_phone");
+    if (!userPhone) return;
+
+    fetch(`${import.meta.env.VITE_API_BASE}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.documents) {
+          const docsMap = data.documents;
+          const restoredFiles = {};
+          const restoredUrls = {};
+          const restoredExtracted = {};
+          const restoredChecked = {};
+
+          Object.keys(docsMap).forEach(docId => {
+            const docInfo = docsMap[docId];
+            if (docInfo.filename) restoredFiles[docId] = docInfo.filename;
+            if (docInfo.supabase_url) restoredUrls[docId] = docInfo.supabase_url;
+            if (docInfo.extracted_data && docInfo.extracted_data.length > 0) {
+              restoredExtracted[docId] = docInfo.extracted_data;
+            }
+            restoredChecked[docId] = true;
+          });
+
+          if (Object.keys(restoredChecked).length > 0) {
+            setUploadedFiles(prev => ({ ...prev, ...restoredFiles }));
+            setSupabaseDocUrls(prev => ({ ...prev, ...restoredUrls }));
+            setExtractedData(prev => ({ ...prev, ...restoredExtracted }));
+            setCheckedItems(prev => ({ ...prev, ...restoredChecked }));
+            console.log("[User Memory] Auto-restored user documents from Supabase:", Object.keys(restoredChecked));
+          }
+        }
+      })
+      .catch(err => console.warn("[User Memory] Error fetching restored user documents:", err));
+  }, []);
+
   const handleCredChange = (e) => setCredentials({ ...credentials, [e.target.name]: e.target.value });
   const handleAddrChange = (e) => setAddressDetails({ ...addressDetails, [e.target.name]: e.target.value });
 
@@ -180,6 +555,7 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     setUploadedFiles(p => { const u = { ...p }; delete u[id]; return u; });
     setRawFiles(p => { const u = { ...p }; delete u[id]; return u; });
     setExtractedData(p => { const u = { ...p }; delete u[id]; return u; });
+    setSupabaseDocUrls(p => { const u = { ...p }; delete u[id]; return u; });
     setCheckedItems(p => ({ ...p, [id]: false }));
   };
 
@@ -201,8 +577,50 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
           throw new Error("Invalid Photograph. Please ensure the image clearly shows a human person.");
         if (id !== "photo" && data.extracted_data?.length > 0)
           setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
+
+        // ── Zero-Knowledge Client-Side Document Encryption ────────────────────
+        let encryptedUrl = "";
+        try {
+          const { encryptDocumentBytesZK } = await import("../utils/crypto");
+          const userPhone = sessionStorage.getItem("user_phone") || "default";
+          const fileBuffer = await file.arrayBuffer();
+          const encBuffer = await encryptDocumentBytesZK(fileBuffer, userPhone);
+          const encBlob = new Blob([encBuffer], { type: "application/octet-stream" });
+          const encForm = new FormData();
+          encForm.append("file", encBlob, `${file.name}.zkenc`);
+          encForm.append("phone_number", userPhone);
+
+          const encRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/upload-encrypted-doc`, {
+            method: "POST",
+            body: encForm,
+          });
+          if (encRes.ok) {
+            const encData = await encRes.json();
+            encryptedUrl = encData.supabase_url;
+            console.log(`[ZK Storage] Uploaded encrypted binary document -> ${encryptedUrl}`);
+
+            // Register document in user's personalized Supabase registry
+            if (userPhone && encryptedUrl) {
+              fetch(`${import.meta.env.VITE_API_BASE}/api/user-documents`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  phone_number: userPhone,
+                  doc_id: id,
+                  filename: file.name,
+                  supabase_url: encryptedUrl,
+                  extracted_data: data.extracted_data || []
+                })
+              }).catch(e => console.warn("[User Memory] Error persisting doc registry:", e));
+            }
+          }
+        } catch (encErr) {
+          console.warn("[ZK Storage] Zero-Knowledge document encryption warning:", encErr);
+        }
+
         setUploadedFiles(p => ({ ...p, [id]: file.name }));
         setRawFiles(p => ({ ...p, [id]: file }));
+        if (encryptedUrl) setSupabaseDocUrls(p => ({ ...p, [id]: encryptedUrl }));
         setCheckedItems(p => ({ ...p, [id]: true }));
         setExpandedItem(null);
       } else {
@@ -217,12 +635,61 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     }
   };
 
+  const handleDownloadEncryptedDoc = async (id) => {
+    const docUrl = supabaseDocUrls[id];
+    const userPhone = sessionStorage.getItem("user_phone") || "default";
+    const fileName = uploadedFiles[id] || `${id}.pdf`;
+
+    const pinInput = window.prompt("Enter your 6-digit Security PIN to decrypt and download your document:");
+    if (!pinInput) return;
+
+    try {
+      let fileBuffer;
+      if (docUrl) {
+        const resp = await fetch(docUrl);
+        if (!resp.ok) throw new Error(`Could not fetch document from Supabase (HTTP ${resp.status})`);
+        fileBuffer = await resp.arrayBuffer();
+      } else if (rawFiles[id]) {
+        fileBuffer = await rawFiles[id].arrayBuffer();
+      } else {
+        throw new Error("No document available for download.");
+      }
+
+      const { decryptDocumentBytesZK } = await import("../utils/crypto");
+      const decryptedBuf = await decryptDocumentBytesZK(fileBuffer, userPhone, pinInput.trim());
+
+      const isPdf = fileName.toLowerCase().endsWith(".pdf");
+      const mimeType = isPdf ? "application/pdf" : "image/jpeg";
+      const blob = new Blob([decryptedBuf], { type: mimeType });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      alert("Decryption Failed: " + (err.message || "Invalid 6-digit PIN. Only the document owner can decrypt this file."));
+    }
+  };
+
   const isAllChecked  = Object.values(checkedItems).every(Boolean);
   const canNext = [
     credentials.username && credentials.password,
     addressDetails.from_date && addressDetails.to_date,
     isAllChecked,
   ][step];
+
+  // ── Retry: reset all automation state then re-run the full flow ──────────────
+  const handleRetryClick = async () => {
+    // Reset step completions so the UI shows fresh progress for the new run
+    setCompletedSteps({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
+    // Reset the parent-held automationStatus so the header shows "Starting automation…"
+    if (onResetAutomationStatus) onResetAutomationStatus();
+    setSubmitError(null);
+    setIsExtracting(false);
+    // Small delay to let React flush the state resets before starting the new run
+    await new Promise(r => setTimeout(r, 50));
+    await handleProceedClick();
+  };
 
   const handleProceedClick = async () => {
     setSubmitError(null);
@@ -232,21 +699,19 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     if (rawFiles.rationCard)     extractForm.append("ration",  rawFiles.rationCard);
     if (rawFiles.drivingLicense) extractForm.append("driving", rawFiles.drivingLicense);
     if (rawFiles.photo)          extractForm.append("photo",   rawFiles.photo);
+
+    // Pass pre-extracted JSON data so backend reuses it without calling VLM again
+    if (extractedData.aadharCard)     extractForm.append("pre_aadhaar", JSON.stringify(extractedData.aadharCard));
+    if (extractedData.rationCard)     extractForm.append("pre_ration",  JSON.stringify(extractedData.rationCard));
+    if (extractedData.drivingLicense) extractForm.append("pre_driving", JSON.stringify(extractedData.drivingLicense));
+
     try {
       const bulkRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/process-all`, { method: "POST", body: extractForm });
       if (!bulkRes.ok) throw new Error(`Document extraction failed (HTTP ${bulkRes.status})`);
       const bulkData = await bulkRes.json();
       if (!(bulkData.status === "success" && bulkData.result)) throw new Error("Document extraction returned no results.");
 
-      const uploadForm = new FormData();
-      if (rawFiles.aadharCard)     uploadForm.append("aadhaar", rawFiles.aadharCard);
-      if (rawFiles.rationCard)     uploadForm.append("ration",  rawFiles.rationCard);
-      if (rawFiles.drivingLicense) uploadForm.append("driving", rawFiles.drivingLicense);
-      if (rawFiles.photo)          uploadForm.append("photo",   rawFiles.photo);
-      const uploadRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/upload-documents`, { method: "POST", body: uploadForm });
-      if (!uploadRes.ok) throw new Error(`File upload failed (HTTP ${uploadRes.status})`);
-      const uploadData = await uploadRes.json();
-      const orchPaths = uploadData.saved_paths || {};
+      const orchPaths = bulkData.saved_paths || {};
 
       setBulkResults(bulkData.result);
       const c = bulkData.result.combined;
@@ -305,7 +770,20 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
             </div>
           ))}
         </div>
-        <div className="cl-actions" style={{ marginTop: "1.25rem" }}>
+        <div className="cl-actions" style={{ marginTop: "1.25rem", display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+          {isError && (
+            <button
+              className="btn-primary"
+              onClick={handleRetryClick}
+              style={{
+                padding: "0.6rem 1.25rem", fontSize: "0.875rem", fontWeight: 600,
+                background: "linear-gradient(135deg, #a855f7, #6366f1)", color: "#fff",
+                border: "none", borderRadius: "9999px", cursor: "pointer"
+              }}
+            >
+              Retry
+            </button>
+          )}
           <button className="btn-secondary" onClick={onExit}>Close</button>
         </div>
       </div>
@@ -326,7 +804,7 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   };
 
   return (
-    <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a" }}>
+    <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", overflow: "visible" }}>
       <h3 className="cl-title" style={{ marginBottom: "1.5rem", color: "#fff" }}>TNeSevai Application Details</h3>
 
       <StepBar current={step} total={STEPS.length} steps={STEPS} />
@@ -349,8 +827,8 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
         <div style={sectionStyle}>
           <div style={sectionLabel}>Residency Constraints</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-            <FloatingInput label="Residing From (DD/MM/YYYY)" name="from_date" value={addressDetails.from_date} onChange={handleAddrChange} />
-            <FloatingInput label="Residing To (DD/MM/YYYY)"   name="to_date"   value={addressDetails.to_date}   onChange={handleAddrChange} />
+            <FloatingInput label="Residing From (DD/MM/YYYY)" name="from_date" isDate value={addressDetails.from_date} onChange={handleAddrChange} />
+            <FloatingInput label="Residing To (DD/MM/YYYY)"   name="to_date"   isDate value={addressDetails.to_date}   onChange={handleAddrChange} />
           </div>
         </div>
       )}
@@ -382,7 +860,23 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
                         <div>
                           <div className="cl-file-row">
                             <div className="cl-file-name"><LuCircleCheck size={15} /><span>{uploadedFiles[doc.id]}</span></div>
-                            <button className="cl-remove-btn" onClick={() => handleRemoveFile(doc.id)}><MdDeleteOutline size={17} /></button>
+                            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                              <button
+                                type="button"
+                                title="Decrypt and download document using your 6-digit PIN"
+                                onClick={() => handleDownloadEncryptedDoc(doc.id)}
+                                style={{
+                                  padding: "0.25rem 0.65rem", borderRadius: "9999px",
+                                  background: "rgba(52, 211, 153, 0.12)", color: "#34d399",
+                                  border: "1px solid rgba(52, 211, 153, 0.4)",
+                                  fontSize: "0.725rem", fontWeight: 600, cursor: "pointer",
+                                  display: "flex", alignItems: "center", gap: "4px"
+                                }}
+                              >
+                                🔒 PIN Download
+                              </button>
+                              <button className="cl-remove-btn" onClick={() => handleRemoveFile(doc.id)}><MdDeleteOutline size={17} /></button>
+                            </div>
                           </div>
                           {extractedData[doc.id]?.map((extract, idx) => (
                             <div key={idx} className="cl-extracted">
@@ -415,8 +909,22 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
       )}
 
       {submitError && (
-        <div className="cl-error-block" style={{ marginTop: "0.75rem" }}>
-          <LuTriangleAlert size={16} /> {submitError}
+        <div className="cl-error-block" style={{ marginTop: "0.75rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <LuTriangleAlert size={16} /> <span>{submitError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleProceedClick}
+            style={{
+              padding: "0.35rem 0.85rem", borderRadius: "9999px",
+              background: "#ef4444", color: "#ffffff",
+              border: "none", fontSize: "0.75rem", fontWeight: 700,
+              cursor: "pointer", flexShrink: 0
+            }}
+          >
+            Retry
+          </button>
         </div>
       )}
 

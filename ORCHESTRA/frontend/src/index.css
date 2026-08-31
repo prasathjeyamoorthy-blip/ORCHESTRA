@@ -93,6 +93,14 @@ h1,h2,h3,h4,h5,h6 { font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; 
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 
+input[type="date"] {
+  color-scheme: dark;
+}
+::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
 /* ── Layout ────────────────────────────────────────────────────────────────── */
 .app-root { display: flex; height: 100vh; overflow: hidden; min-width: 0; }
 

@@ -1,10 +1,10 @@
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import extractor, validator
 
-
-from typing import Optional
 
 def find_certificate(results: list, cert_type: str) -> Optional[dict]:
     """Find certificate by type name.
@@ -43,28 +43,64 @@ def find_certificate(results: list, cert_type: str) -> Optional[dict]:
     return None
 
 
-def process_documents(aadhaar_pdf: str, ration_pdf: str = None, address_pdf: str = None, caste_pdf: str = None) -> dict:
-    # Debug: Print file paths
-    print(f"DEBUG: aadhaar_pdf = {aadhaar_pdf}")
-    print(f"DEBUG: ration_pdf = {ration_pdf}")
-    print(f"DEBUG: address_pdf = {address_pdf}")
-    print(f"DEBUG: caste_pdf = {caste_pdf}")
+def process_documents(
+    aadhaar_pdf: str = None,
+    ration_pdf: str = None,
+    address_pdf: str = None,
+    caste_pdf: str = None,
+    pre_aadhaar: list = None,
+    pre_ration: list = None,
+    pre_address: list = None,
+    pre_caste: list = None
+) -> dict:
+    # Debug: Print file paths & pre-extracted availability
+    print(f"DEBUG: aadhaar_pdf = {aadhaar_pdf} (pre-extracted: {bool(pre_aadhaar)})")
+    print(f"DEBUG: ration_pdf = {ration_pdf} (pre-extracted: {bool(pre_ration)})")
+    print(f"DEBUG: address_pdf = {address_pdf} (pre-extracted: {bool(pre_address)})")
+    print(f"DEBUG: caste_pdf = {caste_pdf} (pre-extracted: {bool(pre_caste)})")
     
-    # extract
-    aadhaar_results = extractor.extract_from_pdf(aadhaar_pdf)
-    ration_results = extractor.extract_from_pdf(ration_pdf) if ration_pdf else []
-    address_results = extractor.extract_from_pdf(address_pdf) if address_pdf else []
-    
-    # Handle caste extraction with better error handling
-    caste_results = []
-    if caste_pdf:
+    def _extract_safe(path):
+        if not path:
+            return []
         try:
-            caste_results = extractor.extract_from_pdf(caste_pdf)
+            return extractor.extract_from_pdf(path)
         except Exception as e:
-            print(f"DEBUG: Error extracting caste PDF: {e}")
-            caste_results = []
-    else:
-        print("DEBUG: No caste_pdf provided")
+            print(f"DEBUG: Error extracting {path}: {e}")
+            return []
+
+    # Map inputs: use pre-extracted if available, otherwise queue for parallel extraction
+    targets = {
+        "aadhaar": (pre_aadhaar, aadhaar_pdf),
+        "ration":  (pre_ration, ration_pdf),
+        "address": (pre_address, address_pdf),
+        "caste":   (pre_caste, caste_pdf),
+    }
+
+    results = {}
+    futures = {}
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for key, (pre_data, pdf_path) in targets.items():
+            if pre_data:
+                # Reuse pre-extracted results directly
+                print(f"[process_documents] Reusing pre-extracted data for {key}")
+                results[key] = pre_data if isinstance(pre_data, list) else [pre_data]
+            elif pdf_path:
+                # Submit for parallel VLM extraction
+                print(f"[process_documents] Submitting parallel extraction for {key}: {pdf_path}")
+                futures[key] = executor.submit(_extract_safe, pdf_path)
+            else:
+                results[key] = []
+
+        # Gather parallel extraction results
+        for key, future in futures.items():
+            results[key] = future.result()
+
+    aadhaar_results = results["aadhaar"]
+    ration_results  = results["ration"]
+    address_results = results["address"]
+    caste_results   = results["caste"]
+
 
     # debugging/logging can be helpful when something is misclassified
     # (rations showing up as Voter ID, address proof shown as "Other", etc.)

@@ -16,7 +16,7 @@ import AnimatedShaderBackground from "./components/ui/animated-shader-background
 import { HoverButton } from "./components/ui/hover-button";
 import { AppSidebar } from "./components/AppSidebar";
 import { GooeyText } from "./components/ui/gooey-text-morphing";
-import { sendMessage } from "./api/chatApi";
+import { sendMessage, sendMessageStream } from "./api/chatApi";
 import "./index.css";
 
 const TYPING_WORDS = ["TNeGA AI Assistant", "e-Sevai Automation"];
@@ -303,12 +303,40 @@ Just type your question in plain language and I will assist you right away.`,
     setShowChecklist(false);
     setWaitingForDocReply(false);
     setIsGenerating(true);
+
+    const botMsgId = Date.now().toString();
+    setMessages(prev => [...prev, { id: botMsgId, sender: "bot", text: "" }]);
+
     try {
-      const res = await sendMessage(sessionId, text);
-      pushBot(res.answer || "Please provide more details.");
+      const res = await sendMessageStream(
+        sessionId,
+        text,
+        userPhone,
+        currentLanguage,
+        (token, fullText) => {
+          setMessages(prev =>
+            prev.map(msg => msg.id === botMsgId ? { ...msg, text: fullText } : msg)
+          );
+        }
+      );
+
+      setMessages(prev =>
+        prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+      );
+
       if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
     } catch (err) {
-      pushBot(`Error: ${err.message}`);
+      try {
+        const res = await sendMessage(sessionId, text);
+        setMessages(prev =>
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+        );
+        if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
+      } catch (fallbackErr) {
+        setMessages(prev =>
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: `Error: ${fallbackErr.message}` } : msg)
+        );
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -318,16 +346,44 @@ Just type your question in plain language and I will assist you right away.`,
     setWaitingForDocReply(false);
     pushUser(reply);
     setIsGenerating(true);
+
+    const botMsgId = Date.now().toString();
+    setMessages(prev => [...prev, { id: botMsgId, sender: "bot", text: "" }]);
+
     try {
-      const res = await sendMessage(sessionId, reply);
-      pushBot(res.answer || "Please provide more details.");
+      const res = await sendMessageStream(
+        sessionId,
+        reply,
+        userPhone,
+        currentLanguage,
+        (token, fullText) => {
+          setMessages(prev =>
+            prev.map(msg => msg.id === botMsgId ? { ...msg, text: fullText } : msg)
+          );
+        }
+      );
+
+      setMessages(prev =>
+        prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+      );
+
       if (res.stage === "SHOW_DOCUMENTS") {
         setShowChecklist(true);
       } else {
         setShowChecklist(false);
       }
     } catch (err) {
-      pushBot(`Error: ${err.message}`);
+      try {
+        const res = await sendMessage(sessionId, reply);
+        setMessages(prev =>
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+        );
+        if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
+      } catch (fallbackErr) {
+        setMessages(prev =>
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: `Error: ${fallbackErr.message}` } : msg)
+        );
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -480,8 +536,8 @@ Just type your question in plain language and I will assist you right away.`,
               />
             )}
 
-            {/* Typing indicator */}
-            {isGenerating && (
+            {/* Typing indicator (only if no active empty bot message) */}
+            {isGenerating && !messages.some(m => (m.sender === "bot" || m.sender === "agent" || m.sender === "assistant") && !m.text) && (
               <div className="typing-row fade-up">
                 <span className="typing-dot" />
                 <span className="typing-dot" />

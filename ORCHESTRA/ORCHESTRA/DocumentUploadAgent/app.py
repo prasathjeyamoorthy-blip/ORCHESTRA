@@ -1,23 +1,45 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 import shutil
 import os
+import json
 
 from extractor import extract_from_pdf
 from face_validator import verify_human_photograph_local
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from main import process_documents
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA")))
+try:
+    from supabase_db import upload_to_supabase_storage
+except Exception as e:
+    print(f"[UploadAgent] Warning: Could not import supabase_db: {e}")
+    upload_to_supabase_storage = None
 
 app = FastAPI()
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+if allowed_origins_env:
+    if allowed_origins_env.strip() == "*":
+        ALLOWED_ORIGINS = ["*"]
+    else:
+        ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://[REPLACE_WITH_ELASTIC_IP]",
-        "http://[REPLACE_WITH_ELASTIC_IP]:80"
-    ],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
+    allow_credentials=True if ALLOWED_ORIGINS != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,15 +50,39 @@ os.makedirs(PLAYWRIGHT_DIR, exist_ok=True)
 
 # Keep local uploads folder for backward compatibility
 UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+@app.post("/upload-encrypted-doc")
+async def upload_encrypted_document(file: UploadFile = File(...), phone_number: str = Form("")):
+    """
+    Upload a client-side Zero-Knowledge encrypted document blob (ZK_DOC_v1 ciphertext) directly to Supabase Storage under a user-isolated path.
+    """
+    content_bytes = await file.read()
+    supabase_url = ""
+    if upload_to_supabase_storage:
+        c_type = "application/octet-stream"
+        supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type, phone_number=phone_number)
+
+    masked_phone = f"******{phone_number[-4:]}" if len(phone_number) >= 4 else "****"
+    print(f"[Supabase Storage] Uploaded ZK Encrypted Document '{file.filename}' (phone: {masked_phone}) -> {supabase_url}")
+
+    return {
+        "filename": file.filename,
+        "supabase_url": supabase_url,
+        "is_encrypted": True
+    }
 
 
 @app.post("/extract")
 async def extract_document(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
 
+    content_bytes = await file.read()
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(content_bytes)
+
+    supabase_url = ""
+    if upload_to_supabase_storage:
+        c_type = file.content_type or "application/octet-stream"
+        supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
 
     print(f"\n📄 [UploadAgent] File received: {file.filename}")
     print("🔍 Running extraction...\n")
@@ -49,7 +95,8 @@ async def extract_document(file: UploadFile = File(...)):
 
     return {
         "filename": file.filename,
-        "extracted_data": results
+        "extracted_data": results,
+        "supabase_url": supabase_url
     }
 
 
@@ -57,8 +104,14 @@ async def extract_document(file: UploadFile = File(...)):
 async def verify_photo_document(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
 
+    content_bytes = await file.read()
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(content_bytes)
+
+    supabase_url = ""
+    if upload_to_supabase_storage:
+        c_type = file.content_type or "image/jpeg"
+        supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
 
     print(f"\n🔍 [UploadAgent] Checking image: {file.filename}")
     
@@ -66,7 +119,8 @@ async def verify_photo_document(file: UploadFile = File(...)):
     
     return {
         "is_human_photo": is_human,
-        "filename": file.filename
+        "filename": file.filename,
+        "supabase_url": supabase_url
     }
 
 
@@ -75,26 +129,42 @@ async def process_all_documents(
     aadhaar: Optional[UploadFile] = File(None),
     ration: Optional[UploadFile] = File(None),
     driving: Optional[UploadFile] = File(None),
-    photo: Optional[UploadFile] = File(None)
+    photo: Optional[UploadFile] = File(None),
+    pre_aadhaar: Optional[str] = Form(None),
+    pre_ration: Optional[str] = Form(None),
+    pre_driving: Optional[str] = Form(None),
+    pre_caste: Optional[str] = Form(None),
 ):
     print("\n🚀 [UploadAgent] Processing all documents in bulk...")
     
     saved_paths = {"Aadhaar": None, "Ration Card": None, "Driving License": None, "Photo": None}
+    supabase_urls = {}
     
-    # helper to save file to Playwright directory
+    # helper to save file to Playwright directory and Supabase Storage
     def _save_if_exists(file_obj, key):
         if file_obj:
+            content_bytes = file_obj.file.read()
             # Save to Playwright directory for automation access
             playwright_path = os.path.join(PLAYWRIGHT_DIR, file_obj.filename)
             with open(playwright_path, "wb") as buffer:
-                shutil.copyfileobj(file_obj.file, buffer)
+                buffer.write(content_bytes)
             
             # Also save to local uploads for extraction processing
             local_path = os.path.join(UPLOAD_DIR, file_obj.filename)
-            file_obj.file.seek(0)  # Reset file pointer
             with open(local_path, "wb") as buffer:
-                shutil.copyfileobj(file_obj.file, buffer)
+                buffer.write(content_bytes)
             
+            # Upload to Supabase Storage bucket
+            if upload_to_supabase_storage:
+                try:
+                    c_type = getattr(file_obj, "content_type", "application/octet-stream") or "application/octet-stream"
+                    s_url = upload_to_supabase_storage(content_bytes, file_obj.filename, content_type=c_type)
+                    if s_url:
+                        supabase_urls[key] = s_url
+                        print(f"✓ Uploaded {key} to Supabase Storage: {s_url}")
+                except Exception as se:
+                    print(f"⚠️ Supabase Storage upload error for {key}: {se}")
+
             # Return absolute path to Playwright directory
             saved_paths[key] = os.path.abspath(playwright_path)
             print(f"✓ Saved {key} to: {saved_paths[key]}")
@@ -105,16 +175,32 @@ async def process_all_documents(
     _save_if_exists(photo, "Photo")
     
     # Process using main.py logic (uses local uploads folder for extraction)
-    # Note: process_documents expects (aadhaar, ration, address)
-    # the frontend uses driving license as an alternative address/dob proof
     local_aadhaar = os.path.join(UPLOAD_DIR, aadhaar.filename) if aadhaar else None
     local_ration = os.path.join(UPLOAD_DIR, ration.filename) if ration else None
     local_driving = os.path.join(UPLOAD_DIR, driving.filename) if driving else None
+
+    def _parse_pre(json_str):
+        if not json_str:
+            return None
+        try:
+            return json.loads(json_str)
+        except Exception as e:
+            print(f"[UploadAgent] Failed to parse pre-extracted JSON string: {e}")
+            return None
+
+    parsed_pre_aadhaar = _parse_pre(pre_aadhaar)
+    parsed_pre_ration  = _parse_pre(pre_ration)
+    parsed_pre_driving = _parse_pre(pre_driving)
+    parsed_pre_caste   = _parse_pre(pre_caste)
     
     result = process_documents(
         aadhaar_pdf=local_aadhaar,
         ration_pdf=local_ration,
-        address_pdf=local_driving  # treating driving license as the 3rd doc
+        address_pdf=local_driving,
+        pre_aadhaar=parsed_pre_aadhaar,
+        pre_ration=parsed_pre_ration,
+        pre_address=parsed_pre_driving,
+        pre_caste=parsed_pre_caste
     )
 
     is_human = False
@@ -138,7 +224,8 @@ async def process_all_documents(
         "status": "success",
         "result": result,
         "is_human_photo": is_human,
-        "saved_paths": saved_paths
+        "saved_paths": saved_paths,
+        "supabase_urls": supabase_urls
     }
 
 

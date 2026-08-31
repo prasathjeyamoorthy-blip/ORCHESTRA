@@ -1,99 +1,99 @@
 import os
 import json
-import faiss
 import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 from pypdf import PdfReader
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
 
-load_dotenv()
-
-# ===============================
-# FILE PATHS
-# ===============================
-
-FAISS_INDEX_FILE = "faiss_index.bin"
-FAISS_TEXT_FILE = "faiss_texts.json"
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path, override=True)
 
 # ===============================
-# EMBEDDING CLIENT
+# CONFIGURATION
 # ===============================
+COLLECTION_NAME = "residence_certificate_docs"
+VECTOR_SIZE = 1024
 
-embed_client = OpenAI(
-    api_key=os.getenv("NVIDIA_API_KEY"),
-    base_url="https://integrate.api.nvidia.com/v1"
-)
 
-# ===============================
-# LOAD OR CREATE FAISS INDEX
-# ===============================
+def get_embed_client():
+    return OpenAI(
+        api_key=os.getenv("OPEN_ROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1"
+    )
 
-dimension = 1024
 
-if os.path.exists(FAISS_INDEX_FILE):
-    index = faiss.read_index(FAISS_INDEX_FILE)
-else:
-    index = faiss.IndexFlatL2(dimension)
+def get_qdrant_client():
+    qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
+    if not qdrant_url or not qdrant_api_key:
+        raise ValueError("[Qdrant] Critical: QDRANT_URL or QDRANT_API_KEY missing in .env. Qdrant Cloud is required.")
 
-if os.path.exists(FAISS_TEXT_FILE):
-    with open(FAISS_TEXT_FILE, "r") as f:
-        stored_texts = json.load(f)
-else:
-    stored_texts = []
+    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key, check_compatibility=False, timeout=10)
+    client.get_collections()
+    print(f"[Qdrant] Connected exclusively to cloud instance: {qdrant_url}")
+    return client
 
-# ===============================
-# TEXT CHUNKING
-# ===============================
 
-def chunk_text(text, chunk_size=1200, overlap=200):
-    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+def chunk_text(text, chunk_size=350, overlap=50):
+    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size - overlap)]
 
-# ===============================
-# PDF INGESTION
-# ===============================
 
-pdf_folder = "pdf_documents"
+def run_ingestion():
+    client = get_qdrant_client()
+    embed_client = get_embed_client()
 
-for file in os.listdir(pdf_folder):
+    if not client.collection_exists(COLLECTION_NAME):
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
+        )
+        print(f"[Qdrant] Created collection '{COLLECTION_NAME}' with vector size {VECTOR_SIZE}")
 
-    if file.endswith(".pdf"):
+    pdf_folder = os.path.join(os.path.dirname(__file__), "pdf_documents")
+    points = []
+    point_id = 0
 
-        path = os.path.join(pdf_folder, file)
-        reader = PdfReader(path)
+    if not os.path.exists(pdf_folder):
+        print(f"[Qdrant] Warning: PDF folder '{pdf_folder}' not found.")
+        return
 
-        full_text = ""
+    for file in os.listdir(pdf_folder):
+        if file.endswith(".pdf"):
+            path = os.path.join(pdf_folder, file)
+            reader = PdfReader(path)
+            full_text = ""
 
-        for page in reader.pages:
-            full_text += page.extract_text() or ""
+            for page in reader.pages:
+                full_text += page.extract_text() or ""
 
-        chunks = chunk_text(full_text)
+            chunks = chunk_text(full_text)
 
-        vectors = []
+            for chunk in chunks:
+                embedding = embed_client.embeddings.create(
+                    model="baai/bge-large-en-v1.5",
+                    input=chunk
+                ).data[0].embedding
 
-        for chunk in chunks:
+                point_id += 1
+                points.append(PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        "text": chunk,
+                        "source_file": file
+                    }
+                ))
 
-            embedding = embed_client.embeddings.create(
-                model="nvidia/nv-embedqa-e5-v5",
-                input=chunk,
-                extra_body={"input_type": "passage"}
-            ).data[0].embedding
+            print(f"[Qdrant] Ingested {len(chunks)} chunks from {file}")
 
-            vectors.append(embedding)
-            stored_texts.append(chunk)
+    if points:
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
+        print(f"[Qdrant] Successfully upserted {len(points)} vector points into collection '{COLLECTION_NAME}'.")
 
-        vectors = np.array(vectors).astype("float32")
+    print("[Qdrant] Ingestion complete.")
 
-        index.add(vectors)
 
-        print(f"Ingested {len(chunks)} chunks from {file}")
-
-# ===============================
-# SAVE FAISS INDEX
-# ===============================
-
-faiss.write_index(index, FAISS_INDEX_FILE)
-
-with open(FAISS_TEXT_FILE, "w") as f:
-    json.dump(stored_texts, f)
-
-print("Ingestion complete.")
+if __name__ == "__main__":
+    run_ingestion()
