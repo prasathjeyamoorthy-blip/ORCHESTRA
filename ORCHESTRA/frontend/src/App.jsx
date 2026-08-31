@@ -87,11 +87,22 @@ function LandingOverlay({ onStart }) {
   );
 }
 
+const DEFAULT_WELCOME_MSG = {
+  sender: "agent",
+  text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
+};
+
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
-  const [messages, setMessages]   = useState([]);
+  const [messages, setMessages]   = useState([DEFAULT_WELCOME_MSG]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [chatSessions, setChatSessions] = useState(() => {
+    try {
+      const saved = localStorage.getItem("tnega_chat_sessions");
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) { return []; }
+  });
   const [showChecklist, setShowChecklist] = useState(false);
   const [waitingForDocReply, setWaitingForDocReply] = useState(false);
   const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
@@ -133,16 +144,55 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // ── Sync current session to chat history in localStorage ──────────────────
+  useEffect(() => {
+    if (!messages || messages.length <= 1) return;
+    const userFirstMsg = messages.find(m => m.sender === "user")?.text;
+    const title = userFirstMsg ? (userFirstMsg.length > 25 ? userFirstMsg.slice(0, 25) + "..." : userFirstMsg) : "New Chat";
 
+    setChatSessions(prev => {
+      const existingIdx = prev.findIndex(s => s.id === sessionId);
+      let updated;
+      if (existingIdx >= 0) {
+        updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], title: updated[existingIdx].title && updated[existingIdx].title !== "New Chat" ? updated[existingIdx].title : title, messages };
+      } else {
+        updated = [{ id: sessionId, title, messages }, ...prev];
+      }
+      try { localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
+      return updated;
+    });
+  }, [messages, sessionId]);
+
+  const handleNewChat = () => {
+    const newId = crypto.randomUUID();
+    setSessionId(newId);
+    setMessages([DEFAULT_WELCOME_MSG]);
+    setShowChecklist(false);
+    setActivePage("home");
+  };
+
+  const handleSelectChat = (id) => {
+    const target = chatSessions.find(s => s.id === id);
+    if (target) {
+      setSessionId(target.id);
+      setMessages(target.messages || [DEFAULT_WELCOME_MSG]);
+      setActivePage("home");
+    }
+  };
+
+  const handleDeleteChat = (id) => {
+    const updated = chatSessions.filter(s => s.id !== id);
+    setChatSessions(updated);
+    try { localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
+    if (id === sessionId) {
+      handleNewChat();
+    }
+  };
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Seed browser history so back button works from the start
     window.history.replaceState({ page: "home" }, "", "#home");
-    setMessages([{
-      sender: "agent",
-      text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
-    }]);
   }, []);
 
   // Auto-scroll
@@ -460,6 +510,11 @@ Just type your question in plain language and I will assist you right away.`,
           onNavigate={navigate}
           drawerOpen={drawerOpen}
           onDrawerClose={() => setDrawerOpen(false)}
+          chatSessions={chatSessions}
+          currentSessionId={sessionId}
+          onNewChat={handleNewChat}
+          onSelectChat={handleSelectChat}
+          onDeleteChat={handleDeleteChat}
         />
       )}
 
