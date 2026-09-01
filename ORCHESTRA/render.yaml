@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: residence-certificate-orchestra
+    env: python
+    buildCommand: "pip install -r requirements.txt && python -m playwright install chromium"
+    startCommand: "cd ORCHESTRA/ORCHESTRA && uvicorn app:app --host 0.0.0.0 --port $PORT"
+
+  - type: web
+    name: residence-certificate-document-upload
+    env: python
+    buildCommand: "pip install -r requirements.txt && python -m playwright install chromium"
+    startCommand: "cd ORCHESTRA/DocumentUploadAgent && uvicorn app:app --host 0.0.0.0 --port $PORT"
