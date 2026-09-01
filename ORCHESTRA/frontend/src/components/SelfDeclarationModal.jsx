@@ -44,7 +44,11 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
   };
 
   const handleDownload = () => {
-    window.open(`${import.meta.env.VITE_DOC_API_BASE}/download-declaration`, '_blank');
+    if (downloadPath && (downloadPath.startsWith("http://") || downloadPath.startsWith("https://"))) {
+      window.open(downloadPath, '_blank');
+    } else {
+      window.open(`${import.meta.env.VITE_DOC_API_BASE}/download-declaration`, '_blank');
+    }
   };
 
   return (

@@ -429,14 +429,39 @@ Document Text:
     return None
 
 
-def extract_from_pdf(pdf_path: str) -> list:
-    """Extract data from a PDF (or image) file.
+def extract_from_pdf(pdf_input) -> list:
+    """Extract data from a PDF (or image) from bytes, HTTP/Supabase URL, or file path.
 
-    Raises HTTPException(400) if the file is neither a valid PDF nor a
-    recognisable image, so callers get a clear error instead of a 500.
+    Operates completely in-memory without requiring local disk storage.
+    Raises HTTPException(400) if invalid.
     """
-    # --- validate the file first ---
-    if _is_valid_pdf(pdf_path):
+    pdf_bytes = None
+
+    if isinstance(pdf_input, bytes):
+        pdf_bytes = pdf_input
+    elif isinstance(pdf_input, str):
+        if pdf_input.startswith("http://") or pdf_input.startswith("https://"):
+            try:
+                resp = requests.get(pdf_input, timeout=15)
+                if resp.status_code == 200:
+                    pdf_bytes = resp.content
+            except Exception as e:
+                print(f"[extractor] Failed to fetch document from URL '{pdf_input}': {e}")
+        elif os.path.exists(pdf_input):
+            try:
+                with open(pdf_input, "rb") as f:
+                    pdf_bytes = f.read()
+            except Exception as e:
+                print(f"[extractor] Failed to read local file '{pdf_input}': {e}")
+
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to read document content or invalid input source."
+        )
+
+    # Check if input is a valid PDF magic header
+    if pdf_bytes.startswith(PDF_MAGIC):
         # Fast path: Try extracting digital text directly using pypdf
         try:
             try:
@@ -447,7 +472,7 @@ def extract_from_pdf(pdf_path: str) -> list:
                         sys.path.append(p)
                 import pypdf
 
-            reader = pypdf.PdfReader(pdf_path)
+            reader = pypdf.PdfReader(BytesIO(pdf_bytes))
             extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             if len(extracted_text.strip()) > 50:
                 print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using fast LLM text extraction.")
@@ -458,29 +483,27 @@ def extract_from_pdf(pdf_path: str) -> list:
             print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
 
         try:
-            pages = convert_from_path(
-                pdf_path,
+            from pdf2image import convert_from_bytes
+            pages = convert_from_bytes(
+                pdf_bytes,
                 dpi=200,
                 poppler_path=config.POPPLER_PATH
             )
         except Exception as exc:
-            print(f"[extractor] pdf2image failed even for a valid PDF: {exc}")
+            print(f"[extractor] pdf2image convert_from_bytes failed: {exc}")
             raise HTTPException(
                 status_code=422,
                 detail=f"PDF conversion failed: {exc}"
             )
-    elif _is_image_file(pdf_path):
-        # File is actually an image (JPG/PNG/etc.) – open it directly
-        print("[extractor] File is an image, not a PDF – processing as single page image.")
-        pages = [Image.open(pdf_path).convert("RGB")]
     else:
-        # Not a PDF and not a recognisable image
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The uploaded file is not a valid PDF or recognised image. "
-                "Please upload a proper PDF document."
+        # Try opening as image directly from bytes
+        try:
+            pages = [Image.open(BytesIO(pdf_bytes)).convert("RGB")]
+        except Exception as ie:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The uploaded file is not a valid PDF or recognized image: {ie}"
             )
-        )
 
     return _process_pages(pages)
+

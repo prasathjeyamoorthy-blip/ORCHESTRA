@@ -103,11 +103,9 @@ class TNeSevaiBackendAgent:
         import base64
 
         def _screenshot_captcha():
-            captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
             captcha_img = page.locator("#captcha_image, img[src*='Captcha'], img[src*='captcha']").first
-            captcha_img.screenshot(path=captcha_path)
-            with open(captcha_path, "rb") as f:
-                return "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
+            img_bytes = captcha_img.screenshot(type="png")
+            return "data:image/png;base64," + base64.b64encode(img_bytes).decode("utf-8")
 
         def _click_captcha_refresh():
             """Click the refresh icon next to the captcha for a near-instant new captcha."""
@@ -360,8 +358,7 @@ class TNeSevaiBackendAgent:
                         user_captcha = self._ws_prompt_captcha(page)
                     else:
                         captcha_img = page.locator("#captcha_image, img[src*='Captcha']").first
-                        captcha_path = os.path.join(os.path.dirname(__file__), "backend_captcha.png")
-                        captcha_img.screenshot(path=captcha_path)
+                        _bytes = captcha_img.screenshot(type="png")
                         user_captcha = input("Enter captcha: ")
 
                     page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
@@ -565,54 +562,90 @@ class TNeSevaiBackendAgent:
                 time.sleep(6) 
 
                 # --- DOCUMENT UPLOAD HELPER ---
-                def process_document_upload(doc_label, filepath, doc_no=None):
-                    if not filepath or not os.path.exists(filepath):
-                        self.log(f"WARNING: File not found at {filepath}. Skipping {doc_label}...")
+                def process_document_upload(doc_label, file_source, doc_no=None):
+                    if not file_source:
+                        self.log(f"WARNING: No file source provided for {doc_label}. Skipping...")
                         return
 
-                    self.log(f"Uploading {doc_label} from {filepath}...")
+                    temp_path = None
+                    target_path = None
 
-                    # 1. Select document type — target the upload section's combobox specifically
-                    # Try known IDs first, then fall back to first enabled combobox
-                    doc_type_selected = False
-                    for selector in ['[id="ss:dsctype"]', '[id="ss:docType"]', '[id="ss:documentType"]']:
+                    if isinstance(file_source, str) and (file_source.startswith("http://") or file_source.startswith("https://")):
                         try:
-                            el = page_form.locator(selector)
-                            if el.count() > 0:
-                                el.select_option(label=doc_label)
-                                doc_type_selected = True
-                                self.log(f"Selected doc type via {selector}")
-                                break
-                        except: pass
+                            self.log(f"Fetching {doc_label} from Supabase Storage: {file_source}...")
+                            req = urllib.request.Request(file_source, headers={"User-Agent": "Mozilla/5.0"})
+                            with urllib.request.urlopen(req, timeout=30) as resp:
+                                file_bytes = resp.read()
 
-                    if not doc_type_selected:
-                        # Fall back: first enabled (not disabled) combobox
-                        try:
-                            enabled_combos = page_form.locator("select:not([disabled])")
-                            enabled_combos.first.select_option(label=doc_label)
-                            doc_type_selected = True
-                            self.log("Selected doc type via first enabled combobox")
+                            ext = ".pdf"
+                            src_lower = file_source.lower()
+                            if ".jpg" in src_lower or ".jpeg" in src_lower:
+                                ext = ".jpg"
+                            elif ".png" in src_lower:
+                                ext = ".png"
+
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tf:
+                                tf.write(file_bytes)
+                                temp_path = tf.name
+                            target_path = temp_path
                         except Exception as e:
-                            self.log(f"WARNING: Could not select doc type '{doc_label}': {e}")
+                            self.log(f"WARNING: Failed to fetch {doc_label} from Supabase URL '{file_source}': {e}")
+                            return
+                    elif isinstance(file_source, str) and os.path.exists(file_source):
+                        target_path = file_source
+                    else:
+                        self.log(f"WARNING: File not found or invalid source for '{doc_label}': {file_source}. Skipping...")
+                        return
 
-                    time.sleep(5)
+                    try:
+                        self.log(f"Uploading {doc_label} to portal...")
 
-                    # 2. Fill document number BEFORE file upload (if needed)
-                    if doc_no:
-                        doc_input = page_form.locator('[id="ss:dscnum"]')
-                        doc_input.click()
-                        doc_input.fill(doc_no)
-                        doc_input.press("Tab")
+                        # 1. Select document type — target the upload section's combobox specifically
+                        doc_type_selected = False
+                        for selector in ['[id="ss:dsctype"]', '[id="ss:docType"]', '[id="ss:documentType"]']:
+                            try:
+                                el = page_form.locator(selector)
+                                if el.count() > 0:
+                                    el.select_option(label=doc_label)
+                                    doc_type_selected = True
+                                    self.log(f"Selected doc type via {selector}")
+                                    break
+                            except: pass
+
+                        if not doc_type_selected:
+                            # Fall back: first enabled combobox
+                            try:
+                                enabled_combos = page_form.locator("select:not([disabled])")
+                                enabled_combos.first.select_option(label=doc_label)
+                                doc_type_selected = True
+                                self.log("Selected doc type via first enabled combobox")
+                            except Exception as e:
+                                self.log(f"WARNING: Could not select doc type '{doc_label}': {e}")
+
                         time.sleep(5)
 
-                    # 3. Use set_input_files() to attach file WITHOUT opening file explorer
-                    page_form.locator("input[type='file']").last.set_input_files(filepath)
-                    time.sleep(8)
+                        # 2. Fill document number BEFORE file upload (if needed)
+                        if doc_no:
+                            doc_input = page_form.locator('[id="ss:dscnum"]')
+                            doc_input.click()
+                            doc_input.fill(doc_no)
+                            doc_input.press("Tab")
+                            time.sleep(5)
 
-                    # 4. Click "Upload" button (NOT "Add..." which opens file explorer)
-                    self.log(f"Clicking Upload for {doc_label}...")
-                    page_form.get_by_text("Upload", exact=True).click(force=True)
-                    time.sleep(10)
+                        # 3. Use set_input_files() to attach file WITHOUT opening file explorer
+                        page_form.locator("input[type='file']").last.set_input_files(target_path)
+                        time.sleep(8)
+
+                        # 4. Click "Upload" button
+                        self.log(f"Clicking Upload for {doc_label}...")
+                        page_form.get_by_text("Upload", exact=True).click(force=True)
+                        time.sleep(10)
+                    finally:
+                        if temp_path and os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except: pass
 
                 # =============================================
                 # STEP 1: UPLOAD PHOTO FIRST
@@ -622,37 +655,57 @@ class TNeSevaiBackendAgent:
                 process_document_upload("Photo", self.docs.get("photo_path"))
 
                 # =============================================
-                # STEP 2: DOWNLOAD SELF DECLARATION → USER SIGNS → UPLOAD
+                # STEP 2: DOWNLOAD SELF DECLARATION → UPLOAD TO SUPABASE → USER SIGNS → UPLOAD
                 # =============================================
                 self.log("Step 2/3: Downloading Self Declaration Form...")
                 self_decl_save_name = "Self_Declaration_Form_To_Sign.pdf"
-                self_decl_save_path = os.path.join(os.path.dirname(__file__), self_decl_save_name)
-                
+                self_decl_supabase_url = ""
+
                 try:
+                    import tempfile
                     with page_form.expect_download(timeout=15000) as download_info:
                         page_form.get_by_role("link", name="Download Self declaration form").click(force=True)
                     download = download_info.value
-                    download.save_as(self_decl_save_path)
-                    self.log(f"Self Declaration Form saved at: {self_decl_save_path}")
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_decl:
+                        download.save_as(tmp_decl.name)
+                        tmp_decl_path = tmp_decl.name
+
+                    try:
+                        import sys
+                        parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                        if parent_dir not in sys.path: sys.path.append(parent_dir)
+                        from supabase_db import upload_to_supabase_storage
+                        with open(tmp_decl_path, "rb") as f_decl:
+                            self_decl_supabase_url = upload_to_supabase_storage(f_decl.read(), self_decl_save_name, content_type="application/pdf")
+                    except Exception as se:
+                        self.log(f"Supabase upload error for Self-Declaration: {se}")
+
+                    if os.path.exists(tmp_decl_path):
+                        try: os.remove(tmp_decl_path)
+                        except: pass
+
+                    self.log(f"Self Declaration Form uploaded to Supabase: {self_decl_supabase_url}")
                 except Exception as e:
                     self.log(f"Download failed: {e}. Proceeding.")
 
-                # Send event to frontend to show SelfDeclarationModal
+                # Send event to frontend to show SelfDeclarationModal with Supabase URL
                 self.log("Sending Self Declaration to user for signing...")
                 signed_decl_response = self._ws_prompt({
                     "type": "REQUEST_SIGNED_DECLARATION",
                     "message": "Please download the Self Declaration form, sign it, and upload the signed version.",
-                    "download_path": self_decl_save_path
+                    "download_path": self_decl_supabase_url or self_decl_save_name,
+                    "file_path": self_decl_supabase_url or self_decl_save_name
                 })
 
-                # The response contains the file path where the signed declaration was saved
+                # The response contains the file path or Supabase URL where the signed declaration was saved
                 signed_decl_path = signed_decl_response.strip() if signed_decl_response else ""
                 
-                if signed_decl_path and signed_decl_path != "exit" and os.path.exists(signed_decl_path):
+                if signed_decl_path and signed_decl_path != "exit":
                     self.log(f"Received signed Self Declaration: {signed_decl_path}")
                     process_document_upload("Self-Declaration of Applicant", signed_decl_path)
                 else:
-                    self.log(f"WARNING: Signed Self Declaration not found at '{signed_decl_path}'. Skipping...")
+                    self.log("WARNING: Signed Self Declaration not received. Skipping...")
 
                 # =============================================
                 # STEP 3: UPLOAD ADDRESS PROOF WITH DOC NUMBER
@@ -776,9 +829,18 @@ if __name__ == "__main__":
     parser.add_argument("--payload", help="Path to JSON file")
     args = parser.parse_args()
 
-    if args.payload:
+    if args.payload and os.path.exists(args.payload):
         with open(args.payload, "r") as f: payload = json.load(f)
-    else: payload = _defaults
+    else:
+        try:
+            import sys
+            parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            if parent_dir not in sys.path: sys.path.append(parent_dir)
+            from supabase_db import get_latest_application_payload
+            db_payload = get_latest_application_payload()
+            payload = db_payload if db_payload else _defaults
+        except Exception:
+            payload = _defaults
 
     bot = TNeSevaiBackendAgent(payload)
     bot.run()

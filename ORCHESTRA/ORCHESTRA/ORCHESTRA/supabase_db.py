@@ -342,3 +342,76 @@ def upload_to_supabase_storage(file_bytes: bytes, filename: str, content_type: s
         return ""
 
 
+APPLICATION_PAYLOAD_REGISTRY: dict = {}
+
+def save_application_payload(payload: dict) -> bool:
+    """
+    Save application submission payload to Supabase Database and in-memory registry.
+    """
+    if not isinstance(payload, dict):
+        return False
+
+    applicant = payload.get("applicant_details", {})
+    phone_number = applicant.get("mobile_number", "") or payload.get("credentials", {}).get("username", "default")
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:] if phone_number != "default" else "default"
+
+    APPLICATION_PAYLOAD_REGISTRY[phone_clean] = payload
+    APPLICATION_PAYLOAD_REGISTRY["latest"] = payload
+
+    url, key = get_supabase_config()
+    if not (url and key):
+        print("[Supabase DB] Application payload stored in memory registry.")
+        return True
+
+    try:
+        endpoint = f"{url}/rest/v1/application_payloads"
+        headers = {**_get_headers(key), "Prefer": "resolution=merge-duplicates"}
+        db_data = {
+            "phone_number": phone_clean,
+            "payload": json.dumps(payload),
+            "updated_at": time.time()
+        }
+        resp = requests.post(endpoint, headers=headers, json=db_data, timeout=3.0)
+        if resp.status_code in (200, 201):
+            print(f"[Supabase DB] Saved application payload to database for phone {_mask_phone(phone_clean)}")
+            return True
+        else:
+            print(f"[Supabase DB] Application payload stored in registry notice: {resp.status_code}")
+            return True
+    except Exception as e:
+        print(f"[Supabase DB] Exception saving application payload: {e}")
+        return True
+
+
+def get_latest_application_payload(phone_number: str = "") -> dict:
+    """
+    Fetch the latest application submission payload from Supabase Database or memory registry.
+    """
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:] if phone_number else "latest"
+    if phone_clean in APPLICATION_PAYLOAD_REGISTRY:
+        return APPLICATION_PAYLOAD_REGISTRY[phone_clean]
+
+    url, key = get_supabase_config()
+    if not (url and key):
+        return APPLICATION_PAYLOAD_REGISTRY.get("latest", {})
+
+    try:
+        endpoint = f"{url}/rest/v1/application_payloads"
+        params = {"order": "created_at.desc", "limit": "1"}
+        if phone_number:
+            params["phone_number"] = f"eq.{phone_clean}"
+        resp = requests.get(endpoint, headers=_get_headers(key), params=params, timeout=3.0)
+        if resp.status_code == 200:
+            rows = resp.json()
+            if rows:
+                raw_payload = rows[0].get("payload", {})
+                if isinstance(raw_payload, str):
+                    return json.loads(raw_payload)
+                return raw_payload
+    except Exception as e:
+        print(f"[Supabase DB] Exception fetching application payload: {e}")
+
+    return APPLICATION_PAYLOAD_REGISTRY.get("latest", {})
+
+
+

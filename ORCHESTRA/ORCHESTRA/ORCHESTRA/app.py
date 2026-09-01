@@ -445,10 +445,21 @@ def ws_status():
 @app.post("/submit-application")
 async def submit_application(payload: dict):
     try:
-        import json as _json
-        with open(os.path.join(playwright_dir, "last_payload.json"), "w") as f:
-            _json.dump(payload, f, indent=2)
+        from supabase_db import save_application_payload
+        save_application_payload(payload)
     except Exception as e:
-        print(f"[WARNING] Could not save payload: {e}")
+        print(f"[WARNING] Could not save payload to database: {e}")
     _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=True).start()
     return {"status": "success", "message": "Playwright task started"}
+
+
+@app.get("/latest-payload")
+def get_payload(phone_number: str = ""):
+    """Fetch the latest submitted application payload from Supabase Database / memory."""
+    try:
+        from supabase_db import get_latest_application_payload
+        payload = get_latest_application_payload(phone_number)
+        return {"status": "success", "payload": payload}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
