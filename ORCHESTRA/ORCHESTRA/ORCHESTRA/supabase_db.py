@@ -448,7 +448,7 @@ USER_PROFILES: dict = {}
 
 def save_user_profile(phone_number: str, profile_data: dict) -> bool:
     """
-    Save or update a user's persistent profile (personal details, address, credentials) in Supabase.
+    Save or update a user's persistent profile (personal details, address, credentials, 3-tab modal data) in Supabase.
     """
     if not phone_number or not isinstance(profile_data, dict):
         return False
@@ -457,8 +457,46 @@ def save_user_profile(phone_number: str, profile_data: dict) -> bool:
     if not phone_clean:
         return False
 
+    creds = profile_data.get("credentials", {})
+    applicant = profile_data.get("applicant_details", {})
+    address = profile_data.get("address_details", {})
+    docs = profile_data.get("documents", {})
+
+    tab1_credentials = {
+        "username": creds.get("username", "") or profile_data.get("username", ""),
+        "password": creds.get("password", "") or profile_data.get("password", ""),
+        "can_number": applicant.get("can_number", "") or creds.get("can_number", ""),
+        "aadhar_number": applicant.get("aadhar_number", "") or creds.get("aadhar_number", "")
+    }
+
+    tab2_residency = {
+        "from_date": address.get("from_date", ""),
+        "to_date": address.get("to_date", ""),
+        "building_no": address.get("building_no", ""),
+        "street_name": address.get("street_name", ""),
+        "village": address.get("village", ""),
+        "pincode": address.get("pincode", ""),
+        "state": address.get("state", "Tamil Nadu"),
+        "district": address.get("district", "")
+    }
+
+    tab3_documents = {
+        "photo_path": docs.get("photo_path", ""),
+        "self_decl_path": docs.get("self_decl_path", ""),
+        "aadhaar_path": docs.get("aadhaar_path", ""),
+        "address_proof_path": docs.get("address_proof_path", ""),
+        "address_doc_no": docs.get("address_doc_no", "")
+    }
+
     existing = USER_PROFILES.get(phone_clean, {})
-    merged_profile = {**existing, **profile_data, "updated_at": time.time()}
+    merged_profile = {
+        **existing,
+        **profile_data,
+        "tab1_credentials": {**(existing.get("tab1_credentials", {})), **tab1_credentials},
+        "tab2_residency": {**(existing.get("tab2_residency", {})), **tab2_residency},
+        "tab3_documents": {**(existing.get("tab3_documents", {})), **tab3_documents},
+        "updated_at": time.time()
+    }
     USER_PROFILES[phone_clean] = merged_profile
 
     url, key = get_supabase_config()
@@ -476,7 +514,7 @@ def save_user_profile(phone_number: str, profile_data: dict) -> bool:
         }
         resp = requests.post(endpoint, headers=headers, json=db_payload, timeout=3.0)
         if resp.status_code in (200, 201):
-            print(f"[Supabase DB] Profile saved to database for phone {_mask_phone(phone_clean)}")
+            print(f"[Supabase DB] 3-tab profile JSON saved to database for phone {_mask_phone(phone_clean)}")
             return True
         else:
             print(f"[Supabase DB] user_profiles post notice ({resp.status_code}): stored in memory.")
@@ -515,6 +553,18 @@ def fetch_user_profile(phone_number: str) -> dict:
                     profile_result.update(raw_prof)
         except Exception as e:
             print(f"[Supabase DB] Exception fetching user profile: {e}")
+
+    if profile_result:
+        t1 = profile_result.get("tab1_credentials", {})
+        t2 = profile_result.get("tab2_residency", {})
+        t3 = profile_result.get("tab3_documents", {})
+
+        if t1 and "credentials" not in profile_result:
+            profile_result["credentials"] = t1
+        if t2 and "address_details" not in profile_result:
+            profile_result["address_details"] = t2
+        if t3 and "supabase_urls" not in profile_result:
+            profile_result["supabase_urls"] = t3
 
     has_saved = bool(profile_result or saved_docs)
     return {

@@ -452,6 +452,7 @@ Just type your question in plain language and I will assist you right away.`,
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
   const [showDocumentNumber, setShowDocumentNumber]   = useState(false);
   const [automationStatus, setAutomationStatus]       = useState("");
+  const [finalPageImage, setFinalPageImage]           = useState("");
 
   const openAutomationSocket = () => new Promise((resolve) => {
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
