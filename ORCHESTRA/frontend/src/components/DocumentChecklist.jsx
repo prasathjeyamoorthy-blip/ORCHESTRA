@@ -513,6 +513,7 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
 
   // ── Restore existing user documents from Supabase on mount ───────────────────
   const [savedProfileLoaded, setSavedProfileLoaded] = useState(false);
+  const [savedProfile, setSavedProfile] = useState({});
 
   // ── Restore existing user profile & documents from Supabase on mount ──────────────
   useEffect(() => {
@@ -525,6 +526,8 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
         if (data && data.status === "success" && data.data) {
           const profileData = data.data.profile || {};
           const docsMap     = data.data.documents || {};
+
+          setSavedProfile(profileData);
 
           // 1. Restore credentials & address details
           const credsObj = profileData.credentials || profileData.applicant_details || {};
@@ -737,22 +740,54 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
       const bulkData = await bulkRes.json();
       if (!(bulkData.status === "success" && bulkData.result)) throw new Error("Document extraction returned no results.");
 
-      const orchPaths = bulkData.saved_paths || {};
-      const supUrls   = bulkData.supabase_urls || {};
+      const savedApplicant = savedProfile.applicant_details || {};
+      const savedAddress   = savedProfile.address_details || {};
+      const savedSupUrls   = savedProfile.supabase_urls || {};
 
-      setBulkResults(bulkData.result);
-      const c = bulkData.result.combined;
-      const aadharNum = (credentials.aadhar_number || c.aadhaar_number || "").replace(/\s/g, "");
+      const orchPaths = bulkData.saved_paths || {};
+      const supUrls   = { ...savedSupUrls, ...(bulkData.supabase_urls || {}), ...supabaseDocUrls };
+
+      setBulkResults(bulkData.result || { combined: savedApplicant, confidence_score: 100 });
+      const c = { ...savedApplicant, ...(bulkData.result?.combined || {}) };
+      const aadharNum = (credentials.aadhar_number || c.aadhaar_number || c.aadhar_number || "").replace(/\s/g, "");
       const payload = {
         credentials: { username: credentials.username, password: credentials.password },
-        applicant_details: { can_number: credentials.can_number || "", aadhar_number: aadharNum, dob: c.dob || "", ration_card_no: c.ration_card_number || "", name: c.username || "", father_name: c.father_name || "", gender: c.gender || "", religion: c.religion || "", community: c.community || "", mobile_number: c.phone_number || "", email: c.email || "" },
-        address_details: { state: c.state || "Tamil Nadu", district: c.district || "", village: c.taluk || c.district || "", area: c.area || "", building_no: c.door_no || "", street_name: c.street_name || c.area || "", pincode: c.pincode || "", from_date: addressDetails.from_date, to_date: addressDetails.to_date, perm_state: c.state || "Tamil Nadu", perm_district: c.district || "", perm_village: c.taluk || c.district || "", perm_building_no: c.door_no || "", perm_street_name: c.street_name || c.area || "", perm_pincode: c.pincode || "" },
+        applicant_details: {
+          can_number: credentials.can_number || c.can_number || "",
+          aadhar_number: aadharNum,
+          dob: c.dob || savedApplicant.dob || "",
+          ration_card_no: c.ration_card_number || c.ration_card_no || savedApplicant.ration_card_no || "",
+          name: c.username || c.name || savedApplicant.name || "",
+          father_name: c.father_name || savedApplicant.father_name || "",
+          gender: c.gender || savedApplicant.gender || "",
+          religion: c.religion || savedApplicant.religion || "",
+          community: c.community || savedApplicant.community || "",
+          mobile_number: c.phone_number || c.mobile_number || savedApplicant.mobile_number || "",
+          email: c.email || savedApplicant.email || ""
+        },
+        address_details: {
+          state: c.state || savedAddress.state || "Tamil Nadu",
+          district: c.district || savedAddress.district || "",
+          village: c.taluk || c.district || savedAddress.village || "",
+          area: c.area || savedAddress.area || "",
+          building_no: c.door_no || c.building_no || savedAddress.building_no || "",
+          street_name: c.street_name || c.area || savedAddress.street_name || "",
+          pincode: c.pincode || savedAddress.pincode || "",
+          from_date: addressDetails.from_date || savedAddress.from_date || "",
+          to_date: addressDetails.to_date || savedAddress.to_date || "",
+          perm_state: c.state || savedAddress.perm_state || "Tamil Nadu",
+          perm_district: c.district || savedAddress.perm_district || "",
+          perm_village: c.taluk || c.district || savedAddress.perm_village || "",
+          perm_building_no: c.door_no || c.building_no || savedAddress.perm_building_no || "",
+          perm_street_name: c.street_name || c.area || savedAddress.perm_street_name || "",
+          perm_pincode: c.pincode || savedAddress.perm_pincode || ""
+        },
         documents: {
-          photo_path: supUrls.Photo || orchPaths.Photo || orchPaths.photo || "",
+          photo_path: supUrls.Photo || supUrls.photo || orchPaths.Photo || orchPaths.photo || "",
           self_decl_path: "",
-          aadhaar_path: supUrls.Aadhaar || orchPaths.Aadhaar || orchPaths.aadhaar || "",
-          address_proof_path: supUrls["Driving License"] || supUrls["Ration Card"] || orchPaths["Driving License"] || orchPaths["Ration Card"] || orchPaths.driving || orchPaths.ration || "",
-          address_doc_no: c.dl_number || ""
+          aadhaar_path: supUrls.Aadhaar || supUrls.aadhaar || orchPaths.Aadhaar || orchPaths.aadhaar || "",
+          address_proof_path: supUrls["Driving License"] || supUrls["Ration Card"] || supUrls.driving || supUrls.ration || orchPaths["Driving License"] || orchPaths["Ration Card"] || orchPaths.driving || orchPaths.ration || "",
+          address_doc_no: c.dl_number || savedApplicant.address_doc_no || ""
         },
       };
 

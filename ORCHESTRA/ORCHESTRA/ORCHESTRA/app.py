@@ -52,6 +52,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+@app.head("/")
+def health_check():
+    return {"status": "online", "service": "ORCHESTRA Backend Agent"}
+
 # ── Session store ──────────────────────────────────────────────────────────────
 SESSIONS: Dict[str, dict] = {}
 USER_PROFILES: Dict[str, dict] = {}

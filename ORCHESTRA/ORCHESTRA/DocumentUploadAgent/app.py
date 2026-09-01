@@ -43,6 +43,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+@app.head("/")
+def health_check():
+    return {"status": "online", "service": "Document Upload Agent"}
+
 # Store files in Playwright directory for automation access
 PLAYWRIGHT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA", "Playwright", "uploaded_documents"))
 os.makedirs(PLAYWRIGHT_DIR, exist_ok=True)

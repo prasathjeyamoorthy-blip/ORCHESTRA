@@ -8,9 +8,30 @@ env_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(env_path, override=True)
 
 
+_SUPABASE_RESOLVED = None
+
 def get_supabase_config():
+    global _SUPABASE_RESOLVED
     url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
     key = os.getenv("SUPABASE_KEY", "").strip()
+    if not (url and key):
+        return "", ""
+    if _SUPABASE_RESOLVED is False:
+        return "", ""
+    if _SUPABASE_RESOLVED is None:
+        try:
+            import socket, urllib.parse
+            parsed = urllib.parse.urlparse(url)
+            hostname = parsed.hostname
+            if hostname:
+                socket.gethostbyname(hostname)
+                _SUPABASE_RESOLVED = True
+            else:
+                _SUPABASE_RESOLVED = False
+        except Exception as e:
+            print(f"[Supabase DB] Notice: Supabase host '{url}' is unreachable ({e}). Using active in-memory storage fallback.")
+            _SUPABASE_RESOLVED = False
+            return "", ""
     return url, key
 
 
