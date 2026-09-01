@@ -1,0 +1,27 @@
+# Environment variables (contains sensitive secrets & keys)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+ENV/
+env/
+
+# Build and dist outputs
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Local runtime & log files
+*.log
+last_payload.json
+backend_captcha.png
+uploads/
+uploaded_documents/
+.DS_Store
