@@ -320,6 +320,10 @@ def upload_to_supabase_storage(file_bytes: bytes, filename: str, content_type: s
         if phone_number:
             phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
             path_prefix = f"{phone_clean}/"
+        else:
+            import uuid
+            session_token = uuid.uuid4().hex[:8]
+            path_prefix = f"session_{session_token}/"
         
         object_path = f"{path_prefix}{clean_filename}"
         upload_url = f"{url}/storage/v1/object/{bucket_name}/{object_path}"
@@ -344,23 +348,27 @@ def upload_to_supabase_storage(file_bytes: bytes, filename: str, content_type: s
 
 APPLICATION_PAYLOAD_REGISTRY: dict = {}
 
-def save_application_payload(payload: dict) -> bool:
+def save_application_payload(payload: dict, phone_number: str = "") -> bool:
     """
-    Save application submission payload to Supabase Database and in-memory registry.
+    Save application submission payload to Supabase Database and in-memory registry, isolated by user phone number.
     """
     if not isinstance(payload, dict):
         return False
 
     applicant = payload.get("applicant_details", {})
-    phone_number = applicant.get("mobile_number", "") or payload.get("credentials", {}).get("username", "default")
-    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:] if phone_number != "default" else "default"
+    creds = payload.get("credentials", {})
+    phone_raw = phone_number or applicant.get("mobile_number") or applicant.get("phone_number") or creds.get("username") or creds.get("aadhar_number")
+    
+    if not phone_raw:
+        print("[Supabase DB] Notice: Application payload saved anonymously.")
+        return True
 
+    phone_clean = phone_raw.replace("+", "").replace(" ", "").strip()[-10:]
     APPLICATION_PAYLOAD_REGISTRY[phone_clean] = payload
-    APPLICATION_PAYLOAD_REGISTRY["latest"] = payload
 
     url, key = get_supabase_config()
     if not (url and key):
-        print("[Supabase DB] Application payload stored in memory registry.")
+        print(f"[Supabase DB] Application payload stored in memory registry for phone {_mask_phone(phone_clean)}")
         return True
 
     try:
@@ -385,21 +393,22 @@ def save_application_payload(payload: dict) -> bool:
 
 def get_latest_application_payload(phone_number: str = "") -> dict:
     """
-    Fetch the latest application submission payload from Supabase Database or memory registry.
+    Fetch application submission payload strictly for a specific user phone number from Supabase Database or memory registry.
     """
-    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:] if phone_number else "latest"
+    if not phone_number:
+        return {}
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
     if phone_clean in APPLICATION_PAYLOAD_REGISTRY:
         return APPLICATION_PAYLOAD_REGISTRY[phone_clean]
 
     url, key = get_supabase_config()
     if not (url and key):
-        return APPLICATION_PAYLOAD_REGISTRY.get("latest", {})
+        return {}
 
     try:
         endpoint = f"{url}/rest/v1/application_payloads"
-        params = {"order": "created_at.desc", "limit": "1"}
-        if phone_number:
-            params["phone_number"] = f"eq.{phone_clean}"
+        params = {"phone_number": f"eq.{phone_clean}", "order": "created_at.desc", "limit": "1"}
         resp = requests.get(endpoint, headers=_get_headers(key), params=params, timeout=3.0)
         if resp.status_code == 200:
             rows = resp.json()
@@ -411,7 +420,89 @@ def get_latest_application_payload(phone_number: str = "") -> dict:
     except Exception as e:
         print(f"[Supabase DB] Exception fetching application payload: {e}")
 
-    return APPLICATION_PAYLOAD_REGISTRY.get("latest", {})
+    return {}
+
+
+USER_PROFILES: dict = {}
+
+def save_user_profile(phone_number: str, profile_data: dict) -> bool:
+    """
+    Save or update a user's persistent profile (personal details, address, credentials) in Supabase.
+    """
+    if not phone_number or not isinstance(profile_data, dict):
+        return False
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+    if not phone_clean:
+        return False
+
+    existing = USER_PROFILES.get(phone_clean, {})
+    merged_profile = {**existing, **profile_data, "updated_at": time.time()}
+    USER_PROFILES[phone_clean] = merged_profile
+
+    url, key = get_supabase_config()
+    if not (url and key):
+        print(f"[Supabase DB] Profile saved in memory for phone {_mask_phone(phone_clean)}")
+        return True
+
+    try:
+        endpoint = f"{url}/rest/v1/user_profiles"
+        headers = {**_get_headers(key), "Prefer": "resolution=merge-duplicates"}
+        db_payload = {
+            "phone_number": phone_clean,
+            "profile_data": json.dumps(merged_profile),
+            "updated_at": time.time()
+        }
+        resp = requests.post(endpoint, headers=headers, json=db_payload, timeout=3.0)
+        if resp.status_code in (200, 201):
+            print(f"[Supabase DB] Profile saved to database for phone {_mask_phone(phone_clean)}")
+            return True
+        else:
+            print(f"[Supabase DB] user_profiles post notice ({resp.status_code}): stored in memory.")
+            return True
+    except Exception as e:
+        print(f"[Supabase DB] Exception saving user profile: {e}")
+        return True
+
+
+def fetch_user_profile(phone_number: str) -> dict:
+    """
+    Fetch a user's saved profile and uploaded documents from Supabase Database.
+    """
+    if not phone_number:
+        return {"has_saved_profile": False}
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+    mem_profile = USER_PROFILES.get(phone_clean, {})
+    saved_docs = fetch_user_documents(phone_clean)
+
+    url, key = get_supabase_config()
+    profile_result = dict(mem_profile)
+
+    if url and key:
+        try:
+            endpoint = f"{url}/rest/v1/user_profiles"
+            params = {"phone_number": f"eq.{phone_clean}", "select": "*"}
+            resp = requests.get(endpoint, headers=_get_headers(key), params=params, timeout=3.0)
+            if resp.status_code == 200:
+                rows = resp.json()
+                if rows:
+                    raw_prof = rows[0].get("profile_data", {})
+                    if isinstance(raw_prof, str):
+                        try: raw_prof = json.loads(raw_prof)
+                        except: raw_prof = {}
+                    profile_result.update(raw_prof)
+        except Exception as e:
+            print(f"[Supabase DB] Exception fetching user profile: {e}")
+
+    has_saved = bool(profile_result or saved_docs)
+    return {
+        "phone_number": phone_clean,
+        "has_saved_profile": has_saved,
+        "profile": profile_result,
+        "documents": saved_docs
+    }
+
 
 
 

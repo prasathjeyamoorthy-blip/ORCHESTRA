@@ -512,15 +512,37 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   const [supabaseDocUrls, setSupabaseDocUrls] = useState({});
 
   // ── Restore existing user documents from Supabase on mount ───────────────────
+  const [savedProfileLoaded, setSavedProfileLoaded] = useState(false);
+
+  // ── Restore existing user profile & documents from Supabase on mount ──────────────
   useEffect(() => {
     const userPhone = sessionStorage.getItem("user_phone");
     if (!userPhone) return;
 
-    fetch(`${import.meta.env.VITE_API_BASE}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`)
+    fetch(`${import.meta.env.VITE_API_BASE}/user-profile?phone_number=${encodeURIComponent(userPhone)}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data && data.documents) {
-          const docsMap = data.documents;
+        if (data && data.status === "success" && data.data) {
+          const profileData = data.data.profile || {};
+          const docsMap     = data.data.documents || {};
+
+          // 1. Restore credentials & address details
+          const credsObj = profileData.credentials || profileData.applicant_details || {};
+          const addrObj  = profileData.address_details || profileData.applicant_details || {};
+
+          setCredentials(prev => ({
+            username:      credsObj.username      || prev.username,
+            password:      credsObj.password      || prev.password,
+            can_number:    credsObj.can_number    || credsObj.can || prev.can_number,
+            aadhar_number: credsObj.aadhar_number || credsObj.aadhaar_number || prev.aadhar_number,
+          }));
+
+          setAddressDetails(prev => ({
+            from_date: addrObj.from_date || prev.from_date,
+            to_date:   addrObj.to_date   || prev.to_date,
+          }));
+
+          // 2. Restore document checklist items & Supabase URLs
           const restoredFiles = {};
           const restoredUrls = {};
           const restoredExtracted = {};
@@ -541,11 +563,15 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
             setSupabaseDocUrls(prev => ({ ...prev, ...restoredUrls }));
             setExtractedData(prev => ({ ...prev, ...restoredExtracted }));
             setCheckedItems(prev => ({ ...prev, ...restoredChecked }));
-            console.log("[User Memory] Auto-restored user documents from Supabase:", Object.keys(restoredChecked));
+          }
+
+          if (profileData.has_saved_profile || Object.keys(restoredChecked).length > 0) {
+            setSavedProfileLoaded(true);
+            console.log("[User Memory] Auto-restored user profile & documents from Supabase ✓");
           }
         }
       })
-      .catch(err => console.warn("[User Memory] Error fetching restored user documents:", err));
+      .catch(err => console.warn("[User Memory] Error fetching restored user profile:", err));
   }, []);
 
   const handleCredChange = (e) => setCredentials({ ...credentials, [e.target.name]: e.target.value });
@@ -813,6 +839,23 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   return (
     <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", overflow: "visible" }}>
       <h3 className="cl-title" style={{ marginBottom: "1.5rem", color: "#fff" }}>TNeSevai Application Details</h3>
+
+      {savedProfileLoaded && (
+        <div style={{
+          background: "rgba(52, 211, 153, 0.1)",
+          border: "1px solid rgba(52, 211, 153, 0.3)",
+          borderRadius: "0.75rem",
+          padding: "0.75rem 1rem",
+          marginBottom: "1rem",
+          color: "#34d399",
+          fontSize: "0.85rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem"
+        }}>
+          <span>✓</span> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
+        </div>
+      )}
 
       <StepBar current={step} total={STEPS.length} steps={STEPS} />
 

@@ -445,8 +445,11 @@ def ws_status():
 @app.post("/submit-application")
 async def submit_application(payload: dict):
     try:
-        from supabase_db import save_application_payload
+        from supabase_db import save_application_payload, save_user_profile
         save_application_payload(payload)
+        phone_num = payload.get("applicant_details", {}).get("mobile_number") or payload.get("credentials", {}).get("username")
+        if phone_num:
+            save_user_profile(phone_num, payload)
     except Exception as e:
         print(f"[WARNING] Could not save payload to database: {e}")
     _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=True).start()
@@ -462,4 +465,30 @@ def get_payload(phone_number: str = ""):
         return {"status": "success", "payload": payload}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/user-profile")
+def get_user_profile(phone_number: str = ""):
+    """Fetch user profile and document metadata from Supabase."""
+    try:
+        from supabase_db import fetch_user_profile
+        data = fetch_user_profile(phone_number)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/user-profile")
+def save_user_profile_endpoint(req: dict):
+    """Save user profile to Supabase."""
+    try:
+        from supabase_db import save_user_profile
+        phone_number = req.get("phone_number") or req.get("mobile_number") or req.get("applicant_details", {}).get("mobile_number")
+        if not phone_number:
+            return {"status": "error", "message": "phone_number required"}
+        save_user_profile(phone_number, req)
+        return {"status": "success", "message": "User profile saved to Supabase"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 

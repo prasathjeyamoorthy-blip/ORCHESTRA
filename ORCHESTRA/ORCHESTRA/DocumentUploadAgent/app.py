@@ -191,6 +191,23 @@ async def process_all_documents(
     print(f"Confidence Score: {result['confidence_score']}%")
     print(f"Photo Valid: {is_human}")
     
+    # Auto-save user profile & document metadata to Supabase DB for returning user recognition
+    try:
+        from supabase_db import save_user_document_meta, save_user_profile
+        combined_data = result.get("combined", {})
+        user_phone = combined_data.get("phone_number") or ""
+        if user_phone:
+            for doc_name, s_url in supabase_urls.items():
+                if s_url:
+                    save_user_document_meta(user_phone, doc_name, doc_name, s_url)
+            save_user_profile(user_phone, {
+                "applicant_details": combined_data,
+                "supabase_urls": supabase_urls
+            })
+            print(f"✓ Auto-saved extracted profile & documents to Supabase for user: {user_phone}")
+    except Exception as spe:
+        print(f"[UploadAgent] Profile auto-save notice: {spe}")
+
     return {
         "status": "success",
         "result": result,
