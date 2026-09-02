@@ -11,6 +11,7 @@ import DocumentChecklist    from "./components/DocumentChecklist";
 import AutomationModal      from "./components/AutomationModal";
 import SelfDeclarationModal from "./components/SelfDeclarationModal";
 import DocumentNumberModal  from "./components/DocumentNumberModal";
+import OtpModal             from "./components/OtpModal";
 import { HeroGeometric } from "./components/ui/shape-landing-hero";
 import AnimatedShaderBackground from "./components/ui/animated-shader-background";
 import { HoverButton } from "./components/ui/hover-button";
@@ -104,6 +105,8 @@ export default function App() {
     } catch (_) { return []; }
   });
   const [showChecklist, setShowChecklist] = useState(false);
+  const [showOtpModal, setShowOtpModal]   = useState(false);
+  const [userPhone, setUserPhone]         = useState(() => sessionStorage.getItem("user_phone") || "");
   const [waitingForDocReply, setWaitingForDocReply] = useState(false);
   const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
   const chatEndRef = useRef(null);
@@ -341,6 +344,28 @@ Just type your question in plain language and I will assist you right away.`,
     }
   };
 
+  const checkShouldShowChecklist = (res, userText, botAnswer) => {
+    if (res?.stage === "SHOW_DOCUMENTS") return true;
+
+    const u = (userText || "").toLowerCase().trim();
+    const b = (botAnswer || "").toLowerCase().trim();
+
+    const userPhrases = [
+      "yeah we can go", "we can go", "let's go", "lets go", "go ahead", "ready", "ready to apply",
+      "submit documents", "upload documents", "apply now", "start application", "yes proceed", "proceed",
+      "submit application", "start process", "begin application", "i want to apply", "yes", "yeah"
+    ];
+    if (userPhrases.some(p => u.includes(p))) return true;
+
+    const botPhrases = [
+      "provide the required documents", "proceed with submitting", "submit your residence certificate",
+      "upload your documents", "ready to begin", "upload the required documents", "document upload checklist"
+    ];
+    if (botPhrases.some(p => b.includes(p))) return true;
+
+    return false;
+  };
+
   const handleSend = async (text) => {
     if (!text.trim()) return;
     pushUser(text);
@@ -370,18 +395,20 @@ Just type your question in plain language and I will assist you right away.`,
         }
       );
 
+      const finalAnswer = res.answer || "";
       setMessages(prev =>
-        prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+        prev.map(msg => msg.id === botMsgId ? { ...msg, text: finalAnswer || "Please provide more details." } : msg)
       );
 
-      if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
+      if (checkShouldShowChecklist(res, text, finalAnswer)) setShowChecklist(true);
     } catch (err) {
       try {
         const res = await sendMessage(sessionId, text);
+        const finalAnswer = res.answer || "";
         setMessages(prev =>
-          prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: finalAnswer || "Please provide more details." } : msg)
         );
-        if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
+        if (checkShouldShowChecklist(res, text, finalAnswer)) setShowChecklist(true);
       } catch (fallbackErr) {
         setMessages(prev =>
           prev.map(msg => msg.id === botMsgId ? { ...msg, text: `Error: ${fallbackErr.message}` } : msg)
@@ -413,22 +440,22 @@ Just type your question in plain language and I will assist you right away.`,
         }
       );
 
+      const finalAnswer = res.answer || "";
       setMessages(prev =>
-        prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+        prev.map(msg => msg.id === botMsgId ? { ...msg, text: finalAnswer || "Please provide more details." } : msg)
       );
 
-      if (res.stage === "SHOW_DOCUMENTS") {
+      if (checkShouldShowChecklist(res, reply, finalAnswer)) {
         setShowChecklist(true);
-      } else {
-        setShowChecklist(false);
       }
     } catch (err) {
       try {
         const res = await sendMessage(sessionId, reply);
+        const finalAnswer = res.answer || "";
         setMessages(prev =>
-          prev.map(msg => msg.id === botMsgId ? { ...msg, text: res.answer || "Please provide more details." } : msg)
+          prev.map(msg => msg.id === botMsgId ? { ...msg, text: finalAnswer || "Please provide more details." } : msg)
         );
-        if (res.stage === "SHOW_DOCUMENTS") setShowChecklist(true);
+        if (checkShouldShowChecklist(res, reply, finalAnswer)) setShowChecklist(true);
       } catch (fallbackErr) {
         setMessages(prev =>
           prev.map(msg => msg.id === botMsgId ? { ...msg, text: `Error: ${fallbackErr.message}` } : msg)
@@ -516,6 +543,8 @@ Just type your question in plain language and I will assist you right away.`,
           onNewChat={handleNewChat}
           onSelectChat={handleSelectChat}
           onDeleteChat={handleDeleteChat}
+          onOpenOtpModal={() => setShowOtpModal(true)}
+          userPhone={userPhone}
         />
       )}
 
@@ -525,7 +554,12 @@ Just type your question in plain language and I will assist you right away.`,
         {showLanding ? <AnimatedShaderBackground /> : <HeroGeometric />}
 
         {/* ── Landing overlay ── */}
-        {showLanding && <LandingOverlay onStart={() => setShowLanding(false)} />}
+        {showLanding && <LandingOverlay onStart={() => {
+          setShowLanding(false);
+          if (!sessionStorage.getItem("user_phone")) {
+            setShowOtpModal(true);
+          }
+        }} />}
 
         {/* ── Mobile Topbar ── */}
         {!showLanding && (<>
@@ -621,6 +655,15 @@ Just type your question in plain language and I will assist you right away.`,
       <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} onAction={handleAutomationAction} />
       <SelfDeclarationModal isOpen={showSelfDeclaration}  downloadPath={selfDeclarationPath} onSubmit={handleSelfDeclarationSubmit} onExit={handleSelfDeclarationExit} />
       <DocumentNumberModal  isOpen={showDocumentNumber}   onSubmit={handleDocumentNumberSubmit} />
+      <OtpModal
+        isOpen={showOtpModal}
+        onClose={() => setShowOtpModal(false)}
+        onSuccess={(phone) => {
+          setShowOtpModal(false);
+          setUserPhone(phone);
+          sessionStorage.setItem("user_phone", phone);
+        }}
+      />
     </div>
   );
 }

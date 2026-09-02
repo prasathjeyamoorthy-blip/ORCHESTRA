@@ -109,10 +109,22 @@ class TNeGACertificateDownloader:
             playwright.stop()
 
 if __name__=="__main__":
-    config={
-        "username":"lohithg",
-        "password":getpass.getpass("Password: "),
-        "transaction_id":"TNCIT000000012997009"
-    }
+    import argparse
+    parser = argparse.ArgumentParser(description="Download TNeGA Residence Certificate")
+    parser.add_argument("--payload", help="Path to JSON file with username, password, transaction_id")
+    parser.add_argument("--username", help="TNeGA portal username")
+    parser.add_argument("--transaction-id", dest="transaction_id", help="Transaction / Application number")
+    args = parser.parse_args()
+
+    if args.payload and os.path.exists(args.payload):
+        with open(args.payload, "r") as f:
+            config = json.load(f)
+    else:
+        config = {
+            "username": args.username or input("Enter TNeGA username: ").strip(),
+            "password": getpass.getpass("Enter TNeGA password: "),
+            "transaction_id": args.transaction_id or input("Enter Transaction ID: ").strip()
+        }
+
     bot=TNeGACertificateDownloader()
     print(json.dumps(bot.execute(config),indent=4))

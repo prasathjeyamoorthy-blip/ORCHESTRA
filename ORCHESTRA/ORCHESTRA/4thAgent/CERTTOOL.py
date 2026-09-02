@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import getpass
+import argparse
 from playwright.sync_api import sync_playwright
 
 class TNeGACertificateDownloader:
@@ -128,16 +130,24 @@ class TNeGACertificateDownloader:
 
 # --- EXECUTION BLOCK ---
 if __name__ == "__main__":
-    
-    # JSON INPUT configuration
-    user_input_json = {
-        "username": "lohithg",
-        "password": "Lohith@2007",
-        "transaction_id": "TNCIT000000012997009"
-    }
+    parser = argparse.ArgumentParser(description="Download TNeGA Residence Certificate")
+    parser.add_argument("--payload", help="Path to JSON file with username, password, transaction_id")
+    parser.add_argument("--username", help="TNeGA portal username")
+    parser.add_argument("--transaction-id", dest="transaction_id", help="Transaction / Application number")
+    args = parser.parse_args()
+
+    if args.payload and os.path.exists(args.payload):
+        with open(args.payload, "r") as f:
+            user_input_json = json.load(f)
+    else:
+        user_input_json = {
+            "username": args.username or input("Enter TNeGA username: ").strip(),
+            "password": getpass.getpass("Enter TNeGA password: "),
+            "transaction_id": args.transaction_id or input("Enter Transaction ID: ").strip()
+        }
 
     bot = TNeGACertificateDownloader()
     result = bot.execute(user_input_json)
-    
+
     print("\n--- JSON OUTPUT ---")
     print(json.dumps(result, indent=4))

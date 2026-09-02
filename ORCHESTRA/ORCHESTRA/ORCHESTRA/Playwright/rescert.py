@@ -232,13 +232,24 @@ class TNeSevaiBackendAgent:
 
         raise TimeoutError("No OTP response received within timeout.")
 
-    def format_date_for_injection(self, date_str):
-        try:
-            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%b-%Y"):
-                try: return datetime.strptime(date_str, fmt).strftime("%d-%b-%Y")
-                except ValueError: continue
-            return date_str 
-        except: return date_str
+    def format_date_for_injection(self, date_str, target_fmt="%d/%m/%Y"):
+        if not date_str:
+            return ""
+        date_str = str(date_str).strip()
+        input_formats = (
+            "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+            "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y",
+            "%d-%b-%Y", "%d/%b/%Y", "%d %b %Y",
+            "%d-%B-%Y", "%d/%B/%Y", "%d %B %Y",
+            "%d/%m/%y", "%d-%m-%y", "%m/%d/%Y", "%m-%d-%Y"
+        )
+        for fmt in input_formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime(target_fmt)
+            except ValueError:
+                continue
+        return date_str
 
     def safe_select_dropdown(self, page, selector, value, field_name):
         if not value: return False
@@ -297,7 +308,8 @@ class TNeSevaiBackendAgent:
             attempt += 1
             try:
                 self.log(f"Checking portal connectivity (attempt {attempt})...")
-                urllib.request.urlopen(self.PORTAL_URL, timeout=10)
+                req = urllib.request.Request(self.PORTAL_URL, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                urllib.request.urlopen(req, timeout=10)
                 self.log("✓ Portal is reachable!")
                 return True
             except Exception as e:
@@ -332,7 +344,7 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                launch_kwargs = {"headless": True, "slow_mo": 200}
+                launch_kwargs = {"headless": False, "slow_mo": 200}
                 for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
                     if os.path.exists(chrome_path):
                         launch_kwargs["executable_path"] = chrome_path
@@ -427,16 +439,120 @@ class TNeSevaiBackendAgent:
                 
                 # --- DOB Injection ---
                 self.log("Injecting Date of Birth...")
-                fmt_dob = self.format_date_for_injection(self.applicant.get("dob"))
-                page_form.evaluate(f"""
-                    var dobField = document.getElementById('statusform:citAapDOBInputDate');
-                    if (dobField) {{
-                        dobField.value = '{fmt_dob}';
-                        dobField.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        dobField.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-                    }}
-                """)
-                time.sleep(4)
+                dob_val = (
+                    self.applicant.get("dob")
+                    or self.applicant.get("date_of_birth")
+                    or self.applicant.get("applicant_dob")
+                    or self.applicant.get("dateOfBirth")
+                    or self.applicant.get("applicant_date_of_birth")
+                    or self.applicant.get("DOB")
+                )
+                self.log(f"Raw Date of Birth from payload: '{dob_val}'")
+
+                if dob_val:
+                    fmt_dob_slash = self.format_date_for_injection(dob_val, "%d/%m/%Y")
+                    fmt_dob_dash_mon = self.format_date_for_injection(dob_val, "%d-%b-%Y")
+                    fmt_dob_dash_num = self.format_date_for_injection(dob_val, "%d-%m-%Y")
+                    self.log(f"Formatted DOB candidates: '{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}'")
+
+                    # Step 1: Remove readonly attribute via JS immediately to prevent Playwright 30s timeouts
+                    page_form.evaluate("""
+                        (() => {
+                            document.querySelectorAll('input[id*="citAapDOB"], input[id*="DOBInputDate"], input[id*="DOB"]').forEach(el => {
+                                el.removeAttribute('readonly');
+                                el.removeAttribute('disabled');
+                            });
+                        })()
+                    """)
+
+                    # Step 2: Instant JS evaluation + RichFaces Date object + popup collapse
+                    js_res = page_form.evaluate(f"""
+                        (() => {{
+                            const formattedDates = ['{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}', '{dob_val}'];
+                            const dateToUse = formattedDates[0] || '';
+                            const selectors = [
+                                'statusform:citAapDOBInputDate',
+                                'statusform:citAapDOB',
+                                'statusform:dob',
+                                'statusform:applicantDOB'
+                            ];
+                            let dobField = null;
+                            for (const id of selectors) {{
+                                const el = document.getElementById(id);
+                                if (el) {{ dobField = el; break; }}
+                            }}
+                            if (!dobField) {{
+                                dobField = document.querySelector('input[id*="citAapDOB"], input[id*="DOBInputDate"], input[id*="DOB"]');
+                            }}
+                            if (dobField) {{
+                                dobField.removeAttribute('readonly');
+                                dobField.removeAttribute('disabled');
+                                dobField.value = dateToUse;
+                                dobField.focus();
+                                ['input', 'change', 'keydown', 'keyup', 'blur'].forEach(evtType => {{
+                                    dobField.dispatchEvent(new Event(evtType, {{ bubbles: true }}));
+                                }});
+
+                                try {{
+                                    const parts = dateToUse.split('/');
+                                    let jsDate = null;
+                                    if (parts.length === 3) {{
+                                        const d = parseInt(parts[0], 10);
+                                        const m = parseInt(parts[1], 10) - 1;
+                                        const y = parseInt(parts[2], 10);
+                                        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {{
+                                            jsDate = new Date(y, m, d);
+                                        }}
+                                    }}
+
+                                    if (window.RichFaces && RichFaces.$) {{
+                                        const calComp = RichFaces.$('statusform:citAapDOB') || RichFaces.$('statusform:citAapDOBInputDate') || RichFaces.$(dobField.id);
+                                        if (calComp) {{
+                                            if (jsDate && typeof calComp.setValue === 'function') {{
+                                                calComp.setValue(jsDate);
+                                            }}
+                                            if (typeof calComp.collapse === 'function') {{
+                                                calComp.collapse();
+                                            }}
+                                        }}
+                                    }}
+                                }} catch(e) {{}}
+
+                                // Collapse/hide any calendar popups
+                                document.querySelectorAll('.rich-calendar-popup, iframe[id*="citAapDOB"]').forEach(el => {{
+                                    try {{ el.style.display = 'none'; }} catch(_) {{}}
+                                }});
+
+                                return dobField.value;
+                            }}
+                            return null;
+                        }})()
+                    """)
+                    self.log(f"DOB JS Injection Result: '{js_res}'")
+
+                    # Step 3: Fast locator fallback with short 1s timeout
+                    if not js_res:
+                        dob_selectors = [
+                            '[id="statusform:citAapDOBInputDate"]',
+                            'input[id*="citAapDOBInputDate"]',
+                            'input[id*="citAapDOB"]',
+                        ]
+                        for selector in dob_selectors:
+                            try:
+                                loc = page_form.locator(selector)
+                                if loc.count() > 0:
+                                    dob_el = loc.first
+                                    dob_el.evaluate("el => { el.removeAttribute('readonly'); el.removeAttribute('disabled'); }")
+                                    dob_el.fill(fmt_dob_slash, timeout=1000)
+                                    dob_el.press("Escape")
+                                    dob_el.press("Tab")
+                                    self.log(f"Filled DOB via fallback locator: '{dob_el.input_value()}'")
+                                    break
+                            except Exception as e:
+                                pass
+                    time.sleep(1)
+                else:
+                    self.log("⚠ WARNING: No Date of Birth found in applicant details payload!")
                 
                 # --- OTP Flow — retry loop ---
                 self.log("Requesting OTP from Server...")
@@ -535,20 +651,61 @@ class TNeSevaiBackendAgent:
                 if self.address.get("pincode") and is_field_empty('[id="residence:pinForList"]'):
                     page_form.locator('[id="residence:pinForList"]').fill(self.address.get("pincode"))
 
-                if self.address.get("from_date") and is_field_empty('[id="residence:fromDateListInputDate"]'):
-                    fmt_from = self.format_date_for_injection(self.address.get("from_date"))
-                    page_form.evaluate(f"document.getElementById('residence:fromDateListInputDate').value = '{fmt_from}';")
-                if self.address.get("to_date") and is_field_empty('[id="residence:toDateListInputDate"]'):
-                    fmt_to = self.format_date_for_injection(self.address.get("to_date"))
-                    page_form.evaluate(f"document.getElementById('residence:toDateListInputDate').value = '{fmt_to}';")
-                
+                if self.address.get("from_date") or self.address.get("to_date"):
+                    fmt_from = self.format_date_for_injection(self.address.get("from_date"), "%d/%m/%Y") if self.address.get("from_date") else ""
+                    fmt_to = self.format_date_for_injection(self.address.get("to_date"), "%d/%m/%Y") if self.address.get("to_date") else ""
+                    self.log(f"Injecting Address Dates: From='{fmt_from}', To='{fmt_to}'...")
+
+                    page_form.evaluate(f"""
+                        (() => {{
+                            function setAddressDate(id, dateStr) {{
+                                if (!dateStr) return;
+                                const el = document.getElementById(id);
+                                if (!el) return;
+                                el.removeAttribute('readonly');
+                                el.removeAttribute('disabled');
+                                el.value = dateStr;
+                                el.focus();
+                                ['input', 'change', 'keydown', 'keyup', 'blur'].forEach(evt => {{
+                                    el.dispatchEvent(new Event(evt, {{ bubbles: true }}));
+                                }});
+                                try {{
+                                    const parts = dateStr.split('/');
+                                    if (parts.length === 3) {{
+                                        const d = parseInt(parts[0], 10);
+                                        const m = parseInt(parts[1], 10) - 1;
+                                        const y = parseInt(parts[2], 10);
+                                        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {{
+                                            const jsDate = new Date(y, m, d);
+                                            const compId = id.replace('InputDate', '');
+                                            if (window.RichFaces && RichFaces.$) {{
+                                                const comp = RichFaces.$(compId) || RichFaces.$(id);
+                                                if (comp && typeof comp.setValue === 'function') {{
+                                                    comp.setValue(jsDate);
+                                                }}
+                                                if (comp && typeof comp.collapse === 'function') {{
+                                                    comp.collapse();
+                                                }}
+                                            }}
+                                        }}
+                                    }}
+                                }} catch(e) {{}}
+                            }}
+
+                            setAddressDate('residence:fromDateListInputDate', '{fmt_from}');
+                            setAddressDate('residence:toDateListInputDate', '{fmt_to}');
+                            document.querySelectorAll('.rich-calendar-popup').forEach(p => {{ try {{ p.style.display = 'none'; }} catch(_) {{}} }});
+                        }})()
+                    """)
+                    time.sleep(1)
+
                 if self.applicant.get("ration_card_no") and is_field_empty('[id="residence:rationCardId"]'):
                     page_form.locator('[id="residence:rationCardId"]').fill(self.applicant.get("ration_card_no"))
                     time.sleep(2) 
 
                 self.log("Submitting Details Table...")
                 page_form.get_by_role("button", name="Add").click()
-                time.sleep(5)
+                time.sleep(4)
 
                 # Dialog Handler
                 def safe_dialog_handler(dialog):
@@ -601,20 +758,47 @@ class TNeSevaiBackendAgent:
                     try:
                         self.log(f"Uploading {doc_label} to portal...")
 
-                        # 1. Select document type — target the upload section's combobox specifically
+                        # 1. Select document type — target exact document dropdown selectors
                         doc_type_selected = False
-                        for selector in ['[id="ss:dsctype"]', '[id="ss:docType"]', '[id="ss:documentType"]']:
+                        doc_selectors = [
+                            'select[id*="docType"]',
+                            'select[id*="DocType"]',
+                            'select[name*="docType"]',
+                            'select[id*="docTypeList"]',
+                            '[id="statusform:docType"]',
+                            '[id="statusform:docTypeList"]',
+                            '[id="ss:dsctype"]',
+                            '[id="ss:docType"]',
+                            '[id="ss:documentType"]'
+                        ]
+                        for selector in doc_selectors:
                             try:
                                 el = page_form.locator(selector)
-                                if el.count() > 0:
-                                    el.select_option(label=doc_label)
+                                if el.count() > 0 and el.first.is_visible():
+                                    el.first.select_option(label=doc_label, timeout=2000)
                                     doc_type_selected = True
-                                    self.log(f"Selected doc type via {selector}")
+                                    self.log(f"Selected doc type '{doc_label}' via {selector}")
                                     break
-                            except: pass
+                            except Exception:
+                                pass
 
                         if not doc_type_selected:
-                            # Fall back: first enabled combobox
+                            # Search select elements inside upload container or page
+                            try:
+                                select_els = page_form.locator('select:not([disabled])').all()
+                                for sel in select_els:
+                                    sel_id = sel.get_attribute('id') or ''
+                                    sel_name = sel.get_attribute('name') or ''
+                                    if 'village' not in sel_id.lower() and 'village' not in sel_name.lower():
+                                        try:
+                                            sel.select_option(label=doc_label, timeout=2000)
+                                            doc_type_selected = True
+                                            self.log(f"Selected doc type '{doc_label}' via generic select ({sel_id})")
+                                            break
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
                             try:
                                 enabled_combos = page_form.locator("select:not([disabled])")
                                 enabled_combos.first.select_option(label=doc_label)
@@ -799,29 +983,29 @@ if __name__ == "__main__":
     import argparse
     _defaults = {
         "credentials": {
-            "username": "lohithg",
-            "password": "Lohith@2007"
+            "username": "",
+            "password": ""
         },
         "applicant_details": {
-            "can_number": "13318016498757",
-            "aadhar_number": "607126530111",
-            "dob": "23-Feb-2007",
-            "ration_card_no": "333477513066"
+            "can_number": "",
+            "aadhar_number": "",
+            "dob": "",
+            "ration_card_no": ""
         },
         "address_details": {
-            "village": "Gundu Uppalavadi",
-            "building_no": "55",
-            "street_name": "World vision street thazhungda",
-            "pincode": "607002",
-            "from_date": "26/07/2023",
-            "to_date": "01/03/2026"
+            "village": "",
+            "building_no": "",
+            "street_name": "",
+            "pincode": "",
+            "from_date": "",
+            "to_date": ""
         },
         "documents": {
-            "photo_path": "D:/Playwright/3rdAgent/REQPICS/LOHITHG.jpg",
-            "self_decl_path": "D:/Playwright/3rdAgent/REQPICS/SelfDeclarationForm_TN-1520260126407SIGNED (1).pdf",
-            "aadhaar_path": "D:/Playwright/3rdAgent/REQPICS/in.gov.uidai-ADHAR.pdf",
-            "address_proof_path": "D:/Playwright/3rdAgent/REQPICS/Screenshot 2026-01-26 200035.png",
-            "address_doc_no": "TN31DL2026000123"
+            "photo_path": "",
+            "self_decl_path": "",
+            "aadhaar_path": "",
+            "address_proof_path": "",
+            "address_doc_no": ""
         }
     }
 

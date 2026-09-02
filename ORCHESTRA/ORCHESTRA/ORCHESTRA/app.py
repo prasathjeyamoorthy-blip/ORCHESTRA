@@ -497,3 +497,41 @@ def save_user_profile_endpoint(req: dict):
         return {"status": "error", "message": str(e)}
 
 
+class SendOtpRequest(BaseModel):
+    phone_number: str
+
+
+class VerifyOtpRequest(BaseModel):
+    phone_number: str
+    code: str
+    verification_id: Optional[str] = ""
+
+
+@app.post("/api/send-otp")
+def send_otp_endpoint(req: SendOtpRequest):
+    """
+    Send OTP via Message Central service or local fallback.
+    """
+    try:
+        from otp_service import send_otp
+        res = send_otp(req.phone_number)
+        return res
+    except Exception as e:
+        print(f"[OTP Endpoint Error] send_otp: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.post("/api/verify-otp")
+def verify_otp_endpoint(req: VerifyOtpRequest):
+    """
+    Verify OTP via Message Central service or local fallback.
+    """
+    try:
+        from otp_service import verify_otp
+        res = verify_otp(req.phone_number, req.code, req.verification_id or "")
+        return res
+    except Exception as e:
+        print(f"[OTP Endpoint Error] verify_otp: {e}")
+        return {"success": False, "message": str(e)}
+
+

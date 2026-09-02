@@ -588,6 +588,19 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     setCheckedItems(p => ({ ...p, [id]: false }));
   };
 
+  const handleClearSavedData = () => {
+    setUploadedFiles({});
+    setRawFiles({});
+    setExtractedData({});
+    setCheckedItems({ aadharCard: false, rationCard: false, photo: false, drivingLicense: false });
+    setSupabaseDocUrls({});
+    setSavedProfileLoaded(false);
+    setSavedProfile({});
+    setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
+    setAddressDetails({ from_date: "", to_date: "" });
+    fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
+  };
+
   const handleFileUpload = async (e, id) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -886,9 +899,29 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
           fontSize: "0.85rem",
           display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           gap: "0.5rem"
         }}>
-          <span>✓</span> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span>✓</span> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
+          </div>
+          <button
+            type="button"
+            onClick={handleClearSavedData}
+            style={{
+              background: "rgba(239, 68, 68, 0.15)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
+              color: "#fca5a5",
+              borderRadius: "9999px",
+              padding: "0.3rem 0.75rem",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              flexShrink: 0
+            }}
+          >
+            Clear &amp; Start Fresh
+          </button>
         </div>
       )}
 
@@ -967,9 +1000,14 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
                             <div key={idx} className="cl-extracted">
                               <h5 className="cl-extracted-title">{extract.certificate_type} Details</h5>
                               <ul className="cl-extracted-list">
-                                {Object.entries(extract.extracted_fields || extract).filter(([k]) => k !== "certificate_type").map(([k, v]) => (
-                                  <li key={k}><strong>{k.replace(/_/g, " ").toUpperCase()}:</strong> {v}</li>
-                                ))}
+                                {Object.entries(extract.extracted_fields || extract)
+                                  .filter(([k, v]) => !k.startsWith("_") && k !== "certificate_type" && v !== null && v !== undefined)
+                                  .map(([k, v]) => (
+                                    <li key={k}>
+                                      <strong>{k.replace(/_/g, " ").toUpperCase()}:</strong>{" "}
+                                      {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                                    </li>
+                                  ))}
                               </ul>
                             </div>
                           ))}

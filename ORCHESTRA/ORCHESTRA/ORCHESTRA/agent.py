@@ -315,6 +315,16 @@ _PERSONAL_QUERY_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 
+_APPLY_READY_PATTERNS = re.compile(
+    r"\b("
+    r"yeah we can go|we can go|let'?s go|go ahead|ready|ready to apply|yes let'?s start|ok let'?s start|"
+    r"start application|submit documents|upload documents|apply now|apply for residence|residence certificate venum|"
+    r"apply panna poren|ready ah irukken|document submit|proceed with application|start process|yes, proceed|yes proceed|"
+    r"i want to apply|i'?m ready|i am ready|submit application|submit my application"
+    r")\b",
+    re.IGNORECASE
+)
+
 def _is_obvious_social(text: str) -> bool:
     if _PERSONAL_QUERY_KEYWORDS.search(text):
         return False
@@ -439,6 +449,13 @@ async def detect_intent(state: RAGState) -> RAGState:
         state["intent"] = {"primary": "GREETING", "document": None}
         state["_cached_chunks"] = []
         print("[agent] Fast-path GREETING detected")
+        return state
+
+    # Fast-path for readiness to apply / submit documents
+    if _APPLY_READY_PATTERNS.search(question):
+        state["intent"] = {"primary": "APPLY", "document": None}
+        state["_cached_chunks"] = []
+        print("[agent] Fast-path APPLY detected (User ready to proceed)")
         return state
 
     # Fast-path for personal identity / capabilities queries

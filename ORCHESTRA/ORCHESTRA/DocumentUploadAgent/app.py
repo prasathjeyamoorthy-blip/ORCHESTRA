@@ -52,6 +52,15 @@ def health_check():
 PLAYWRIGHT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA", "Playwright", "uploaded_documents"))
 os.makedirs(PLAYWRIGHT_DIR, exist_ok=True)
 
+# Server-side cache for extracted document data to avoid re-running VLM extraction in bulk
+EXTRACTED_CACHE = {}
+
+
+@app.post("/clear-cache")
+def clear_extracted_cache():
+    EXTRACTED_CACHE.clear()
+    return {"status": "success", "message": "Extraction cache cleared"}
+
 # Keep local uploads folder for backward compatibility
 UPLOAD_DIR = "uploads"
 @app.post("/upload-encrypted-doc")
@@ -87,6 +96,17 @@ async def extract_document(file: UploadFile = File(...)):
     print("🔍 Running extraction in-memory...\n")
 
     results = extract_from_pdf(content_bytes)
+
+    if file.filename:
+        EXTRACTED_CACHE[file.filename] = results
+    for r in results:
+        cert_type = (r.get("certificate_type") or "").lower()
+        if cert_type:
+            EXTRACTED_CACHE[cert_type] = r
+            if "aadhaar" in cert_type: EXTRACTED_CACHE["aadhaar"] = r
+            elif "ration" in cert_type: EXTRACTED_CACHE["ration"] = r
+            elif "driving" in cert_type or "dl" in cert_type or "address" in cert_type: EXTRACTED_CACHE["driving"] = r
+            elif "caste" in cert_type: EXTRACTED_CACHE["caste"] = r
 
     print("\n✅ --- EXTRACTED JSON (Upload Agent) ---\n")
     for r in results:
@@ -171,10 +191,10 @@ async def process_all_documents(
             print(f"[UploadAgent] Failed to parse pre-extracted JSON string: {e}")
             return None
 
-    parsed_pre_aadhaar = _parse_pre(pre_aadhaar)
-    parsed_pre_ration  = _parse_pre(pre_ration)
-    parsed_pre_driving = _parse_pre(pre_driving)
-    parsed_pre_caste   = _parse_pre(pre_caste)
+    parsed_pre_aadhaar = _parse_pre(pre_aadhaar) or EXTRACTED_CACHE.get("aadhaar") or (EXTRACTED_CACHE.get(aadhaar.filename) if aadhaar else None)
+    parsed_pre_ration  = _parse_pre(pre_ration) or EXTRACTED_CACHE.get("ration") or (EXTRACTED_CACHE.get(ration.filename) if ration else None)
+    parsed_pre_driving = _parse_pre(pre_driving) or EXTRACTED_CACHE.get("driving") or (EXTRACTED_CACHE.get(driving.filename) if driving else None)
+    parsed_pre_caste   = _parse_pre(pre_caste) or EXTRACTED_CACHE.get("caste")
     
     result = process_documents(
         aadhaar_pdf=file_bytes_map.get("Aadhaar") or supabase_urls.get("Aadhaar"),

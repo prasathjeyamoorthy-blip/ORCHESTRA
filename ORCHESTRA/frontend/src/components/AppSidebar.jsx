@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Menu, LayoutDashboard, BookOpen,
   FileCheck, Phone, Settings, User2, ChevronUp, X,
-  Plus, MessageSquare, Trash2,
+  Plus, MessageSquare, Trash2, ShieldCheck,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -25,7 +25,8 @@ const actBg  = "rgba(255,255,255,0.12)";
 function NavContent({
   open, activePage, onNavigate, onClose, onToggle,
   userMenu, setUserMenu, userMenuRef,
-  chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat
+  chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
+  onOpenOtpModal, userPhone
 }) {
   const row = {
     display: "flex", alignItems: "center",
@@ -150,6 +151,19 @@ function NavContent({
 
       {/* Footer */}
       <div style={{ padding: "0.5rem 0.375rem", display: "flex", flexDirection: "column", gap: "0.125rem" }}>
+        {onOpenOtpModal && (
+          <button
+            onClick={() => { onOpenOtpModal(); onClose?.(); }}
+            title={!open ? "Security & PIN" : undefined}
+            style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", color: "#c084fc" }}
+            onMouseEnter={e => e.currentTarget.style.background = hover}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            <ShieldCheck size={20} style={{ flexShrink: 0, color: "#c084fc" }} />
+            {open && <span style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{userPhone ? "Security PIN Locked" : "Verify Mobile & PIN"}</span>}
+          </button>
+        )}
+
         <button title={!open ? "Settings" : undefined}
           style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem" }}
           onMouseEnter={e => e.currentTarget.style.background = hover}
@@ -187,9 +201,10 @@ function NavContent({
   );
 }
 
-export function AppSidebar({
+  export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
-  chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat
+  chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
+  onOpenOtpModal, userPhone
 }) {
   const [open, setOpen]         = useState(false);
   const [userMenu, setUserMenu] = useState(false);
@@ -210,7 +225,8 @@ export function AppSidebar({
 
   const navProps = {
     open, activePage, onNavigate, userMenu, setUserMenu, userMenuRef,
-    chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat
+    chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
+    onOpenOtpModal, userPhone
   };
 
   return (

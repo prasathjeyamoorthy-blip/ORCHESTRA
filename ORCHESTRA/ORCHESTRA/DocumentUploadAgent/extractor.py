@@ -76,134 +76,168 @@ def pil_to_base64(img):
 
 # keep run_vlm logic exactly as reference
 
+def get_groq_keys():
+    """Retrieve all available Groq API keys from environment variables for automatic failover."""
+    keys = []
+    raw_keys = os.getenv("GROQ_API_KEYS", "")
+    if raw_keys:
+        for k in raw_keys.split(","):
+            k = k.strip()
+            if k.startswith("gsk_") and k not in keys:
+                keys.append(k)
+    var_names = ["GROQ_API_KEY"] + [f"GROQ_API_KEY{i}" for i in range(1, 10)] + [f"GROQ_API_KEY_{i}" for i in range(1, 10)]
+    for env_var in var_names:
+        k = os.getenv(env_var, "").strip()
+        if k.startswith("gsk_") and k not in keys:
+            keys.append(k)
+    return keys
+
+
+def get_nvidia_keys():
+    """Retrieve all available NVIDIA NIM API keys for automatic failover."""
+    keys = []
+    raw_keys = os.getenv("NVIDIA_API_KEYS", "")
+    if raw_keys:
+        for k in raw_keys.split(","):
+            k = k.strip()
+            if k.startswith("nvapi-") and k not in keys:
+                keys.append(k)
+    var_names = ["NVIDIA_META_11B", "NVIDIA_API_KEY"] + [f"NVIDIA_API_KEY{i}" for i in range(1, 10)] + [f"NVIDIA_API_KEY_{i}" for i in range(1, 10)]
+    for env_var in var_names:
+        k = os.getenv(env_var, "").strip()
+        if k.startswith("nvapi-") and k not in keys:
+            keys.append(k)
+    return keys
+
+
 def run_vlm(image, text_prompt):
     image_b64 = pil_to_base64(image)
-    groq_key = os.getenv("GROQ_API_KEY")
+    groq_keys = get_groq_keys()
 
-    # Try Groq ultra-fast LPU Vision API first if key available
-    if groq_key and groq_key.startswith("gsk_"):
+    # Try Groq ultra-fast LPU Vision API with automatic key failover
+    if groq_keys:
         groq_url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {groq_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "qwen/qwen3.6-27b",
-            "reasoning_format": "hidden",
-            "temperature": 0,
-            "max_tokens": 450,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": text_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_b64}"
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-
-        # Try up to 3 times with short sleep if 429 rate limit is hit
-        for attempt in range(3):
-            try:
-                res = requests.post(groq_url, headers=headers, json=payload, timeout=90)
-                if res.status_code == 200:
-                    content = res.json()["choices"][0]["message"]["content"]
-                    if content and content.strip():
-                        print(f"[run_vlm] Groq VLM extraction success! (Attempt {attempt+1})")
-                        return content
-                elif res.status_code == 429:
-                    print(f"[run_vlm] Groq VLM 429 rate limit, waiting 2.5s before retry {attempt+1}/3...")
-                    import time
-                    time.sleep(2.5)
-                else:
-                    print(f"[run_vlm] Groq VLM returned status {res.status_code}: {res.text[:150]}")
-                    break
-            except Exception as ge:
-                print(f"[run_vlm] Groq VLM call exception (attempt {attempt+1}): {ge}")
-                import time
-                time.sleep(1.5)
-
-    # Fallback to NVIDIA NIM API
-    invoke_url = config.NVIDIA_API_URL
-    headers = {
-        "Authorization": f"Bearer {os.getenv('NVIDIA_META_11B')}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "meta/llama-3.2-11b-vision-instruct",
-        "temperature": 0,
-        "max_tokens": 450,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": text_prompt},
+        for idx, key in enumerate(groq_keys):
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "llama-3.2-11b-vision-instruct",
+                "temperature": 0,
+                "max_tokens": 450,
+                "messages": [
                     {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_b64}"
-                        }
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": text_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}"
+                                }
+                            }
+                        ]
                     }
                 ]
             }
-        ]
-    }
-    
-    response = requests.post(
-        invoke_url,
-        headers=headers,
-        json=payload,
-        timeout=120
-    )
 
-    response.raise_for_status()
+            try:
+                res = requests.post(groq_url, headers=headers, json=payload, timeout=45)
+                if res.status_code == 200:
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        print(f"[run_vlm] Groq VLM extraction success with Key #{idx+1}!")
+                        return content
+                elif res.status_code == 429:
+                    print(f"[run_vlm] Groq VLM Key #{idx+1} hit 429 rate limit — switching to next key...")
+                    continue
+                else:
+                    print(f"[run_vlm] Groq VLM Key #{idx+1} returned status {res.status_code}: {res.text[:150]}")
+            except Exception as ge:
+                print(f"[run_vlm] Groq VLM Key #{idx+1} call exception: {ge}")
+                continue
 
-    return response.json()["choices"][0]["message"]["content"]
+    # Fallback to NVIDIA NIM API with multi-key failover
+    nvidia_keys = get_nvidia_keys()
+    if nvidia_keys:
+        invoke_url = config.NVIDIA_API_URL
+        for idx, key in enumerate(nvidia_keys):
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "meta/llama-3.2-11b-vision-instruct",
+                "temperature": 0,
+                "max_tokens": 450,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": text_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+            try:
+                res = requests.post(invoke_url, headers=headers, json=payload, timeout=60)
+                if res.status_code == 200:
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        print(f"[run_vlm] NVIDIA NIM VLM extraction success with Key #{idx+1}!")
+                        return content
+                else:
+                    print(f"[run_vlm] NVIDIA NIM Key #{idx+1} returned status {res.status_code}: {res.text[:150]}")
+            except Exception as ne:
+                print(f"[run_vlm] NVIDIA NIM Key #{idx+1} call exception: {ne}")
+                continue
+
+    raise RuntimeError("All Groq and NVIDIA NIM VLM API keys exhausted or failed.")
 
 
 # ------- JSON helper -------
 
 def parse_vlm_output(text):
     """Safely convert the VLM text response into a Python dict."""
-    # 1. Direct JSON parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    if not text:
+        raise ValueError("Empty VLM response")
 
-    # 2. Find a JSON block anywhere in the text
-    json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except Exception:
-            pass
+    cleaned_text = text.strip()
 
-    # 3. Strip and retry
-    cleaned = text.strip()
+    # 1. Strip markdown ```json ... ``` wrapper if present
+    if "```" in cleaned_text:
+        m_code = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned_text, re.IGNORECASE)
+        if m_code:
+            try:
+                return json.loads(m_code.group(1).strip())
+            except Exception:
+                pass
+
+    # 2. Direct JSON parse
     try:
-        return json.loads(cleaned)
+        return json.loads(cleaned_text)
     except Exception:
         pass
 
-    # 4. Extract after "Here is the output in JSON format:"
-    if "Here is the output in JSON format:" in text:
+    # 3. Find JSON object between outer braces { ... }
+    start_idx = cleaned_text.find('{')
+    end_idx = cleaned_text.rfind('}')
+    if start_idx != -1 and end_idx > start_idx:
+        json_candidate = cleaned_text[start_idx:end_idx+1]
         try:
-            json_part = text.split("Here is the output in JSON format:")[-1].strip()
-            return json.loads(json_part)
+            return json.loads(json_candidate)
         except Exception:
             pass
 
-    # 5. Narrative fallback — model returned prose instead of JSON.
-    #    Extract key field values from natural-language sentences.
-    print("[parse_vlm_output] Narrative response detected — extracting fields via regex")
+    # 4. Narrative fallback — model returned prose instead of JSON.
+    print("[parse_vlm_output] Narrative response detected — extracting fields via strict regex")
     result = {}
     _FIELDS = [
         "certificate_type", "name", "gender", "dob", "aadhaar_number",
@@ -211,22 +245,29 @@ def parse_vlm_output(text):
         "street", "area", "city", "state", "district", "taluk",
         "pincode", "phone_number"
     ]
-    for field in _FIELDS:
-        # pattern: field_name is "VALUE" or field_name: VALUE
-        pattern = rf'"{field}"\s*[:\-]\s*"([^"]+)"'
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            result[field] = m.group(1).strip()
-            continue
-        # looser: "the X is VALUE" sentences
-        label = field.replace("_", "[ _]?")
-        m2 = re.search(rf'{label}[^\w]*(?:is|:)\s*["\']?([A-Za-z0-9][^,\n"\'\.]+)', text, re.IGNORECASE)
-        if m2:
-            result[field] = m2.group(1).strip()
 
-    # Special C/O extraction for father_name if still missing
+    for field in _FIELDS:
+        # Pattern 1: "field_name": "VALUE"
+        p1 = rf'"{field}"\s*[:\-]\s*"([^"]+)"'
+        m1 = re.search(p1, cleaned_text, re.IGNORECASE)
+        if m1:
+            val = m1.group(1).strip()
+            if val.lower() not in {"null", "none", "n/a", "not available"}:
+                result[field] = val
+                continue
+
+        # Pattern 2: "field_name": VALUE
+        p2 = rf'"{field}"\s*[:\-]\s*([^\n,}}]+)'
+        m2 = re.search(p2, cleaned_text, re.IGNORECASE)
+        if m2:
+            val = m2.group(1).strip().strip('"').strip("'")
+            if val.lower() not in {"null", "none", "n/a", "not available"}:
+                result[field] = val
+                continue
+
+    # Special C/O extraction for father_name if missing
     if not result.get("father_name"):
-        m3 = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]+([A-Za-z][^\n,]+)", text, re.IGNORECASE)
+        m3 = re.search(r"(?:C/O|S/O|D/O|W/O)[:\s]+([A-Za-z][^\n,]+)", cleaned_text, re.IGNORECASE)
         if m3:
             result["father_name"] = m3.group(1).strip()
 
