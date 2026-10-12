@@ -5,51 +5,61 @@ import requests
 
 SQL_SETUP_SCRIPT = """-- ============================================================
 -- SUPABASE DATABASE INITIALIZATION SCRIPT (TNeGA ORCHESTRA)
--- Run this in your new Supabase SQL Editor: https://supabase.com/dashboard
+-- Run this in your new Supabase SQL Editor:
+-- https://supabase.com/dashboard/project/cifhffdgeouugiyxrykl/sql/new
 -- ============================================================
 
--- 1. Create user_profiles table
+-- 1. user_profiles: stores 3-tab modal data per user
 CREATE TABLE IF NOT EXISTS public.user_profiles (
     phone_number TEXT PRIMARY KEY,
     profile_data JSONB,
-    updated_at DOUBLE PRECISION
+    updated_at   DOUBLE PRECISION
 );
 
--- 2. Create user_documents table
+-- 2. user_documents: stores uploaded document metadata per user
 CREATE TABLE IF NOT EXISTS public.user_documents (
-    id BIGSERIAL PRIMARY KEY,
+    id           BIGSERIAL PRIMARY KEY,
     phone_number TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    filename TEXT,
+    doc_id       TEXT NOT NULL,
+    filename     TEXT,
     supabase_url TEXT,
-    extracted_data JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    extracted_data TEXT DEFAULT '[]',
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (phone_number, doc_id)
 );
 
--- 3. Create application_payloads table
+-- 3. application_payloads: stores form submission payload per user
 CREATE TABLE IF NOT EXISTS public.application_payloads (
     phone_number TEXT PRIMARY KEY,
-    payload JSONB,
-    updated_at DOUBLE PRECISION,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    payload      JSONB,
+    updated_at   DOUBLE PRECISION,
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Create user_chat_history table
+-- 4. user_chat_history: stores chat messages per user/session
+--    NOTE: uses 'content' and 'session_id'/'stage' columns (not 'message')
 CREATE TABLE IF NOT EXISTS public.user_chat_history (
-    id BIGSERIAL PRIMARY KEY,
+    id           BIGSERIAL PRIMARY KEY,
     phone_number TEXT NOT NULL,
-    role TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    session_id   TEXT DEFAULT '',
+    role         TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    stage        TEXT DEFAULT '',
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Disable Row Level Security (RLS) for direct REST API access
-ALTER TABLE public.user_profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_documents DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.application_payloads DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_chat_history DISABLE ROW LEVEL SECURITY;
+-- Indexes for fast lookups
+CREATE INDEX IF NOT EXISTS idx_chat_phone     ON public.user_chat_history (phone_number);
+CREATE INDEX IF NOT EXISTS idx_chat_session   ON public.user_chat_history (session_id);
+CREATE INDEX IF NOT EXISTS idx_docs_phone     ON public.user_documents (phone_number);
 
--- 5. Create Storage Bucket for Document Uploads
+-- Disable Row Level Security (RLS) for direct REST API access via service key
+ALTER TABLE public.user_profiles        DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_documents       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.application_payloads DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_chat_history    DISABLE ROW LEVEL SECURITY;
+
+-- 5. Storage bucket for document uploads (public read)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('document_uploads', 'document_uploads', true)
 ON CONFLICT (id) DO UPDATE SET public = true;

@@ -109,6 +109,7 @@ export default function App() {
   const [userPhone, setUserPhone]         = useState(() => sessionStorage.getItem("user_phone") || "");
   const [waitingForDocReply, setWaitingForDocReply] = useState(false);
   const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
+  const [currentLanguage] = useState("en");
   const chatEndRef = useRef(null);
 
   // ── Dark mode — always dark ───────────────────────────────────────────────
@@ -180,6 +181,8 @@ export default function App() {
     if (target) {
       setSessionId(target.id);
       setMessages(target.messages || [DEFAULT_WELCOME_MSG]);
+      setShowChecklist(false);   // never carry checklist state across sessions
+      setWaitingForDocReply(false);
       setActivePage("home");
     }
   };
@@ -350,16 +353,24 @@ Just type your question in plain language and I will assist you right away.`,
     const u = (userText || "").toLowerCase().trim();
     const b = (botAnswer || "").toLowerCase().trim();
 
+    // Only trigger on explicit application / document submission intent
+    // Avoid casual words like "yes", "ready", "proceed" that fire on any reply
     const userPhrases = [
-      "yeah we can go", "we can go", "let's go", "lets go", "go ahead", "ready", "ready to apply",
-      "submit documents", "upload documents", "apply now", "start application", "yes proceed", "proceed",
-      "submit application", "start process", "begin application", "i want to apply", "yes", "yeah"
+      "submit documents", "upload documents", "apply now", "start application",
+      "submit application", "start process", "begin application",
+      "i want to apply", "i want to submit", "let's start the application",
+      "ready to submit", "upload my documents", "start uploading",
+      "yeah we can go", "we can go", "go ahead and apply",
     ];
     if (userPhrases.some(p => u.includes(p))) return true;
 
+    // Bot must explicitly mention document upload or checklist — not just any question
     const botPhrases = [
-      "provide the required documents", "proceed with submitting", "submit your residence certificate",
-      "upload your documents", "ready to begin", "upload the required documents", "document upload checklist"
+      "document upload checklist",
+      "upload your documents now",
+      "proceed with submitting your documents",
+      "ready to begin uploading",
+      "click here to upload",
     ];
     if (botPhrases.some(p => b.includes(p))) return true;
 
@@ -623,6 +634,7 @@ Just type your question in plain language and I will assist you right away.`,
                 isProceeding={isChecklistProceeding}
                 onOpenSocket={openAutomationSocket}
                 automationStatus={automationStatus}
+                onResetAutomationStatus={() => setAutomationStatus("")}
               />
             )}
 

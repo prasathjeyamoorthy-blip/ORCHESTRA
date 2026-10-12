@@ -74,8 +74,8 @@ def send_otp(mobile_number: str, country_code: str = "91") -> dict:
             print(f"[OTP Service] Exception during Message Central API call: {e}. Using fallback mock.")
 
     # ── Simulated Fallback OTP ────────────────────────────────────────────────
-    # Generate 6-digit OTP
-    otp_code = str(random.randint(100000, 999999))
+    # Generate 4-digit OTP
+    otp_code = str(random.randint(1000, 9999))
     verification_id = f"local_verif_{int(time.time())}_{random.randint(100, 999)}"
     _LOCAL_OTP_STORE[mobile_number] = {
         "code": otp_code,
@@ -134,12 +134,12 @@ def verify_otp(mobile_number: str, code: str, verification_id: str = "", country
     # ── Simulated Fallback Verification ───────────────────────────────────────
     record = _LOCAL_OTP_STORE.get(mobile_number)
     if not record:
-        # Accept '123456' as master test OTP in demo mode
-        if code == "123456":
+        # Accept '1234' as master test OTP in demo mode
+        if code == "1234":
             return {"success": True, "message": "OTP verified successfully (Master Test OTP)."}
         return {"success": False, "message": "No OTP requested for this phone number."}
 
-    if record["code"] == code or code == "123456":
+    if record["code"] == code or code == "1234":
         _LOCAL_OTP_STORE.pop(mobile_number, None)
         return {"success": True, "message": "OTP verified successfully."}
 

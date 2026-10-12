@@ -344,7 +344,7 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                launch_kwargs = {"headless": False, "slow_mo": 200}
+                launch_kwargs = {"headless": False, "slow_mo": 50}
                 for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
                     if os.path.exists(chrome_path):
                         launch_kwargs["executable_path"] = chrome_path
@@ -376,7 +376,15 @@ class TNeSevaiBackendAgent:
                     page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
                     self.log("Clicking Login...")
                     page.get_by_role("button", name="Login").click()
-                    time.sleep(3)
+                    # Wait for either a login error indicator or successful dashboard
+                    try:
+                        page.wait_for_selector(
+                            "text=does not match the code, text=invalid captcha, text=captcha is incorrect, "
+                            "a[href*='Revenue'], a:has-text('Revenue'), #userDashboard",
+                            timeout=15000
+                        )
+                    except Exception:
+                        pass  # proceed to HTML check below
 
                     # Check if login failed — inspect page HTML for known error strings
                     page_html = page.content().lower()
@@ -414,15 +422,22 @@ class TNeSevaiBackendAgent:
                 
                 page_form = popup_info.value
                 page_form.wait_for_load_state("domcontentloaded")
-                time.sleep(4)
                 page_form.get_by_role("button", name="Proceed").click()
-                time.sleep(4)
+                # Wait for CAN search field to appear — confirms page loaded
+                page_form.wait_for_selector('[id="statusform:aadhar"]', timeout=20000)
                 
                 # --- CAN Search & Aadhaar ---
                 self.log(f"Searching CAN: {self.applicant.get('can_number')}...")
                 page_form.locator('[id="statusform:aadhar"]').fill(self.applicant.get("can_number")) 
                 page_form.get_by_role("button", name="Search").click()
-                time.sleep(8) 
+                # Wait for the result row radio button to appear instead of sleeping 8s
+                try:
+                    page_form.wait_for_selector(
+                        'input[type="radio"], [id*="citRadio"], tr.rich-table-row',
+                        timeout=15000
+                    )
+                except Exception:
+                    pass  # row may already be visible
                 
                 try: page_form.get_by_label("").check() 
                 except: pass 
@@ -435,7 +450,19 @@ class TNeSevaiBackendAgent:
                 except AttributeError: aadhar_input.type(self.applicant.get("aadhar_number"), delay=150)
                 
                 aadhar_input.press("Tab")
-                time.sleep(5)
+                # Wait for DOB field to become active/populated by the portal
+                try:
+                    page_form.wait_for_function(
+                        """() => {
+                            const el = document.querySelector(
+                                'input[id*="citAapDOB"], input[id*="DOBInputDate"]'
+                            );
+                            return el && (el.value.length > 0 || !el.hasAttribute('disabled'));
+                        }""",
+                        timeout=5000
+                    )
+                except Exception:
+                    pass  # proceed with DOB injection regardless
                 
                 # --- DOB Injection ---
                 self.log("Injecting Date of Birth...")
@@ -449,13 +476,23 @@ class TNeSevaiBackendAgent:
                 )
                 self.log(f"Raw Date of Birth from payload: '{dob_val}'")
 
+                # Normalise: if VLM only returned a year (e.g. "2007"), we cannot inject it
+                # as a full date. Log clearly and skip so the portal shows a useful error.
+                if dob_val:
+                    dob_str_clean = str(dob_val).strip()
+                    # Reject bare 4-digit years — portal requires a full date
+                    import re as _re
+                    if _re.fullmatch(r'\d{4}', dob_str_clean):
+                        self.log(f"⚠ WARNING: VLM only extracted year '{dob_str_clean}' for DOB — full date required. Skipping injection.")
+                        dob_val = None
+
                 if dob_val:
                     fmt_dob_slash = self.format_date_for_injection(dob_val, "%d/%m/%Y")
                     fmt_dob_dash_mon = self.format_date_for_injection(dob_val, "%d-%b-%Y")
                     fmt_dob_dash_num = self.format_date_for_injection(dob_val, "%d-%m-%Y")
                     self.log(f"Formatted DOB candidates: '{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}'")
 
-                    # Step 1: Remove readonly attribute via JS immediately to prevent Playwright 30s timeouts
+                    # Step 1: Remove readonly / disabled so Playwright can interact
                     page_form.evaluate("""
                         (() => {
                             document.querySelectorAll('input[id*="citAapDOB"], input[id*="DOBInputDate"], input[id*="DOB"]').forEach(el => {
@@ -465,7 +502,7 @@ class TNeSevaiBackendAgent:
                         })()
                     """)
 
-                    # Step 2: Instant JS evaluation + RichFaces Date object + popup collapse
+                    # Step 2: JS injection — set value + fire all events + RichFaces API
                     js_res = page_form.evaluate(f"""
                         (() => {{
                             const formattedDates = ['{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}', '{dob_val}'];
@@ -530,8 +567,11 @@ class TNeSevaiBackendAgent:
                     """)
                     self.log(f"DOB JS Injection Result: '{js_res}'")
 
-                    # Step 3: Fast locator fallback with short 1s timeout
-                    if not js_res:
+                    # Step 3: Playwright locator fallback — triple-click to select all,
+                    # then type character-by-character to bypass readonly and trigger
+                    # the RichFaces internal change handler properly.
+                    dob_filled = bool(js_res and js_res.strip())
+                    if not dob_filled:
                         dob_selectors = [
                             '[id="statusform:citAapDOBInputDate"]',
                             'input[id*="citAapDOBInputDate"]',
@@ -542,15 +582,27 @@ class TNeSevaiBackendAgent:
                                 loc = page_form.locator(selector)
                                 if loc.count() > 0:
                                     dob_el = loc.first
+                                    # Ensure editable
                                     dob_el.evaluate("el => { el.removeAttribute('readonly'); el.removeAttribute('disabled'); }")
-                                    dob_el.fill(fmt_dob_slash, timeout=1000)
-                                    dob_el.press("Escape")
+                                    dob_el.click()
+                                    # Select all existing text and replace
+                                    dob_el.press("Control+a")
+                                    dob_el.press("Delete")
+                                    # Type the date using press_sequentially — one char at a time,
+                                    # triggering keydown/keyup per character (what RichFaces listens to)
+                                    try:
+                                        dob_el.press_sequentially(fmt_dob_slash, delay=60)
+                                    except AttributeError:
+                                        dob_el.type(fmt_dob_slash, delay=60)
                                     dob_el.press("Tab")
-                                    self.log(f"Filled DOB via fallback locator: '{dob_el.input_value()}'")
-                                    break
+                                    filled_val = dob_el.input_value()
+                                    self.log(f"DOB keyboard-type fallback result: '{filled_val}'")
+                                    if filled_val.strip():
+                                        dob_filled = True
+                                        break
                             except Exception as e:
-                                pass
-                    time.sleep(1)
+                                self.log(f"DOB keyboard fallback error on '{selector}': {e}")
+
                 else:
                     self.log("⚠ WARNING: No Date of Birth found in applicant details payload!")
                 
@@ -567,7 +619,15 @@ class TNeSevaiBackendAgent:
 
                     page_form.locator('[id="statusform:otp_id"]').fill(user_otp)
                     page_form.get_by_role("button", name="Confirm OTP").click()
-                    time.sleep(3)
+                    # Wait for either an OTP error or the form proceeding
+                    try:
+                        page_form.wait_for_selector(
+                            "text=please enter valid otp, text=invalid otp, text=otp does not match, "
+                            "[id*='proceed'], button:has-text('Proceed'), [id*='otp_id']",
+                            timeout=10000
+                        )
+                    except Exception:
+                        pass
 
                     # Check if OTP failed — inspect page HTML for known error strings
                     otp_page_html = page_form.content().lower()
@@ -600,8 +660,8 @@ class TNeSevaiBackendAgent:
                 
                 self.log("OTP Confirmed. Proceeding to Form...")
                 page_form.get_by_role("button", name="Proceed").click()
+                # networkidle already waits for all requests to finish — no extra sleep needed
                 page_form.wait_for_load_state("networkidle")
-                time.sleep(5)
 
                 # --- Fill Form Details ---
                 self.log("Filling Form Details...")
@@ -630,7 +690,22 @@ class TNeSevaiBackendAgent:
                     try: page_form.locator('[id="residence:fatherName"]').fill(self.applicant.get("father_name"))
                     except: pass
 
-                revenue_village_value = self.address.get("area") or self.address.get("village")
+                # Fill gender dropdown if present and empty
+                if self.applicant.get("gender"):
+                    self.safe_select_dropdown(page_form, '[id="residence:genderId"], select[id*="gender"]', self.applicant.get("gender"), "Gender")
+
+                # Fill religion dropdown if present and empty
+                if self.applicant.get("religion"):
+                    self.safe_select_dropdown(page_form, '[id="residence:religionId"], select[id*="religion"]', self.applicant.get("religion"), "Religion")
+
+                # Fill community dropdown if present and empty
+                if self.applicant.get("community"):
+                    self.safe_select_dropdown(page_form, '[id="residence:communityId"], select[id*="community"]', self.applicant.get("community"), "Community")
+
+                revenue_village_value = (
+                    self.address.get("village")
+                    or self.address.get("area")
+                )
                 if is_dropdown_empty('[id="residence:cRvillageListId"]'):
                     if revenue_village_value:
                         success = self.safe_select_dropdown(page_form, '[id="residence:cRvillageListId"]', revenue_village_value, "Revenue Village")
@@ -701,11 +776,17 @@ class TNeSevaiBackendAgent:
 
                 if self.applicant.get("ration_card_no") and is_field_empty('[id="residence:rationCardId"]'):
                     page_form.locator('[id="residence:rationCardId"]').fill(self.applicant.get("ration_card_no"))
-                    time.sleep(2) 
 
                 self.log("Submitting Details Table...")
                 page_form.get_by_role("button", name="Add").click()
-                time.sleep(4)
+                # Wait for the table row to appear confirming the Add was processed
+                try:
+                    page_form.wait_for_selector(
+                        "tr.rich-table-row, [id*='detailsTable'] tr, [id*='residenceTable'] tr",
+                        timeout=8000
+                    )
+                except Exception:
+                    pass
 
                 # Dialog Handler
                 def safe_dialog_handler(dialog):
@@ -715,8 +796,8 @@ class TNeSevaiBackendAgent:
 
                 self.log("Submitting Form...")
                 page_form.get_by_role("button", name="Submit").click()
+                # networkidle already waits — no extra sleep needed
                 page_form.wait_for_load_state("networkidle")
-                time.sleep(6) 
 
                 # --- DOCUMENT UPLOAD HELPER ---
                 def process_document_upload(doc_label, file_source, doc_no=None):
@@ -807,7 +888,11 @@ class TNeSevaiBackendAgent:
                             except Exception as e:
                                 self.log(f"WARNING: Could not select doc type '{doc_label}': {e}")
 
-                        time.sleep(5)
+                        # Wait for the portal to react to the dropdown change
+                        try:
+                            page_form.wait_for_load_state("networkidle", timeout=4000)
+                        except Exception:
+                            pass
 
                         # 2. Fill document number BEFORE file upload (if needed)
                         if doc_no:
@@ -815,16 +900,35 @@ class TNeSevaiBackendAgent:
                             doc_input.click()
                             doc_input.fill(doc_no)
                             doc_input.press("Tab")
-                            time.sleep(5)
+                            # Short wait for portal validation
+                            try:
+                                page_form.wait_for_load_state("networkidle", timeout=3000)
+                            except Exception:
+                                pass
 
                         # 3. Use set_input_files() to attach file WITHOUT opening file explorer
                         page_form.locator("input[type='file']").last.set_input_files(target_path)
-                        time.sleep(8)
+                        # Wait for upload preview/indicator to appear instead of hardcoded 8s
+                        try:
+                            page_form.wait_for_function(
+                                """() => {
+                                    const inputs = document.querySelectorAll("input[type='file']");
+                                    const last = inputs[inputs.length - 1];
+                                    return last && last.files && last.files.length > 0;
+                                }""",
+                                timeout=6000
+                            )
+                        except Exception:
+                            pass
 
                         # 4. Click "Upload" button
                         self.log(f"Clicking Upload for {doc_label}...")
                         page_form.get_by_text("Upload", exact=True).click(force=True)
-                        time.sleep(10)
+                        # Wait for upload to complete — look for success indicator or networkidle
+                        try:
+                            page_form.wait_for_load_state("networkidle", timeout=12000)
+                        except Exception:
+                            pass
                     finally:
                         if temp_path and os.path.exists(temp_path):
                             try:
@@ -903,8 +1007,6 @@ class TNeSevaiBackendAgent:
 
                 # --- FINAL STEP ---
                 self.log("All Documents Uploaded! Navigating to Payment...")
-                time.sleep(3)
-                
                 button_clicked = False
                 for button_name in ["Proceed", "Submit", "Make Payment", "Continue"]:
                     try:
@@ -924,14 +1026,12 @@ class TNeSevaiBackendAgent:
                         except: continue
 
                 self.log("SUCCESS! Payment page reached. Backend job complete.")
-                time.sleep(3)
 
                 # Accept T&C and click Make Payment
                 try:
                     page_form.scroll_into_view_if_needed = lambda: None  # no-op guard
                     # Scroll to bottom to reveal T&C and Make Payment button
                     page_form.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(1.5)
 
                     # Accept Terms & Conditions checkbox
                     try:
@@ -941,7 +1041,6 @@ class TNeSevaiBackendAgent:
                         if not tc_checkbox.is_checked():
                             tc_checkbox.check(force=True)
                             self.log("Terms & Conditions accepted.")
-                        time.sleep(0.5)
                     except Exception as e:
                         self.log(f"T&C checkbox not found or already checked: {e}")
 
@@ -973,7 +1072,6 @@ class TNeSevaiBackendAgent:
                     self.log(f"Payment step error: {e}")
 
                 self.log("User redirected to payment gateway. Backend job complete.")
-                time.sleep(2)
                 browser.close()
 
         except Exception as e:

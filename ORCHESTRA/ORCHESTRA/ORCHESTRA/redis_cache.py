@@ -86,15 +86,14 @@ def set_cache(key: str, value: Any, ttl_seconds: int = 3600) -> bool:
     rest_url, rest_token = _get_rest_credentials()
     if rest_url and rest_token:
         try:
-            url = f"{rest_url}/set/{key}/EX/{ttl_seconds}"
-            headers = {"Authorization": f"Bearer {rest_token}"}
-            resp = requests.post(url, headers=headers, data=val_str, timeout=3.0)
+            # Upstash REST API: POST /pipeline with [["SET", key, value, "EX", ttl]]
+            headers = {"Authorization": f"Bearer {rest_token}", "Content-Type": "application/json"}
+            pipeline_url = f"{rest_url}/pipeline"
+            pipeline_body = [["SET", key, val_str, "EX", ttl_seconds]]
+            resp = requests.post(pipeline_url, headers=headers, json=pipeline_body, timeout=3.0)
             if resp.status_code == 200:
                 return True
-            
-            # Alternative Upstash REST GET format: /set/key/value/EX/3600
-            resp_get = requests.get(f"{rest_url}/set/{key}/{requests.utils.quote(val_str)}/EX/{ttl_seconds}", headers=headers, timeout=3.0)
-            return resp_get.status_code == 200
+            print(f"[Redis Cache] REST SET error ({resp.status_code}): {resp.text[:100]}")
         except Exception as e:
             print(f"[Redis Cache] REST SET error: {e}")
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { MdOutlineCloudUpload, MdDeleteOutline } from "react-icons/md";
-import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader, LuEye, LuEyeOff, LuCalendar } from "react-icons/lu";
+import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader, LuEye, LuEyeOff, LuCalendar, LuUser, LuFileText, LuMapPin, LuRefreshCw, LuZap } from "react-icons/lu";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -474,9 +474,184 @@ function NavButtons({ step, totalSteps, onBack, onNext, onSubmit, onExit, canNex
   );
 }
 
+// ── Returning User Card ───────────────────────────────────────────────────────
+function ReturningUserCard({ profile, docUrls, uploadedFiles, onRunNow, onUpdateDetails, onExit, isExtracting, submitError, onRetry }) {
+  const creds    = profile.credentials    || profile.applicant_details || {};
+  const address  = profile.address_details || {};
+  const applicant = profile.applicant_details || {};
+
+  const docLabels = {
+    aadharCard:     "Aadhaar Card",
+    rationCard:     "Ration Card",
+    photo:          "Photograph",
+    drivingLicense: "Driving License",
+  };
+  const savedDocs = Object.entries(uploadedFiles).filter(([, v]) => v);
+
+  const pill = (label, value) => value ? (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 2,
+      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: "0.625rem", padding: "0.55rem 0.875rem", flex: "1 1 160px",
+    }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "#e0e0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</span>
+    </div>
+  ) : null;
+
+  return (
+    <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a" }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "0.875rem", marginBottom: "1.5rem" }}>
+        <div style={{
+          width: 42, height: 42, borderRadius: "50%", flexShrink: 0,
+          background: "linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.25))",
+          border: "1.5px solid rgba(168,85,247,0.4)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <LuUser size={19} style={{ color: "#c084fc" }} />
+        </div>
+        <div>
+          <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, color: "#fff" }}>
+            Welcome back{applicant.name ? `, ${applicant.name.split(" ")[0]}` : ""}!
+          </h3>
+          <p style={{ margin: "0.2rem 0 0", fontSize: "0.8rem", color: "#666" }}>
+            Your saved profile is ready — no need to fill anything again.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Credentials ── */}
+      <div style={{ marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.625rem" }}>
+          <LuUser size={12} style={{ color: "#666" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.08em" }}>Portal</span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          {pill("Username", creds.username)}
+          {pill("Password", creds.password ? "••••••••" : "")}
+          {pill("CAN Number", creds.can_number)}
+          {pill("Aadhaar", creds.aadhar_number ? `••••••${creds.aadhar_number.slice(-4)}` : "")}
+        </div>
+      </div>
+
+      {/* ── Applicant ── */}
+      {(applicant.name || applicant.dob || applicant.father_name) && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.625rem" }}>
+            <LuFileText size={12} style={{ color: "#666" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.08em" }}>Applicant</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {pill("Name", applicant.name)}
+            {pill("Father / Husband", applicant.father_name)}
+            {pill("Date of Birth", applicant.dob)}
+            {pill("Gender", applicant.gender)}
+          </div>
+        </div>
+      )}
+
+      {/* ── Address ── */}
+      {(address.from_date || address.to_date || address.building_no) && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.625rem" }}>
+            <LuMapPin size={12} style={{ color: "#666" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.08em" }}>Residency</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {pill("From", address.from_date)}
+            {pill("To", address.to_date)}
+            {pill("Building / Door", address.building_no)}
+            {pill("Street", address.street_name)}
+            {pill("Pincode", address.pincode)}
+          </div>
+        </div>
+      )}
+
+      {/* ── Documents ── */}
+      {savedDocs.length > 0 && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.625rem" }}>
+            <LuFileText size={12} style={{ color: "#666" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.08em" }}>Documents</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {savedDocs.map(([id, filename]) => (
+              <div key={id} style={{
+                display: "flex", alignItems: "center", gap: "0.4rem",
+                background: "rgba(52,211,153,0.07)", border: "1px solid rgba(52,211,153,0.22)",
+                borderRadius: "0.5rem", padding: "0.4rem 0.75rem",
+              }}>
+                <LuCheck size={12} style={{ color: "#34d399", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#a3e6c8", fontWeight: 600 }}>{docLabels[id] || id}</span>
+                <span style={{ fontSize: 11, color: "#555", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {filename}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Error ── */}
+      {submitError && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem",
+          background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)",
+          borderRadius: "0.625rem", padding: "0.65rem 0.875rem", marginBottom: "1rem",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#fca5a5", fontSize: "0.8rem" }}>
+            <LuTriangleAlert size={14} /> {submitError}
+          </div>
+          <button onClick={onRetry} style={{
+            background: "#ef4444", color: "#fff", border: "none",
+            borderRadius: "9999px", padding: "0.3rem 0.75rem",
+            fontSize: "0.75rem", fontWeight: 700, cursor: "pointer", flexShrink: 0,
+          }}>Retry</button>
+        </div>
+      )}
+
+      {/* ── Actions ── */}
+      <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end", borderTop: "1px solid #2a2a2a", paddingTop: "1.25rem" }}>
+        <button onClick={onExit} style={{
+          padding: "0.6rem 1.25rem", borderRadius: "9999px",
+          background: "#1c1c1c", color: "#888", border: "1px solid #2a2a2a",
+          fontSize: "0.875rem", fontWeight: 600, cursor: "pointer",
+        }}>Exit</button>
+        <button onClick={onUpdateDetails} style={{
+          padding: "0.6rem 1.25rem", borderRadius: "9999px",
+          background: "transparent", color: "#a0a0a0", border: "1px solid #3a3a3a",
+          fontSize: "0.875rem", fontWeight: 600, cursor: "pointer",
+          display: "flex", alignItems: "center", gap: "0.4rem",
+        }}>
+          <LuRefreshCw size={13} /> Update Details
+        </button>
+        <button
+          onClick={onRunNow}
+          disabled={isExtracting}
+          style={{
+            padding: "0.6rem 1.375rem", borderRadius: "9999px",
+            background: isExtracting ? "#2a2a2a" : "linear-gradient(135deg, #a855f7, #6366f1)",
+            color: isExtracting ? "#555" : "#fff", border: "none",
+            fontSize: "0.875rem", fontWeight: 700, cursor: isExtracting ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", gap: "0.5rem",
+            boxShadow: isExtracting ? "none" : "0 4px 16px rgba(168,85,247,0.35)",
+            transition: "all 0.2s",
+          }}
+        >
+          {isExtracting
+            ? <><LuLoader size={14} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
+            : <><LuZap size={14} /> Run Automation</>
+          }
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function DocumentChecklist({ onProceed, onExit, isProceeding, onOpenSocket, automationStatus, onResetAutomationStatus }) {
   const [step, setStep] = useState(0);
+  const [showForm, setShowForm]           = useState(false); // force form even for returning users
   const [checkedItems, setCheckedItems]   = useState({ aadharCard: false, rationCard: false, photo: false, drivingLicense: false });
   const [expandedItem, setExpandedItem]   = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState({});
@@ -511,14 +686,18 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
 
   const [supabaseDocUrls, setSupabaseDocUrls] = useState({});
 
-  // ── Restore existing user documents from Supabase on mount ───────────────────
+  // ── Restore existing user profile & documents from Supabase on mount ──────────────
   const [savedProfileLoaded, setSavedProfileLoaded] = useState(false);
   const [savedProfile, setSavedProfile] = useState({});
+  const [profileLoading, setProfileLoading] = useState(true); // true until fetch resolves
 
   // ── Restore existing user profile & documents from Supabase on mount ──────────────
   useEffect(() => {
     const userPhone = sessionStorage.getItem("user_phone");
-    if (!userPhone) return;
+    if (!userPhone) {
+      setProfileLoading(false); // no phone — nothing to fetch
+      return;
+    }
 
     fetch(`${import.meta.env.VITE_API_BASE}/user-profile?phone_number=${encodeURIComponent(userPhone)}`)
       .then(res => res.ok ? res.json() : null)
@@ -574,7 +753,8 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
           }
         }
       })
-      .catch(err => console.warn("[User Memory] Error fetching restored user profile:", err));
+      .catch(err => console.warn("[User Memory] Error fetching restored user profile:", err))
+      .finally(() => setProfileLoading(false));
   }, []);
 
   const handleCredChange = (e) => setCredentials({ ...credentials, [e.target.name]: e.target.value });
@@ -596,6 +776,8 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
     setSupabaseDocUrls({});
     setSavedProfileLoaded(false);
     setSavedProfile({});
+    setShowForm(false);
+    setStep(0);
     setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
     setAddressDetails({ from_date: "", to_date: "" });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
@@ -722,13 +904,9 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
 
   // ── Retry: reset all automation state then re-run the full flow ──────────────
   const handleRetryClick = async () => {
-    // Reset step completions so the UI shows fresh progress for the new run
-    setCompletedSteps({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
-    // Reset the parent-held automationStatus so the header shows "Starting automation…"
-    if (onResetAutomationStatus) onResetAutomationStatus();
     setSubmitError(null);
     setIsExtracting(false);
-    // Small delay to let React flush the state resets before starting the new run
+    setBulkResults(null); // ensure automation screen doesn't show while restarting
     await new Promise(r => setTimeout(r, 50));
     await handleProceedClick();
   };
@@ -736,71 +914,107 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
   const handleProceedClick = async () => {
     setSubmitError(null);
     setIsExtracting(true);
-    const extractForm = new FormData();
-    if (rawFiles.aadharCard)     extractForm.append("aadhaar", rawFiles.aadharCard);
-    if (rawFiles.rationCard)     extractForm.append("ration",  rawFiles.rationCard);
-    if (rawFiles.drivingLicense) extractForm.append("driving", rawFiles.drivingLicense);
-    if (rawFiles.photo)          extractForm.append("photo",   rawFiles.photo);
-
-    // Pass pre-extracted JSON data so backend reuses it without calling VLM again
-    if (extractedData.aadharCard)     extractForm.append("pre_aadhaar", JSON.stringify(extractedData.aadharCard));
-    if (extractedData.rationCard)     extractForm.append("pre_ration",  JSON.stringify(extractedData.rationCard));
-    if (extractedData.drivingLicense) extractForm.append("pre_driving", JSON.stringify(extractedData.drivingLicense));
+    // Always reset step indicators at the start of every run
+    setCompletedSteps({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
+    if (onResetAutomationStatus) onResetAutomationStatus();
 
     try {
-      const bulkRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/process-all`, { method: "POST", body: extractForm });
-      if (!bulkRes.ok) throw new Error(`Document extraction failed (HTTP ${bulkRes.status})`);
-      const bulkData = await bulkRes.json();
-      if (!(bulkData.status === "success" && bulkData.result)) throw new Error("Document extraction returned no results.");
-
       const savedApplicant = savedProfile.applicant_details || {};
-      const savedAddress   = savedProfile.address_details || {};
-      const savedSupUrls   = savedProfile.supabase_urls || {};
+      const savedAddress   = savedProfile.address_details   || {};
+      const savedSupUrls   = savedProfile.supabase_urls     || {};
+      const supUrls        = { ...savedSupUrls, ...supabaseDocUrls };
 
-      const orchPaths = bulkData.saved_paths || {};
-      const supUrls   = { ...savedSupUrls, ...(bulkData.supabase_urls || {}), ...supabaseDocUrls };
+      // ── Fast path: returning user with all data already in Supabase ──────────
+      // If we have no new raw files AND we already have extracted data + supabase urls
+      // from a prior run, skip /process-all entirely and build payload directly.
+      const hasNewFiles = Object.values(rawFiles).some(Boolean);
+      const hasStoredDocs = Object.values(supabaseDocUrls).some(Boolean);
+      const hasExtracted  = Object.values(extractedData).some(Boolean);
 
-      setBulkResults(bulkData.result || { combined: savedApplicant, confidence_score: 100 });
-      const c = { ...savedApplicant, ...(bulkData.result?.combined || {}) };
+      let c = { ...savedApplicant };
+
+      if (!hasNewFiles && (hasStoredDocs || hasExtracted)) {
+        // Merge extracted data from restored Supabase docs
+        if (hasExtracted) {
+          Object.values(extractedData).forEach(pages => {
+            if (Array.isArray(pages)) {
+              pages.forEach(page => { if (page && typeof page === "object") Object.assign(c, page); });
+            }
+          });
+        }
+        setBulkResults({ combined: c, confidence_score: 100 });
+      } else {
+        // ── Normal path: new files uploaded — run VLM extraction ────────────────
+        const extractForm = new FormData();
+        if (rawFiles.aadharCard)     extractForm.append("aadhaar", rawFiles.aadharCard);
+        if (rawFiles.rationCard)     extractForm.append("ration",  rawFiles.rationCard);
+        if (rawFiles.drivingLicense) extractForm.append("driving", rawFiles.drivingLicense);
+        if (rawFiles.photo)          extractForm.append("photo",   rawFiles.photo);
+
+        if (extractedData.aadharCard)     extractForm.append("pre_aadhaar", JSON.stringify(extractedData.aadharCard));
+        if (extractedData.rationCard)     extractForm.append("pre_ration",  JSON.stringify(extractedData.rationCard));
+        if (extractedData.drivingLicense) extractForm.append("pre_driving", JSON.stringify(extractedData.drivingLicense));
+
+        // pass OTP-verified phone so backend auto-save works even when card phone is masked
+        const phoneForExtract = sessionStorage.getItem("user_phone") || "";
+        if (phoneForExtract) extractForm.append("phone_number", phoneForExtract);
+
+        const bulkRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/process-all`, { method: "POST", body: extractForm });
+        if (!bulkRes.ok) throw new Error(`Document extraction failed (HTTP ${bulkRes.status})`);
+        const bulkData = await bulkRes.json();
+        if (!(bulkData.status === "success" && bulkData.result)) throw new Error("Document extraction returned no results.");
+
+        const orchPaths = bulkData.saved_paths || {};
+        Object.assign(supUrls, bulkData.supabase_urls || {}, orchPaths);
+        c = { ...savedApplicant, ...(bulkData.result?.combined || {}) };
+        setBulkResults(bulkData.result || { combined: savedApplicant, confidence_score: 100 });
+      }
+
       const aadharNum = (credentials.aadhar_number || c.aadhaar_number || c.aadhar_number || "").replace(/\s/g, "");
+      const userPhone = sessionStorage.getItem("user_phone") || "";
       const payload = {
+        phone_number: userPhone,
         credentials: { username: credentials.username, password: credentials.password },
         applicant_details: {
-          can_number: credentials.can_number || c.can_number || "",
+          can_number:    credentials.can_number    || c.can_number    || "",
           aadhar_number: aadharNum,
-          dob: c.dob || savedApplicant.dob || "",
+          dob:           c.dob           || savedApplicant.dob           || "",
           ration_card_no: c.ration_card_number || c.ration_card_no || savedApplicant.ration_card_no || "",
-          name: c.username || c.name || savedApplicant.name || "",
-          father_name: c.father_name || savedApplicant.father_name || "",
-          gender: c.gender || savedApplicant.gender || "",
-          religion: c.religion || savedApplicant.religion || "",
-          community: c.community || savedApplicant.community || "",
-          mobile_number: c.phone_number || c.mobile_number || savedApplicant.mobile_number || "",
-          email: c.email || savedApplicant.email || ""
+          // combined uses "username" key for name; also check "name" for backward compat
+          name:          c.username      || c.name          || savedApplicant.name          || "",
+          father_name:   c.father_name   || savedApplicant.father_name   || "",
+          gender:        c.gender        || savedApplicant.gender        || "",
+          religion:      c.religion      || savedApplicant.religion      || "",
+          community:     c.community     || savedApplicant.community     || "",
+          mobile_number: userPhone       || c.phone_number  || savedApplicant.mobile_number || "",
+          email:         c.email         || savedApplicant.email         || "",
         },
         address_details: {
-          state: c.state || savedAddress.state || "Tamil Nadu",
-          district: c.district || savedAddress.district || "",
-          village: c.taluk || c.district || savedAddress.village || "",
-          area: c.area || savedAddress.area || "",
-          building_no: c.door_no || c.building_no || savedAddress.building_no || "",
-          street_name: c.street_name || c.area || savedAddress.street_name || "",
-          pincode: c.pincode || savedAddress.pincode || "",
-          from_date: addressDetails.from_date || savedAddress.from_date || "",
-          to_date: addressDetails.to_date || savedAddress.to_date || "",
-          perm_state: c.state || savedAddress.perm_state || "Tamil Nadu",
-          perm_district: c.district || savedAddress.perm_district || "",
-          perm_village: c.taluk || c.district || savedAddress.perm_village || "",
-          perm_building_no: c.door_no || c.building_no || savedAddress.perm_building_no || "",
-          perm_street_name: c.street_name || c.area || savedAddress.perm_street_name || "",
-          perm_pincode: c.pincode || savedAddress.perm_pincode || ""
+          state:            c.state            || savedAddress.state            || "Tamil Nadu",
+          district:         c.district         || savedAddress.district         || "",
+          // village: use extracted village first, then area — never use taluk as village
+          village:          c.village          || c.area    || savedAddress.village || "",
+          area:             c.area             || savedAddress.area             || "",
+          building_no:      c.door_no          || c.building_no || savedAddress.building_no || "",
+          // street_name: never fall back to area — leave blank if genuinely missing
+          street_name:      c.street_name      || c.street  || savedAddress.street_name      || "",
+          pincode:          c.pincode          || savedAddress.pincode          || "",
+          from_date:        addressDetails.from_date || savedAddress.from_date  || "",
+          to_date:          addressDetails.to_date   || savedAddress.to_date    || "",
+          perm_state:       c.state            || savedAddress.perm_state       || "Tamil Nadu",
+          perm_district:    c.district         || savedAddress.perm_district    || "",
+          perm_village:     c.village          || c.area    || savedAddress.perm_village || "",
+          perm_building_no: c.door_no          || c.building_no || savedAddress.perm_building_no || "",
+          perm_street_name: c.street_name      || c.street  || savedAddress.perm_street_name    || "",
+          perm_pincode:     c.pincode          || savedAddress.perm_pincode     || "",
         },
         documents: {
-          photo_path: supUrls.Photo || supUrls.photo || orchPaths.Photo || orchPaths.photo || "",
-          self_decl_path: "",
-          aadhaar_path: supUrls.Aadhaar || supUrls.aadhaar || orchPaths.Aadhaar || orchPaths.aadhaar || "",
-          address_proof_path: supUrls["Driving License"] || supUrls["Ration Card"] || supUrls.driving || supUrls.ration || orchPaths["Driving License"] || orchPaths["Ration Card"] || orchPaths.driving || orchPaths.ration || "",
-          address_doc_no: c.dl_number || savedApplicant.address_doc_no || ""
+          photo_path:         supUrls.Photo              || supUrls.photo          || "",
+          self_decl_path:     "",
+          aadhaar_path:       supUrls.Aadhaar            || supUrls.aadhaar        || "",
+          // address proof: check all possible doc types including "Address Proof"
+          address_proof_path: supUrls["Driving License"] || supUrls["Address Proof"] || supUrls["Ration Card"] || supUrls.driving || supUrls.address || supUrls.ration || "",
+          address_doc_no:     c.dl_number || savedApplicant.address_doc_no || "",
         },
       };
 
@@ -809,13 +1023,44 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
         try { const s = await fetch(`${import.meta.env.VITE_API_BASE}/ws/status`); const d = await s.json(); if (d.connected) break; } catch (_) {}
         await new Promise(r => setTimeout(r, 500));
       }
-      const submitRes = await fetch(`${import.meta.env.VITE_API_BASE}/submit-application`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const submitRes = await fetch(`${import.meta.env.VITE_API_BASE}/submit-application`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       if (!submitRes.ok) throw new Error(`Automation server error (HTTP ${submitRes.status}).`);
     } catch (e) {
       setSubmitError(e.message || "An unexpected error occurred.");
       setIsExtracting(false);
     }
   };
+
+  // ── Loading: wait for Supabase profile fetch before deciding which screen to show ──
+  if (profileLoading) {
+    return (
+      <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 180, gap: "0.75rem" }}>
+        <LuLoader size={18} style={{ color: "#666", animation: "spin 1s linear infinite" }} />
+        <span style={{ color: "#555", fontSize: "0.875rem" }}>Loading your profile…</span>
+      </div>
+    );
+  }
+
+  // ── Returning user fast-path: show saved profile card instead of the form ────
+  if (savedProfileLoaded && !showForm && !bulkResults) {
+    return (
+      <ReturningUserCard
+        profile={savedProfile}
+        docUrls={supabaseDocUrls}
+        uploadedFiles={uploadedFiles}
+        onRunNow={handleProceedClick}
+        onUpdateDetails={() => setShowForm(true)}
+        onExit={onExit}
+        isExtracting={isExtracting}
+        submitError={submitError}
+        onRetry={handleRetryClick}
+      />
+    );
+  }
 
   // ── Success / automation live screen ────────────────────────────────────────
   if (bulkResults) {
@@ -886,46 +1131,46 @@ export default function DocumentChecklist({ onProceed, onExit, isProceeding, onO
 
   return (
     <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", overflow: "visible" }}>
-      <h3 className="cl-title" style={{ marginBottom: "1.5rem", color: "#fff" }}>TNeSevai Application Details</h3>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+        <h3 className="cl-title" style={{ margin: 0, color: "#fff" }}>TNeSevai Application Details</h3>
+        {showForm && savedProfileLoaded && (
+          <button
+            type="button"
+            onClick={() => setShowForm(false)}
+            style={{
+              display: "flex", alignItems: "center", gap: "0.3rem",
+              background: "transparent", border: "none",
+              color: "#666", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer",
+              padding: "0.3rem 0.5rem", borderRadius: "0.4rem",
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = "#a0a0a0"}
+            onMouseLeave={e => e.currentTarget.style.color = "#666"}
+          >
+            <LuChevronLeft size={14} /> Saved Profile
+          </button>
+        )}
+      </div>
 
-      {savedProfileLoaded && (
+      <StepBar current={step} total={STEPS.length} steps={STEPS} />
+
+      {showForm && savedProfileLoaded && (
         <div style={{
-          background: "rgba(52, 211, 153, 0.1)",
-          border: "1px solid rgba(52, 211, 153, 0.3)",
-          borderRadius: "0.75rem",
-          padding: "0.75rem 1rem",
-          marginBottom: "1rem",
-          color: "#34d399",
-          fontSize: "0.85rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.5rem"
+          display: "flex", alignItems: "center", justifyContent: "flex-end",
+          marginBottom: "0.75rem",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span>✓</span> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
-          </div>
           <button
             type="button"
             onClick={handleClearSavedData}
             style={{
-              background: "rgba(239, 68, 68, 0.15)",
-              border: "1px solid rgba(239, 68, 68, 0.4)",
-              color: "#fca5a5",
-              borderRadius: "9999px",
-              padding: "0.3rem 0.75rem",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              cursor: "pointer",
-              flexShrink: 0
+              background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+              color: "#fca5a5", borderRadius: "9999px",
+              padding: "0.3rem 0.75rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer",
             }}
           >
-            Clear &amp; Start Fresh
+            Clear Saved Data
           </button>
         </div>
       )}
-
-      <StepBar current={step} total={STEPS.length} steps={STEPS} />
 
       {/* ── Step 0: Portal Credentials ── */}
       {step === 0 && (

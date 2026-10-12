@@ -148,6 +148,7 @@ async def process_all_documents(
     pre_ration: Optional[str] = Form(None),
     pre_driving: Optional[str] = Form(None),
     pre_caste: Optional[str] = Form(None),
+    phone_number: Optional[str] = Form(None),
 ):
     print("\n🚀 [UploadAgent] Processing all documents in bulk (Supabase Storage)...")
     
@@ -220,7 +221,8 @@ async def process_all_documents(
     try:
         from supabase_db import save_user_document_meta, save_user_profile
         combined_data = result.get("combined", {})
-        user_phone = combined_data.get("phone_number") or ""
+        # Prefer OTP-verified phone passed from frontend; fall back to card-extracted phone
+        user_phone = (phone_number or "").strip() or combined_data.get("phone_number") or ""
         if user_phone:
             for doc_name, s_url in supabase_urls.items():
                 if s_url:
@@ -229,7 +231,9 @@ async def process_all_documents(
                 "applicant_details": combined_data,
                 "supabase_urls": supabase_urls
             })
-            print(f"✓ Auto-saved extracted profile & documents to Supabase for user: {user_phone}")
+            print(f"✓ Auto-saved extracted profile & documents to Supabase for user: ****{user_phone[-4:]}")
+        else:
+            print("[UploadAgent] No phone number available — profile auto-save skipped.")
     except Exception as spe:
         print(f"[UploadAgent] Profile auto-save notice: {spe}")
 

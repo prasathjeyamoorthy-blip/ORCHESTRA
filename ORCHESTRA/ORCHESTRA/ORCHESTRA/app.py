@@ -447,12 +447,51 @@ def ws_status():
     return {"connected": manager.is_connected}
 
 
+@app.get("/automation/captcha-b64")
+def get_captcha_b64():
+    """Return captcha as base64 JSON — used by AutomationModal frontend."""
+    import base64
+    captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
+    if os.path.exists(captcha_path):
+        with open(captcha_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return {"image": f"data:image/png;base64,{b64}"}
+    return {"error": "Captcha not found", "image": ""}
+
+
+@app.get("/api/chat-history")
+def get_chat_history(phone_number: str = "", session_id: str = ""):
+    """Fetch chat history for a user from Supabase."""
+    try:
+        from supabase_db import fetch_user_history
+        history = fetch_user_history(phone_number, session_id=session_id or None)
+        return {"status": "success", "history": history}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "history": []}
+
+
+@app.delete("/api/chat-history")
+def delete_chat_history(phone_number: str = "", session_id: str = ""):
+    """Delete chat history for a user from Supabase."""
+    try:
+        from supabase_db import delete_user_history
+        ok = delete_user_history(phone_number, session_id=session_id or None)
+        return {"status": "success" if ok else "error"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.post("/submit-application")
 async def submit_application(payload: dict):
     try:
         from supabase_db import save_application_payload, save_user_profile
-        save_application_payload(payload)
-        phone_num = payload.get("applicant_details", {}).get("mobile_number") or payload.get("credentials", {}).get("username")
+        # Use OTP-verified phone from payload root; fall back to applicant mobile_number
+        phone_num = (
+            payload.get("phone_number")
+            or payload.get("applicant_details", {}).get("mobile_number")
+            or payload.get("credentials", {}).get("username")
+        )
+        save_application_payload(payload, phone_number=phone_num or "")
         if phone_num:
             save_user_profile(phone_num, payload)
     except Exception as e:
@@ -505,6 +544,39 @@ class VerifyOtpRequest(BaseModel):
     phone_number: str
     code: str
     verification_id: Optional[str] = ""
+
+
+@app.post("/api/user-documents")
+def save_user_document_endpoint(req: dict):
+    """Register a user's uploaded document (filename + Supabase URL + extracted data) in Supabase."""
+    try:
+        from supabase_db import save_user_document_meta
+        phone_number = req.get("phone_number", "")
+        doc_id       = req.get("doc_id", "")
+        filename     = req.get("filename", "")
+        supabase_url = req.get("supabase_url", "")
+        extracted    = req.get("extracted_data", [])
+
+        if not phone_number or not doc_id:
+            return {"status": "error", "message": "phone_number and doc_id are required"}
+
+        save_user_document_meta(phone_number, doc_id, filename, supabase_url, extracted)
+        return {"status": "success", "message": f"Document '{doc_id}' registered for {phone_number[-4:]}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/user-documents")
+def get_user_documents_endpoint(phone_number: str = ""):
+    """Fetch all registered documents for a user from Supabase."""
+    try:
+        from supabase_db import fetch_user_documents
+        if not phone_number:
+            return {"status": "error", "message": "phone_number is required"}
+        docs = fetch_user_documents(phone_number)
+        return {"status": "success", "documents": docs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/send-otp")

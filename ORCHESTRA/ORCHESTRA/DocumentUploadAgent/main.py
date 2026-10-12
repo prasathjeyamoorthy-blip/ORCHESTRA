@@ -1,9 +1,38 @@
 import json
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Optional
 
 import extractor, validator
+    
+
+def _normalise_dob(dob_str: str) -> str:
+    """Normalise any DOB format the VLM returns to DD/MM/YYYY.
+    
+    Handles: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, DD-Mon-YYYY, DD Mon YYYY,
+    bare 4-digit year (returned as-is with a warning).
+    """
+    if not dob_str:
+        return ""
+    s = str(dob_str).strip()
+    # Bare 4-digit year — can't make a full date from it
+    if re.fullmatch(r'\d{4}', s):
+        return s  # return as-is; the portal will reject it — handled in rescert.py
+    fmts = (
+        "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y",
+        "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+        "%d-%b-%Y", "%d/%b/%Y", "%d %b %Y",
+        "%d-%B-%Y", "%d/%B/%Y", "%d %B %Y",
+        "%d/%m/%y", "%d-%m-%y",
+    )
+    for fmt in fmts:
+        try:
+            return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
+        except ValueError:
+            continue
+    return s  # return original if nothing matched
 
 
 def find_certificate(results: list, cert_type: str) -> Optional[dict]:
@@ -147,11 +176,12 @@ def process_documents(
         """Get resolution from document, default to 0 if not available"""
         return doc.get("_resolution", {}).get("total_pixels", 0) if doc else 0
 
-    def _merge_with_resolution_priority(aadhaar, ration, address):
+    def _merge_with_resolution_priority(aadhaar, ration, address, caste=None):
         """Merge documents with priority based on resolution.
-        
-        Documents are sorted by resolution (highest first), and fields are 
+
+        Documents are sorted by resolution (highest first), and fields are
         taken from the highest resolution document that has that field.
+        Caste Certificate contributes religion, community, and caste-specific fields.
         """
         # Create list of (document, resolution, doc_type) sorted by resolution descending
         docs_with_res = []
@@ -161,10 +191,12 @@ def process_documents(
             docs_with_res.append((ration, _get_resolution(ration), "Ration"))
         if address:
             docs_with_res.append((address, _get_resolution(address), "Address"))
-        
+        if caste:
+            docs_with_res.append((caste, _get_resolution(caste), "Caste"))
+
         # Sort by resolution (highest first)
         docs_with_res.sort(key=lambda x: x[1], reverse=True)
-        
+
         print(f"Document priority order (by resolution): {[d[2] for d in docs_with_res]}")
         
         # Helper function to get field value with resolution priority
@@ -180,42 +212,82 @@ def process_documents(
         # Helper function to get field from specific document types (for fields that are document-specific)
         def get_aadhaar_field(field):
             return aadhaar.get(field, "") if aadhaar else ""
-        
+
         def get_ration_field(field):
             return ration.get(field, "") if ration else ""
-        
+
         def get_address_field(field):
             return address.get(field, "") if address else ""
-        
+
+        def get_caste_field(field):
+            return caste.get(field, "") if caste else ""
+
         # Get name from highest resolution document that has it
         name = get_field_priority("name", "username")
-        
+
+        father_name = get_field_priority("father_name")
+        raw_door_no  = get_field_priority("door_no")
+        raw_street   = get_field_priority("street", "street_name")
+
+        # Sanitise: if VLM put the guardian name (C/O / S/O) into address fields, clear them.
+        def _looks_like_name(val):
+            if not val:
+                return False
+            val_lower = val.strip().lower()
+            # Exact match with father_name
+            if father_name and val_lower == father_name.strip().lower():
+                return True
+            # Starts with S. / C. / D. / W. followed by a name (e.g. "S. Ashish")
+            if re.match(r'^[scdw]\.\s+[a-z]', val_lower):
+                return True
+            return False
+
+        door_no     = "" if _looks_like_name(raw_door_no) else raw_door_no
+        street_name = "" if _looks_like_name(raw_street)  else raw_street
+
+        # Build address string from resolution-priority winners (not hardcoded Aadhaar)
+        addr_door   = door_no
+        addr_street = street_name
+        addr_area   = get_field_priority("area")
+        addr_city   = get_field_priority("city")
+        addr_state  = get_field_priority("state")
+        addr_pin    = get_field_priority("pincode")
+        address_parts = [p for p in [addr_door, addr_street, addr_area, addr_city, addr_state] if p]
+        address_str = (", ".join(address_parts) + (" - " + addr_pin if addr_pin else "")) if address_parts else ""
+
+        # dl_number: check address-proof doc first, then check any doc (DL may be classified as Address Proof)
+        dl_number = get_address_field("dl_number") or get_field_priority("dl_number")
+
+        # village: use area from Aadhaar as the best approximation of revenue village
+        village = get_aadhaar_field("area") or get_field_priority("area")
+
         return {
             "username": name,
+            "name":          name,
             "aadhaar_number": get_aadhaar_field("aadhaar_number"),
-            "dl_number": get_address_field("dl_number"),
-            "dob": get_field_priority("dob"),
-            "father_name": get_field_priority("father_name"),
-            "gender": get_field_priority("gender"),
-            "religion": get_field_priority("religion"),
-            "community": get_field_priority("community"),
-            "state": get_field_priority("state"),
-            "district": get_field_priority("district"),
-            "taluk": get_field_priority("taluk"),
-            "phone_number": get_aadhaar_field("phone_number"),
-            "email": get_field_priority("email"),
+            "dl_number":     dl_number,
+            "dob":           _normalise_dob(get_field_priority("dob")),
+            "father_name":   father_name,
+            "gender":        get_field_priority("gender"),
+            "religion":      get_field_priority("religion") or get_caste_field("religion"),
+            "community":     get_field_priority("community") or get_caste_field("community"),
+            "caste":         get_caste_field("caste"),
+            "state":         addr_state,
+            "district":      get_field_priority("district"),
+            "taluk":         get_field_priority("taluk"),
+            "village":       village,
+            "area":          addr_area,
+            "city":          addr_city,
+            "phone_number":  get_aadhaar_field("phone_number"),
+            "email":         get_field_priority("email"),
             "ration_card_number": get_ration_field("number"),
-            "address": (
-                f"{get_aadhaar_field('door_no')}, {get_aadhaar_field('street')}, {get_aadhaar_field('area')}, {get_aadhaar_field('city')}, {get_aadhaar_field('state')} - {get_aadhaar_field('pincode')}"
-                or ""
-            ),
-            "door_no": get_field_priority("door_no"),
-            "street_name": get_field_priority("street", "street_name"),
-            "area": get_field_priority("area"),
-            "pincode": get_field_priority("pincode"),
+            "address":       address_str,
+            "door_no":       door_no,
+            "street_name":   street_name,
+            "pincode":       addr_pin,
         }
 
-    combined = _merge_with_resolution_priority(aadhaar_data, ration_data, address_data)
+    combined = _merge_with_resolution_priority(aadhaar_data, ration_data, address_data, caste_data)
 
     # Get resolution info for each document
     aadhaar_resolution = aadhaar_data.get("_resolution", {}).get("total_pixels", 0)

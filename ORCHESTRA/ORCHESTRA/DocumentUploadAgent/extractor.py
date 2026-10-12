@@ -63,19 +63,6 @@ _session.mount("https://", _adapter)
 _session.mount("http://", _adapter)
 
 
-def pil_to_base64(img):
-    buffer = BytesIO()
-
-    # Compress image before encoding (VERY IMPORTANT)
-    img = img.convert("RGB")
-    img.thumbnail((512, 512))  # optimal size (12k vision tokens) to stay well under 100k TPM rate limit
-    img.save(buffer, format="JPEG", quality=75)
-
-    return base64.b64encode(buffer.getvalue()).decode()
-
-
-# keep run_vlm logic exactly as reference
-
 def get_groq_keys():
     """Retrieve all available Groq API keys from environment variables for automatic failover."""
     keys = []
@@ -110,9 +97,24 @@ def get_nvidia_keys():
     return keys
 
 
+# Cache API keys at module load — avoids re-reading env vars on every VLM call
+_GROQ_KEYS_CACHE: list = get_groq_keys()
+_NVIDIA_KEYS_CACHE: list = get_nvidia_keys()
+
+
+def pil_to_base64(img):
+    """Compress and base64-encode a PIL image for VLM API calls."""
+    buffer = BytesIO()
+    img = img.convert("RGB")
+    img.thumbnail((512, 512))  # optimal size to stay under TPM rate limits
+    img.save(buffer, format="JPEG", quality=75)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
 def run_vlm(image, text_prompt):
     image_b64 = pil_to_base64(image)
-    groq_keys = get_groq_keys()
+    # Use cached keys — no env re-read on every call
+    groq_keys = _GROQ_KEYS_CACHE or get_groq_keys()
 
     # Try Groq ultra-fast LPU Vision API with automatic key failover
     if groq_keys:
@@ -159,7 +161,7 @@ def run_vlm(image, text_prompt):
                 continue
 
     # Fallback to NVIDIA NIM API with multi-key failover
-    nvidia_keys = get_nvidia_keys()
+    nvidia_keys = _NVIDIA_KEYS_CACHE or get_nvidia_keys()
     if nvidia_keys:
         invoke_url = config.NVIDIA_API_URL
         for idx, key in enumerate(nvidia_keys):
@@ -324,11 +326,12 @@ def detect_certificate_type(image):
 
 def _process_pages(pages: list) -> list:
     """Run VLM extraction on a list of PIL page images.
-    
+
     Uses a single combined VLM call per page to detect certificate type
     AND extract fields simultaneously, halving the number of API calls.
+    All pages are processed in parallel via a thread pool.
     """
-    outputs = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Combined prompt: detect type and extract in one shot
     COMBINED_PROMPT = """
@@ -353,6 +356,8 @@ For Residence Certificate use keys: certificate_type, name, father_name, religio
 For Income Certificate use keys: certificate_type, name, father_name, religion, community, dob, address, income, issued_date, issuing_authority
 
 Note: for father_name on Aadhaar, look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon.
+Note: for dob, always return the full date in DD/MM/YYYY format (e.g. "23/02/2007"). If only a year is visible, still return only what is on the card.
+Note: for door_no and street fields, extract only the actual door/building number and street name. Do NOT put the C/O / S/O guardian name into these fields — that name belongs only in father_name.
 
 Return ONLY the JSON object. No explanation.
 """
@@ -360,20 +365,17 @@ Return ONLY the JSON object. No explanation.
     _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
     _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
 
-    for i, page in enumerate(pages):
+    def _process_single_page(i, page):
         print(f"Processing page {i+1}")
-
         resolution = get_image_resolution(page)
         print(f"Page resolution: {resolution['width']}x{resolution['height']} (total pixels: {resolution['total_pixels']})")
 
         try:
-            # Single combined VLM call — detects type and extracts fields together
             raw = run_vlm(page, COMBINED_PROMPT)
             cert_type = "Unknown"
 
-            # Refusal detection: retry with minimal prompt
             if any(p in raw.lower() for p in _REFUSAL_PHRASES):
-                print(f"[VLM] Refusal detected, retrying with minimal prompt...")
+                print(f"[VLM] Refusal detected on page {i+1}, retrying with minimal prompt...")
                 _minimal = (
                     "Read the text on this card image and return a JSON object with these keys: "
                     "certificate_type, name, gender, dob, aadhaar_number, father_name (the name after C/O: or S/O:), "
@@ -384,7 +386,7 @@ Return ONLY the JSON object. No explanation.
 
             data = parse_vlm_output(raw)
             cert_type = data.get("certificate_type", "Unknown")
-            print("Detected:", cert_type)
+            print(f"Page {i+1} detected: {cert_type}")
 
             # --- Aadhaar: two-stage fallback for father_name ---
             _current = data.get("father_name", "") or ""
@@ -398,7 +400,7 @@ Return ONLY the JSON object. No explanation.
                         data["father_name"] = _candidate
                         print(f"[regex fallback] father_name → {data['father_name']}")
 
-                # Stage 2: targeted VLM call directly on the image
+                # Stage 2: targeted VLM call only if still missing
                 if (data.get("father_name") or "").strip().lower() in _MISSING:
                     _father_prompt = (
                         "Look at this Aadhaar card image carefully.\n"
@@ -419,12 +421,27 @@ Return ONLY the JSON object. No explanation.
                         print(f"[father_name VLM fallback failed]: {_fe}")
 
             data["_resolution"] = resolution
-            outputs.append(data)
+            return i, data
 
         except Exception as e:
             print(f"Error processing page {i+1}: {e}")
+            return i, None
 
-    return outputs
+    # Single page — no need for a thread pool
+    if len(pages) == 1:
+        _, result = _process_single_page(0, pages[0])
+        return [result] if result is not None else []
+
+    # Multiple pages — process all in parallel
+    outputs = [None] * len(pages)
+    with ThreadPoolExecutor(max_workers=min(len(pages), 4)) as executor:
+        futures = {executor.submit(_process_single_page, i, page): i for i, page in enumerate(pages)}
+        for future in as_completed(futures):
+            i, data = future.result()
+            if data is not None:
+                outputs[i] = data
+
+    return [d for d in outputs if d is not None]
 
 
 def run_text_llm(text_content: str) -> dict:
@@ -446,13 +463,19 @@ For Address Proof use keys: certificate_type, username, father_name, religion, c
 For PAN use keys: certificate_type, name, father_name, dob, pan_number
 For Voter ID use keys: certificate_type, name, father_name, dob, voter_id
 
+Note: for dob, always return the full date in DD/MM/YYYY format (e.g. "23/02/2007"). If only a year is visible, return what is on the document.
+Note: for door_no and street fields, extract only the actual door/building number and street name. Do NOT put the C/O / S/O guardian name into these fields.
+
 Return ONLY the JSON object. No explanation.
 
 Document Text:
 {text_content}
 """
-    groq_key = os.getenv("GROQ_API_KEY")
-    if groq_key and groq_key.startswith("gsk_"):
+    # Use full key pool (same as run_vlm) instead of only the first key
+    groq_keys = _GROQ_KEYS_CACHE or get_groq_keys()
+    for idx, groq_key in enumerate(groq_keys):
+        if not (groq_key and groq_key.startswith("gsk_")):
+            continue
         try:
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
@@ -465,8 +488,12 @@ Document Text:
             res = requests.post(url, headers=headers, json=payload, timeout=15)
             if res.status_code == 200:
                 return parse_vlm_output(res.json()["choices"][0]["message"]["content"])
+            elif res.status_code == 429:
+                print(f"[run_text_llm] Key #{idx+1} rate limited — trying next key...")
+                continue
         except Exception as e:
-            print(f"[run_text_llm] Groq text LLM failed: {e}")
+            print(f"[run_text_llm] Key #{idx+1} failed: {e}")
+            continue
     return None
 
 

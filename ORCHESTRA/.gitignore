@@ -1,27 +1,54 @@
-# Environment variables (contains sensitive secrets & keys)
-.env
-.env.local
-.env.*.local
-*.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+*.pyd
 
-# Dependencies
-node_modules/
+# Virtual environments
 .venv/
 venv/
-ENV/
 env/
 
-# Build and dist outputs
-dist/
-build/
-*.egg-info/
-__pycache__/
-*.pyc
-
-# Local runtime & log files
-*.log
-last_payload.json
-backend_captcha.png
+# Uploads / runtime generated files
 uploads/
-uploaded_documents/
+temp_uploads/
+tmp_scraper/
+Downloaded_Certificates/
+Playwright/uploaded_documents/
+*/Playwright/uploaded_documents/
+
+# Debug artifacts
+captcha_snapshot.png
+backend_captcha.png
+final_page.png
+
+# Node
+node_modules/
+package-lock.json
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Environment secrets
+.env
+!.env.example
+!.env.production
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Patch / diff files
+*.patch
+diff_names.txt
+status.txt
+
+# Debug logs
+*.txt
+!README.md
