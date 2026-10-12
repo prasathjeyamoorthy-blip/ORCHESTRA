@@ -39,8 +39,8 @@ services:
 
   document-upload:
     build:
-      context: ./ORCHESTRA/DocumentUploadAgent
-      dockerfile: Dockerfile
+      context: ./ORCHESTRA    
+      dockerfile: DocumentUploadAgent/Dockerfile
     container_name: document-upload-agent
     restart: always
     ports:
