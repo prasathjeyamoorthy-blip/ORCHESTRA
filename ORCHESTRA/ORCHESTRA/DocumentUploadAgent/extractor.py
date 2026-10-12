@@ -532,14 +532,7 @@ def extract_from_pdf(pdf_input) -> list:
     if pdf_bytes.startswith(PDF_MAGIC):
         # Fast path: Try extracting digital text directly using pypdf
         try:
-            try:
-                import pypdf
-            except ImportError:
-                for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
-                    if p not in sys.path:
-                        sys.path.append(p)
-                import pypdf
-
+            import pypdf
             reader = pypdf.PdfReader(BytesIO(pdf_bytes))
             extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             if len(extracted_text.strip()) > 50:

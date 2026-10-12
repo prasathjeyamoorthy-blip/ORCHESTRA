@@ -4,10 +4,11 @@ services:
   - type: web
     name: residence-certificate-orchestra
     runtime: python
+    region: singapore
     rootDir: ORCHESTRA/ORCHESTRA/ORCHESTRA
     buildCommand: "pip install -r requirements.txt && python -m playwright install chromium --with-deps"
     startCommand: "uvicorn app:app --host 0.0.0.0 --port $PORT"
-    plan: starter
+    plan: free
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
@@ -56,10 +57,11 @@ services:
   - type: web
     name: residence-certificate-document-upload
     runtime: python
+    region: singapore
     rootDir: ORCHESTRA/ORCHESTRA/DocumentUploadAgent
     buildCommand: "pip install -r requirements.txt && apt-get install -y poppler-utils || true"
     startCommand: "uvicorn app:app --host 0.0.0.0 --port $PORT"
-    plan: starter
+    plan: free
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
@@ -94,6 +96,7 @@ services:
   - type: web
     name: residence-certificate-frontend
     runtime: static
+    region: singapore
     rootDir: ORCHESTRA/frontend
     buildCommand: "npm install && npm run build"
     staticPublishPath: dist

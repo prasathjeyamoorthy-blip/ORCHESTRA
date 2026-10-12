@@ -1,30 +1,66 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  frontend:
-    image: nginx:alpine
-    container_name: react_frontend
-    ports:
-      - "80:80"
-    volumes:
-      - ./frontend/dist:/usr/share/nginx/html
-    restart: always
-    depends_on:
-      - cv_api
-      - playwright_api
 
-  cv_api:
-    build:
-      context: ./ORCHESTRA/DocumentUploadAgent
-    container_name: cv_fastapi
-    ports:
-      - "8000:8000"
-    restart: always
-
-  playwright_api:
+  orchestra:
     build:
       context: ./ORCHESTRA/ORCHESTRA
-    container_name: playwright_fastapi
+      dockerfile: Dockerfile
+    container_name: orchestra-backend
+    restart: always
     ports:
       - "8001:8001"
+    environment:
+      - PORT=8001
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - NVIDIA_API_KEY1=${NVIDIA_API_KEY1}
+      - NVIDIA_API_KEY2=${NVIDIA_API_KEY2}
+      - NVIDIA_API_KEY3=${NVIDIA_API_KEY3}
+      - NVIDIA_META_11B=${NVIDIA_META_11B}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_KEY1=${GROQ_API_KEY1}
+      - GROQ_API_KEY2=${GROQ_API_KEY2}
+      - GROQ_API_KEY3=${GROQ_API_KEY3}
+      - GROQ_API_KEY4=${GROQ_API_KEY4}
+      - GROQ_API_KEY5=${GROQ_API_KEY5}
+      - GROQ_API_KEY6=${GROQ_API_KEY6}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL}
+      - UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN}
+      - MESSAGE_CENTRAL_AUTH_TOKEN=${MESSAGE_CENTRAL_AUTH_TOKEN}
+      - MESSAGE_CENTRAL_CUSTOMER_ID=${MESSAGE_CENTRAL_CUSTOMER_ID}
+      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+    shm_size: "256m"
+
+  document-upload:
+    build:
+      context: ./ORCHESTRA/DocumentUploadAgent
+      dockerfile: Dockerfile
+    container_name: document-upload-agent
     restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - NVIDIA_API_KEY1=${NVIDIA_API_KEY1}
+      - NVIDIA_API_KEY2=${NVIDIA_API_KEY2}
+      - NVIDIA_API_KEY3=${NVIDIA_API_KEY3}
+      - NVIDIA_META_11B=${NVIDIA_META_11B}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_KEY1=${GROQ_API_KEY1}
+      - GROQ_API_KEY2=${GROQ_API_KEY2}
+      - GROQ_API_KEY3=${GROQ_API_KEY3}
+      - GROQ_API_KEY4=${GROQ_API_KEY4}
+      - GROQ_API_KEY5=${GROQ_API_KEY5}
+      - GROQ_API_KEY6=${GROQ_API_KEY6}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - S3_DECLARATION_URL=${S3_DECLARATION_URL}
