@@ -1,13 +1,16 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV and pdf2image (poppler)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip first
+RUN pip install --upgrade pip
 
 # Copy requirements and install (context is ORCHESTRA/ so path is relative to that)
 COPY DocumentUploadAgent/requirements.txt .
