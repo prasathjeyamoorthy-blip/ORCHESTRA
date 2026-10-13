@@ -344,11 +344,12 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                launch_kwargs = {"headless": True, "slow_mo": 50}
-                for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
-                    if os.path.exists(chrome_path):
-                        launch_kwargs["executable_path"] = chrome_path
-                        break
+                launch_kwargs = {
+                    "headless": True,
+                    "slow_mo": 50,
+                    "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                }
+                # Remove executable_path search — use Playwright's bundled Chromium
                 browser = playwright.chromium.launch(**launch_kwargs)
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()

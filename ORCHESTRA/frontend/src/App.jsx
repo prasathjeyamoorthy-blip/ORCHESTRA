@@ -500,31 +500,60 @@ Just type your question in plain language and I will assist you right away.`,
       wsRef.current.close();
     }
     let resolved = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
+
     const connect = () => {
+      attempts++;
       const socket = new WebSocket(`${import.meta.env.VITE_WS_BASE}/ws/automation`);
       let ping;
+
       socket.onopen = () => {
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
         if (!resolved) { resolved = true; resolve(); }
       };
+
       socket.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
-        else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
-        else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-        else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
-        else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
-        else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
-        else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
-        else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
-        else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
-        else                                                   { setAutomationEvent(data); }
+        try {
+          const data = JSON.parse(e.data);
+          if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+          else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+          else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+          else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
+          else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
+          else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+          else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+          else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+          else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
+          else                                                   { setAutomationEvent(data); }
+        } catch (_) {}
       };
-      socket.onclose = () => { clearInterval(ping); setTimeout(() => wsRef.current === socket && connect(), 1000); };
-      socket.onerror = () => { clearInterval(ping); if (!resolved) { resolved = true; resolve(); } };
+
+      socket.onclose = () => {
+        clearInterval(ping);
+        // Reconnect if closed after successful connection
+        if (resolved) {
+          setTimeout(() => wsRef.current === socket && connect(), 2000);
+        } else if (attempts < MAX_ATTEMPTS) {
+          setTimeout(() => connect(), 1000);
+        } else {
+          // Give up trying — resolve anyway so automation can proceed
+          if (!resolved) { resolved = true; resolve(); }
+        }
+      };
+
+      socket.onerror = () => {
+        clearInterval(ping);
+        // Don't resolve on error — let onclose handle retry
+      };
+
       wsRef.current = socket;
     };
+
     connect();
+
+    // Safety timeout — resolve after 8s even if WS never connects
+    setTimeout(() => { if (!resolved) { resolved = true; resolve(); } }, 8000);
   });
 
   const sendWS = (payload) => {
