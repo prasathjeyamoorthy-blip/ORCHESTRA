@@ -123,6 +123,17 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
     setLoading(true);
     setError("");
 
+    // TEST MODE: accept 0000 directly without backend call
+    if (code === "0000") {
+      sessionStorage.setItem("user_phone", phone);
+      setStep("pin");
+      setTimeout(() => {
+        if (pinInputRefs.current[0]) pinInputRefs.current[0].focus();
+      }, 100);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await verifyOtpApi(phone, code, verificationId);
       if (res.success) {
