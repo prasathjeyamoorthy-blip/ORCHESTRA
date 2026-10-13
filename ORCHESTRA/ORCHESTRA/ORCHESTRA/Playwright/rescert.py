@@ -344,7 +344,7 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                launch_kwargs = {"headless": False, "slow_mo": 50}
+                launch_kwargs = {"headless": True, "slow_mo": 50}
                 for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
                     if os.path.exists(chrome_path):
                         launch_kwargs["executable_path"] = chrome_path
