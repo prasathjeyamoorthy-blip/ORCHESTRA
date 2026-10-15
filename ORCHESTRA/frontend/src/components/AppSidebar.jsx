@@ -26,10 +26,9 @@ function NavContent({
   open, activePage, onNavigate, onClose, onToggle,
   userMenu, setUserMenu, userMenuRef,
   chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onClearData
+  onOpenOtpModal, userPhone, onClearData,
+  onShowClearConfirm
 }) {
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const row = {
     display: "flex", alignItems: "center",
     width: "100%", border: "none", background: "transparent",
@@ -187,7 +186,7 @@ function NavContent({
                   {label}
                 </button>
               ))}              <button
-                onClick={() => { setUserMenu(false); setShowClearConfirm(true); }}
+                onClick={() => { setUserMenu(false); onShowClearConfirm(); }}
                 style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start", color: "#f87171" }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.12)"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -198,34 +197,72 @@ function NavContent({
         </div>
       </div>
 
-      {/* ── Clear My Data confirmation modal ── */}
+      {/* ── Clear My Data confirmation modal moved to AppSidebar level ── */}
+    </>
+  );
+}
+
+export function AppSidebar({
+  activePage, onNavigate, drawerOpen, onDrawerClose,
+  chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
+  onOpenOtpModal, userPhone, onClearData
+}) {
+  const [open, setOpen]             = useState(false);
+  const [userMenu, setUserMenu]     = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing]     = useState(false);
+  const userMenuRef                 = useRef(null);
+
+  useEffect(() => {
+    const h = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenu(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  // Close drawer on resize to desktop
+  useEffect(() => {
+    const onResize = () => { if (window.innerWidth >= 768) onDrawerClose?.(); };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [onDrawerClose]);
+
+  const navProps = {
+    open, activePage, onNavigate, userMenu, setUserMenu, userMenuRef,
+    chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
+    onOpenOtpModal, userPhone, onClearData,
+    onShowClearConfirm: () => setShowClearConfirm(true)
+  };
+
+  return (
+    <>
+      {/* ── Desktop sidebar (hidden on mobile) ── */}
+      <div className="sidebar-desktop-spacer" style={{ width: open ? FULL_W : ICON_W, minWidth: open ? FULL_W : ICON_W, flexShrink: 0, transition: "width 0.2s ease, min-width 0.2s ease" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: open ? FULL_W : ICON_W, background: bg, backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", borderRight: `1px solid ${border}`, boxShadow: "4px 0 24px rgba(0,0,0,0.20)", display: "flex", flexDirection: "column", overflow: "hidden", transition: "width 0.2s ease", zIndex: 5 }}>
+          <NavContent {...navProps} open={open} onClose={null} onToggle={() => setOpen(o => !o)} />
+        </div>
+      </div>
+
+      {/* ── Mobile drawer overlay ── */}
+      {drawerOpen && (
+        <div onClick={onDrawerClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", zIndex: 200, animation: "fade-in 0.2s ease" }} />
+      )}
+      {/* Mobile drawer panel */}
+      <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: "16rem", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", zIndex: 201, transform: drawerOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden" }}>
+        <NavContent {...navProps} open={true} onClose={onDrawerClose} onToggle={null} />
+      </div>
+
+      {/* ── Clear My Data confirmation modal — rendered at root level so overflow:hidden doesn't clip it ── */}
       {showClearConfirm && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
-          backdropFilter: "blur(8px)", zIndex: 9999,
-          display: "flex", alignItems: "center", justifyContent: "center"
-        }}>
-          <div style={{
-            background: "#141414", border: "1px solid rgba(239,68,68,0.4)",
-            borderRadius: "1rem", padding: "2rem", maxWidth: "22rem", width: "90%",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.6)"
-          }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#141414", border: "1px solid rgba(239,68,68,0.4)", borderRadius: "1rem", padding: "2rem", maxWidth: "22rem", width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
             <div style={{ fontSize: "2rem", textAlign: "center", marginBottom: "0.75rem" }}>🗑️</div>
-            <h3 style={{ color: "#fff", margin: "0 0 0.5rem", textAlign: "center", fontSize: "1.1rem" }}>
-              Clear All My Data?
-            </h3>
+            <h3 style={{ color: "#fff", margin: "0 0 0.5rem", textAlign: "center", fontSize: "1.1rem" }}>Clear All My Data?</h3>
             <p style={{ color: "#a0a0a0", fontSize: "0.85rem", textAlign: "center", margin: "0 0 1.5rem", lineHeight: 1.5 }}>
-              This will permanently delete your chat history, uploaded documents and saved profile from our servers. This cannot be undone.
+              This will permanently delete your chat history, uploaded documents and saved profile. This cannot be undone.
             </p>
             <div style={{ display: "flex", gap: "0.75rem" }}>
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                disabled={clearing}
-                style={{
-                  flex: 1, padding: "0.65rem", borderRadius: "0.5rem",
-                  background: "#2a2a2a", border: "1px solid #3a3a3a",
-                  color: "#a0a0a0", cursor: "pointer", fontSize: "0.875rem", fontWeight: 600
-                }}>
+              <button onClick={() => setShowClearConfirm(false)} disabled={clearing}
+                style={{ flex: 1, padding: "0.65rem", borderRadius: "0.5rem", background: "#2a2a2a", border: "1px solid #3a3a3a", color: "#a0a0a0", cursor: "pointer", fontSize: "0.875rem", fontWeight: 600 }}>
                 Cancel
               </button>
               <button
@@ -247,68 +284,13 @@ function NavContent({
                   onClearData?.();
                 }}
                 disabled={clearing}
-                style={{
-                  flex: 1, padding: "0.65rem", borderRadius: "0.5rem",
-                  background: clearing ? "#7f1d1d" : "#ef4444",
-                  border: "none", color: "#fff",
-                  cursor: clearing ? "not-allowed" : "pointer",
-                  fontSize: "0.875rem", fontWeight: 700
-                }}>
+                style={{ flex: 1, padding: "0.65rem", borderRadius: "0.5rem", background: clearing ? "#7f1d1d" : "#ef4444", border: "none", color: "#fff", cursor: clearing ? "not-allowed" : "pointer", fontSize: "0.875rem", fontWeight: 700 }}>
                 {clearing ? "Clearing…" : "Yes, Delete"}
               </button>
             </div>
           </div>
         </div>
       )}
-    </>
-  );
-}
-
-export function AppSidebar({
-  activePage, onNavigate, drawerOpen, onDrawerClose,
-  chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onClearData
-}) {
-  const [open, setOpen]         = useState(false);
-  const [userMenu, setUserMenu] = useState(false);
-  const userMenuRef             = useRef(null);
-
-  useEffect(() => {
-    const h = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenu(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
-  // Close drawer on resize to desktop
-  useEffect(() => {
-    const onResize = () => { if (window.innerWidth >= 768) onDrawerClose?.(); };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [onDrawerClose]);
-
-  const navProps = {
-    open, activePage, onNavigate, userMenu, setUserMenu, userMenuRef,
-    chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-    onOpenOtpModal, userPhone, onClearData
-  };
-
-  return (
-    <>
-      {/* ── Desktop sidebar (hidden on mobile) ── */}
-      <div className="sidebar-desktop-spacer" style={{ width: open ? FULL_W : ICON_W, minWidth: open ? FULL_W : ICON_W, flexShrink: 0, transition: "width 0.2s ease, min-width 0.2s ease" }}>
-        <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: open ? FULL_W : ICON_W, background: bg, backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", borderRight: `1px solid ${border}`, boxShadow: "4px 0 24px rgba(0,0,0,0.20)", display: "flex", flexDirection: "column", overflow: "hidden", transition: "width 0.2s ease", zIndex: 5 }}>
-          <NavContent {...navProps} open={open} onClose={null} onToggle={() => setOpen(o => !o)} />
-        </div>
-      </div>
-
-      {/* ── Mobile drawer overlay ── */}
-      {drawerOpen && (
-        <div onClick={onDrawerClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", zIndex: 200, animation: "fade-in 0.2s ease" }} />
-      )}
-      {/* Mobile drawer panel */}
-      <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: "16rem", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", zIndex: 201, transform: drawerOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden" }}>
-        <NavContent {...navProps} open={true} onClose={onDrawerClose} onToggle={null} />
-      </div>
     </>
   );
 }
