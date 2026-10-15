@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Menu, LayoutDashboard, BookOpen,
-  FileCheck, Phone, Settings, User2, ChevronUp, X,
+  FileCheck, Phone, User2, ChevronUp, X,
   Plus, MessageSquare, Trash2, ShieldCheck,
 } from "lucide-react";
 
@@ -172,9 +172,7 @@ function NavContent({
           onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
           <Settings size={20} style={{ flexShrink: 0 }} />
           {open && <span style={{ whiteSpace: "nowrap" }}>Settings</span>}
-        </button>
-
-        <div ref={userMenuRef} style={{ position: "relative" }}>
+        </button>        <div ref={userMenuRef} style={{ position: "relative" }}>
           <button onClick={() => setUserMenu(o => !o)} title={!open ? "User" : undefined}
             style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", background: userMenu ? actBg : "transparent", color: userMenu ? colAct : col }}
             onMouseEnter={e => { if (!userMenu) e.currentTarget.style.background = hover; }}
@@ -194,8 +192,7 @@ function NavContent({
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   {label}
                 </button>
-              ))}
-              <button
+              ))}              <button
                 onClick={() => { setUserMenu(false); setShowClearConfirm(true); }}
                 style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start", color: "#f87171" }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.12)"}
