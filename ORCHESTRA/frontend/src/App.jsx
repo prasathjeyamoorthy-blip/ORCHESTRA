@@ -196,6 +196,20 @@ export default function App() {
     }
   };
 
+  const handleClearData = () => {
+    // Reset all frontend state
+    setChatSessions([]);
+    setMessages([DEFAULT_WELCOME_MSG]);
+    setUserPhone("");
+    setShowChecklist(false);
+    setWaitingForDocReply(false);
+    handleNewChat();
+    try { localStorage.removeItem("tnega_chat_sessions"); } catch (_) {}
+    sessionStorage.removeItem("user_phone");
+    // Show OTP modal so user can log in fresh
+    setShowOtpModal(true);
+  };
+
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     window.history.replaceState({ page: "home" }, "", "#home");
@@ -585,6 +599,7 @@ Just type your question in plain language and I will assist you right away.`,
           onDeleteChat={handleDeleteChat}
           onOpenOtpModal={() => setShowOtpModal(true)}
           userPhone={userPhone}
+          onClearData={handleClearData}
         />
       )}
 

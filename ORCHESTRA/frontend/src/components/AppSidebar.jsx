@@ -26,7 +26,7 @@ function NavContent({
   open, activePage, onNavigate, onClose, onToggle,
   userMenu, setUserMenu, userMenuRef,
   chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone
+  onOpenOtpModal, userPhone, onClearData
 }) {
   const row = {
     display: "flex", alignItems: "center",
@@ -197,7 +197,7 @@ function NavContent({
                 onClick={async () => {
                   setUserMenu(false);
                   if (!userPhone) { alert("No account data to clear — you are not logged in."); return; }
-                  if (!window.confirm("This will permanently delete all your saved data from our servers including documents, chat history and profile. Are you sure?")) return;
+                  if (!window.confirm("This will permanently delete all your saved data — chat history, documents and profile — from our servers. This cannot be undone. Proceed?")) return;
                   try {
                     const base = import.meta.env.VITE_API_BASE;
                     await Promise.all([
@@ -205,9 +205,11 @@ function NavContent({
                       fetch(`${base}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
                       fetch(`${base}/user-profile?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
                     ]);
+                    // Clear all local/session storage
                     sessionStorage.removeItem("user_phone");
-                    alert("All your data has been cleared successfully.");
-                    window.location.reload();
+                    localStorage.removeItem("tnega_chat_sessions");
+                    // Notify App.jsx to reset state
+                    onClearData?.();
                   } catch (e) {
                     alert("Failed to clear data: " + e.message);
                   }
@@ -228,7 +230,7 @@ function NavContent({
   export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
   chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone
+  onOpenOtpModal, userPhone, onClearData
 }) {
   const [open, setOpen]         = useState(false);
   const [userMenu, setUserMenu] = useState(false);
@@ -250,7 +252,7 @@ function NavContent({
   const navProps = {
     open, activePage, onNavigate, userMenu, setUserMenu, userMenuRef,
     chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-    onOpenOtpModal, userPhone
+    onOpenOtpModal, userPhone, onClearData
   };
 
   return (
