@@ -63,23 +63,6 @@ _session.mount("https://", _adapter)
 _session.mount("http://", _adapter)
 
 
-def get_groq_keys():
-    """Retrieve all available Groq API keys from environment variables for automatic failover."""
-    keys = []
-    raw_keys = os.getenv("GROQ_API_KEYS", "")
-    if raw_keys:
-        for k in raw_keys.split(","):
-            k = k.strip()
-            if k.startswith("gsk_") and k not in keys:
-                keys.append(k)
-    var_names = ["GROQ_API_KEY"] + [f"GROQ_API_KEY{i}" for i in range(1, 10)] + [f"GROQ_API_KEY_{i}" for i in range(1, 10)]
-    for env_var in var_names:
-        k = os.getenv(env_var, "").strip()
-        if k.startswith("gsk_") and k not in keys:
-            keys.append(k)
-    return keys
-
-
 def get_nvidia_keys():
     """Retrieve all available NVIDIA NIM API keys for automatic failover."""
     keys = []
@@ -98,7 +81,6 @@ def get_nvidia_keys():
 
 
 # Cache API keys at module load — avoids re-reading env vars on every VLM call
-_GROQ_KEYS_CACHE: list = get_groq_keys()
 _NVIDIA_KEYS_CACHE: list = get_nvidia_keys()
 
 
@@ -113,54 +95,8 @@ def pil_to_base64(img):
 
 def run_vlm(image, text_prompt):
     image_b64 = pil_to_base64(image)
-    # Use cached keys — no env re-read on every call
-    groq_keys = _GROQ_KEYS_CACHE or get_groq_keys()
 
-    # Try Groq ultra-fast LPU Vision API with automatic key failover
-    if groq_keys:
-        groq_url = "https://api.groq.com/openai/v1/chat/completions"
-        for idx, key in enumerate(groq_keys):
-            headers = {
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "llama-3.2-11b-vision-instruct",
-                "temperature": 0,
-                "max_tokens": 450,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": text_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_b64}"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-
-            try:
-                res = requests.post(groq_url, headers=headers, json=payload, timeout=45)
-                if res.status_code == 200:
-                    content = res.json()["choices"][0]["message"]["content"]
-                    if content and content.strip():
-                        print(f"[run_vlm] Groq VLM extraction success with Key #{idx+1}!")
-                        return content
-                elif res.status_code == 429:
-                    print(f"[run_vlm] Groq VLM Key #{idx+1} hit 429 rate limit — switching to next key...")
-                    continue
-                else:
-                    print(f"[run_vlm] Groq VLM Key #{idx+1} returned status {res.status_code}: {res.text[:150]}")
-            except Exception as ge:
-                print(f"[run_vlm] Groq VLM Key #{idx+1} call exception: {ge}")
-                continue
-
-    # Fallback to NVIDIA NIM API with multi-key failover
+    # NVIDIA NIM API with multi-key failover
     nvidia_keys = _NVIDIA_KEYS_CACHE or get_nvidia_keys()
     if nvidia_keys:
         invoke_url = config.NVIDIA_API_URL
@@ -201,7 +137,7 @@ def run_vlm(image, text_prompt):
                 print(f"[run_vlm] NVIDIA NIM Key #{idx+1} call exception: {ne}")
                 continue
 
-    raise RuntimeError("All Groq and NVIDIA NIM VLM API keys exhausted or failed.")
+    raise RuntimeError("All NVIDIA NIM VLM API keys exhausted or failed.")
 
 
 # ------- JSON helper -------
@@ -471,28 +407,28 @@ Return ONLY the JSON object. No explanation.
 Document Text:
 {text_content}
 """
-    # Use full key pool (same as run_vlm) instead of only the first key
-    groq_keys = _GROQ_KEYS_CACHE or get_groq_keys()
-    for idx, groq_key in enumerate(groq_keys):
-        if not (groq_key and groq_key.startswith("gsk_")):
+    # Use NVIDIA NIM for text LLM extraction
+    nvidia_keys = _NVIDIA_KEYS_CACHE or get_nvidia_keys()
+    for idx, key in enumerate(nvidia_keys):
+        if not (key and key.startswith("nvapi-")):
             continue
         try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+            url = config.NVIDIA_API_URL
+            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "meta/llama-3.3-70b-instruct",
                 "temperature": 0,
                 "max_tokens": 450,
                 "messages": [{"role": "user", "content": prompt}]
             }
-            res = requests.post(url, headers=headers, json=payload, timeout=15)
+            res = requests.post(url, headers=headers, json=payload, timeout=30)
             if res.status_code == 200:
                 return parse_vlm_output(res.json()["choices"][0]["message"]["content"])
             elif res.status_code == 429:
-                print(f"[run_text_llm] Key #{idx+1} rate limited — trying next key...")
+                print(f"[run_text_llm] NVIDIA Key #{idx+1} rate limited — trying next key...")
                 continue
         except Exception as e:
-            print(f"[run_text_llm] Key #{idx+1} failed: {e}")
+            print(f"[run_text_llm] NVIDIA Key #{idx+1} failed: {e}")
             continue
     return None
 
