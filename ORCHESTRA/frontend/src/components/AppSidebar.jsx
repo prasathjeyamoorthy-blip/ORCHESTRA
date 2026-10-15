@@ -193,6 +193,30 @@ function NavContent({
                   {label}
                 </button>
               ))}
+              <button
+                onClick={async () => {
+                  setUserMenu(false);
+                  if (!userPhone) { alert("No account data to clear — you are not logged in."); return; }
+                  if (!window.confirm("This will permanently delete all your saved data from our servers including documents, chat history and profile. Are you sure?")) return;
+                  try {
+                    const base = import.meta.env.VITE_API_BASE;
+                    await Promise.all([
+                      fetch(`${base}/api/chat-history?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                      fetch(`${base}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                      fetch(`${base}/user-profile?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                    ]);
+                    sessionStorage.removeItem("user_phone");
+                    alert("All your data has been cleared successfully.");
+                    window.location.reload();
+                  } catch (e) {
+                    alert("Failed to clear data: " + e.message);
+                  }
+                }}
+                style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start", color: "#f87171" }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.12)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                🗑 Clear My Data
+              </button>
             </div>
           )}
         </div>

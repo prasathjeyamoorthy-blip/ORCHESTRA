@@ -470,7 +470,47 @@ def get_chat_history(phone_number: str = "", session_id: str = ""):
         return {"status": "error", "message": str(e), "history": []}
 
 
-@app.delete("/api/chat-history")
+@app.delete("/api/user-documents")
+def delete_user_documents(phone_number: str = ""):
+    """Delete all documents for a user from Supabase."""
+    try:
+        from supabase_db import get_supabase_config, _get_headers
+        if not phone_number:
+            return {"status": "error", "message": "phone_number is required"}
+        url, key = get_supabase_config()
+        if url and key:
+            import requests as _req
+            endpoint = f"{url}/rest/v1/user_documents"
+            params = {"phone_number": f"eq.{phone_number.replace('+','').strip()[-10:]}"}
+            _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/user-profile")
+def delete_user_profile(phone_number: str = ""):
+    """Delete user profile from Supabase."""
+    try:
+        from supabase_db import get_supabase_config, _get_headers
+        if not phone_number:
+            return {"status": "error", "message": "phone_number is required"}
+        phone_clean = phone_number.replace("+", "").strip()[-10:]
+        url, key = get_supabase_config()
+        if url and key:
+            import requests as _req
+            for table in ["user_profiles", "application_payloads"]:
+                endpoint = f"{url}/rest/v1/{table}"
+                params = {"phone_number": f"eq.{phone_clean}"}
+                _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
+        # Also clear in-memory stores
+        from supabase_db import USER_PROFILES, APPLICATION_PAYLOAD_REGISTRY, USER_DOCUMENT_REGISTRY
+        USER_PROFILES.pop(phone_clean, None)
+        APPLICATION_PAYLOAD_REGISTRY.pop(phone_clean, None)
+        USER_DOCUMENT_REGISTRY.pop(phone_clean, None)
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 def delete_chat_history(phone_number: str = "", session_id: str = ""):
     """Delete chat history for a user from Supabase."""
     try:
