@@ -511,6 +511,9 @@ def delete_user_profile(phone_number: str = ""):
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/chat-history")
 def delete_chat_history(phone_number: str = "", session_id: str = ""):
     """Delete chat history for a user from Supabase."""
     try:
