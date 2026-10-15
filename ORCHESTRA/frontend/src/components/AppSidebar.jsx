@@ -166,7 +166,6 @@ function NavContent({
           </button>
         )}
 
-        </div>
         <div ref={userMenuRef} style={{ position: "relative" }}>
           <button onClick={() => setUserMenu(o => !o)} title={!open ? "User" : undefined}
             style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", background: userMenu ? actBg : "transparent", color: userMenu ? colAct : col }}
