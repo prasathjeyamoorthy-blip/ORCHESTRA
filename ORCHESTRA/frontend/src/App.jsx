@@ -516,6 +516,37 @@ Just type your question in plain language and I will assist you right away.`,
     let resolved = false;
     let attempts = 0;
     const MAX_ATTEMPTS = 10;
+    let pollInterval = null;
+
+    const processEvent = (data) => {
+      if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+      else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+      else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+      else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
+      else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
+      else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+      else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+      else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+      else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
+      else                                                   { setAutomationEvent(data); }
+    };
+
+    // Start HTTP polling as reliable fallback
+    let lastEventSeen = null;
+    const startPolling = () => {
+      if (pollInterval) return;
+      console.log("[WS Fallback] Starting HTTP polling for automation status");
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE}/automation/status`);
+          const data = await res.json();
+          if (data.latest_event && JSON.stringify(data.latest_event) !== lastEventSeen) {
+            lastEventSeen = JSON.stringify(data.latest_event);
+            processEvent(data.latest_event);
+          }
+        } catch (_) {}
+      }, 1500);
+    };
 
     const connect = () => {
       attempts++;
@@ -523,51 +554,43 @@ Just type your question in plain language and I will assist you right away.`,
       let ping;
 
       socket.onopen = () => {
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
         if (!resolved) { resolved = true; resolve(); }
       };
 
       socket.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
-          else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
-          else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-          else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
-          else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
-          else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
-          else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
-          else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
-          else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
-          else                                                   { setAutomationEvent(data); }
-        } catch (_) {}
+        try { processEvent(JSON.parse(e.data)); } catch (_) {}
       };
 
       socket.onclose = () => {
         clearInterval(ping);
-        // Reconnect if closed after successful connection
         if (resolved) {
+          // Was connected before — reconnect
           setTimeout(() => wsRef.current === socket && connect(), 2000);
         } else if (attempts < MAX_ATTEMPTS) {
           setTimeout(() => connect(), 1000);
         } else {
-          // Give up trying — resolve anyway so automation can proceed
+          // WebSocket completely failed — use polling
+          startPolling();
           if (!resolved) { resolved = true; resolve(); }
         }
       };
 
-      socket.onerror = () => {
-        clearInterval(ping);
-        // Don't resolve on error — let onclose handle retry
-      };
-
+      socket.onerror = () => { clearInterval(ping); };
       wsRef.current = socket;
     };
 
     connect();
 
-    // Safety timeout — resolve after 8s even if WS never connects
-    setTimeout(() => { if (!resolved) { resolved = true; resolve(); } }, 8000);
+    // After 6s if still not connected, start polling and resolve
+    setTimeout(() => {
+      if (!resolved) {
+        startPolling();
+        resolved = true;
+        resolve();
+      }
+    }, 6000);
   });
 
   const sendWS = (payload) => {

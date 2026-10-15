@@ -447,6 +447,16 @@ def ws_status():
     return {"connected": manager.is_connected}
 
 
+@app.get("/automation/status")
+def get_automation_status():
+    """HTTP polling fallback for automation status — used when WebSocket fails."""
+    latest = manager.latest_response
+    return {
+        "connected": manager.is_connected,
+        "latest_event": latest
+    }
+
+
 @app.get("/automation/captcha-b64")
 def get_captcha_b64():
     """Return captcha as base64 JSON — used by AutomationModal frontend."""
