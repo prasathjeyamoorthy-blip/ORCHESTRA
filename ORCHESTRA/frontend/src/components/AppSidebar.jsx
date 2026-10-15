@@ -272,6 +272,8 @@ function NavContent({
     </>
   );
 }
+
+export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
   chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
   onOpenOtpModal, userPhone, onClearData
