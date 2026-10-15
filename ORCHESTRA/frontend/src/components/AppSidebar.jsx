@@ -28,6 +28,8 @@ function NavContent({
   chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
   onOpenOtpModal, userPhone, onClearData
 }) {
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const row = {
     display: "flex", alignItems: "center",
     width: "100%", border: "none", background: "transparent",
@@ -194,26 +196,7 @@ function NavContent({
                 </button>
               ))}
               <button
-                onClick={async () => {
-                  setUserMenu(false);
-                  if (!userPhone) { alert("No account data to clear — you are not logged in."); return; }
-                  if (!window.confirm("This will permanently delete all your saved data — chat history, documents and profile — from our servers. This cannot be undone. Proceed?")) return;
-                  try {
-                    const base = import.meta.env.VITE_API_BASE;
-                    await Promise.all([
-                      fetch(`${base}/api/chat-history?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
-                      fetch(`${base}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
-                      fetch(`${base}/user-profile?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
-                    ]);
-                    // Clear all local/session storage
-                    sessionStorage.removeItem("user_phone");
-                    localStorage.removeItem("tnega_chat_sessions");
-                    // Notify App.jsx to reset state
-                    onClearData?.();
-                  } catch (e) {
-                    alert("Failed to clear data: " + e.message);
-                  }
-                }}
+                onClick={() => { setUserMenu(false); setShowClearConfirm(true); }}
                 style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start", color: "#f87171" }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.12)"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -223,11 +206,72 @@ function NavContent({
           )}
         </div>
       </div>
+
+      {/* ── Clear My Data confirmation modal ── */}
+      {showClearConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+          backdropFilter: "blur(8px)", zIndex: 9999,
+          display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{
+            background: "#141414", border: "1px solid rgba(239,68,68,0.4)",
+            borderRadius: "1rem", padding: "2rem", maxWidth: "22rem", width: "90%",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.6)"
+          }}>
+            <div style={{ fontSize: "2rem", textAlign: "center", marginBottom: "0.75rem" }}>🗑️</div>
+            <h3 style={{ color: "#fff", margin: "0 0 0.5rem", textAlign: "center", fontSize: "1.1rem" }}>
+              Clear All My Data?
+            </h3>
+            <p style={{ color: "#a0a0a0", fontSize: "0.85rem", textAlign: "center", margin: "0 0 1.5rem", lineHeight: 1.5 }}>
+              This will permanently delete your chat history, uploaded documents and saved profile from our servers. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                disabled={clearing}
+                style={{
+                  flex: 1, padding: "0.65rem", borderRadius: "0.5rem",
+                  background: "#2a2a2a", border: "1px solid #3a3a3a",
+                  color: "#a0a0a0", cursor: "pointer", fontSize: "0.875rem", fontWeight: 600
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!userPhone) { setShowClearConfirm(false); return; }
+                  setClearing(true);
+                  try {
+                    const base = import.meta.env.VITE_API_BASE;
+                    await Promise.all([
+                      fetch(`${base}/api/chat-history?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                      fetch(`${base}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                      fetch(`${base}/user-profile?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                    ]);
+                  } catch (_) {}
+                  sessionStorage.removeItem("user_phone");
+                  localStorage.removeItem("tnega_chat_sessions");
+                  setShowClearConfirm(false);
+                  setClearing(false);
+                  onClearData?.();
+                }}
+                disabled={clearing}
+                style={{
+                  flex: 1, padding: "0.65rem", borderRadius: "0.5rem",
+                  background: clearing ? "#7f1d1d" : "#ef4444",
+                  border: "none", color: "#fff",
+                  cursor: clearing ? "not-allowed" : "pointer",
+                  fontSize: "0.875rem", fontWeight: 700
+                }}>
+                {clearing ? "Clearing…" : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
-
-  export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
   chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
   onOpenOtpModal, userPhone, onClearData
