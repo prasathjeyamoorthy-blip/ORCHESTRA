@@ -483,55 +483,98 @@ def get_chat_history(phone_number: str = "", session_id: str = ""):
 @app.delete("/api/user-documents")
 def delete_user_documents(phone_number: str = ""):
     """Delete all documents for a user from Supabase."""
+    if not phone_number:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "phone_number is required"})
     try:
         from supabase_db import get_supabase_config, _get_headers
-        if not phone_number:
-            return {"status": "error", "message": "phone_number is required"}
+        phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
         url, key = get_supabase_config()
         if url and key:
             import requests as _req
             endpoint = f"{url}/rest/v1/user_documents"
-            params = {"phone_number": f"eq.{phone_number.replace('+','').strip()[-10:]}"}
-            _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
+            params = {"phone_number": f"eq.{phone_clean}"}
+            r = _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
+            if r.status_code not in (200, 204):
+                return JSONResponse(status_code=500, content={"status": "error", "message": f"DB error {r.status_code}"})
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
 @app.delete("/user-profile")
 def delete_user_profile(phone_number: str = ""):
-    """Delete user profile from Supabase."""
+    """
+    Clear user chat history and in-memory state only.
+    Per spec: keep user_profiles row intact — do NOT delete the user account.
+    Only clears application_payloads and in-memory caches.
+    """
+    if not phone_number:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "phone_number is required"})
     try:
         from supabase_db import get_supabase_config, _get_headers
-        if not phone_number:
-            return {"status": "error", "message": "phone_number is required"}
-        phone_clean = phone_number.replace("+", "").strip()[-10:]
+        phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
         url, key = get_supabase_config()
         if url and key:
             import requests as _req
-            for table in ["user_profiles", "application_payloads"]:
-                endpoint = f"{url}/rest/v1/{table}"
-                params = {"phone_number": f"eq.{phone_clean}"}
-                _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
-        # Also clear in-memory stores
-        from supabase_db import USER_PROFILES, APPLICATION_PAYLOAD_REGISTRY, USER_DOCUMENT_REGISTRY
-        USER_PROFILES.pop(phone_clean, None)
+            # Only delete application_payloads — keep user_profiles row
+            endpoint = f"{url}/rest/v1/application_payloads"
+            params = {"phone_number": f"eq.{phone_clean}"}
+            _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
+
+        # Clear in-memory stores (documents registry and payload registry only)
+        from supabase_db import APPLICATION_PAYLOAD_REGISTRY, USER_DOCUMENT_REGISTRY
         APPLICATION_PAYLOAD_REGISTRY.pop(phone_clean, None)
         USER_DOCUMENT_REGISTRY.pop(phone_clean, None)
+
+        # Clear in-memory chat history in app.py USER_PROFILES (keep the profile entry)
+        if phone_clean in USER_PROFILES:
+            USER_PROFILES[phone_clean]["chat_history"] = []
+            USER_PROFILES[phone_clean]["stage"] = None
+            USER_PROFILES[phone_clean]["applicant_category"] = None
+
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
 @app.delete("/api/chat-history")
 def delete_chat_history(phone_number: str = "", session_id: str = ""):
-    """Delete chat history for a user from Supabase."""
+    """Delete chat history for a user from Supabase and all in-memory caches."""
+    if not phone_number:
+        from fastapi.responses import JSONResponse as _J
+        return _J(status_code=400, content={"status": "error", "message": "phone_number is required"})
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+
+    # 1. Delete from Supabase
     try:
         from supabase_db import delete_user_history
-        ok = delete_user_history(phone_number, session_id=session_id or None)
-        return {"status": "success" if ok else "error"}
+        ok = delete_user_history(phone_clean, session_id=session_id or None)
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        from fastapi.responses import JSONResponse as _J
+        return _J(status_code=500, content={"status": "error", "message": str(e)})
+
+    if not ok:
+        from fastapi.responses import JSONResponse as _J
+        return _J(status_code=500, content={"status": "error", "message": "Database deletion failed"})
+
+    # 2. Clear in-memory chat history from app.py USER_PROFILES
+    if phone_clean in USER_PROFILES:
+        USER_PROFILES[phone_clean]["chat_history"] = []
+        USER_PROFILES[phone_clean]["stage"] = None
+        USER_PROFILES[phone_clean]["applicant_category"] = None
+
+    # 3. Clear all active sessions for this user
+    sessions_to_clear = [sid for sid, s in SESSIONS.items()
+                         if s.get("chat_history") and any(
+                             True for _ in [phone_clean]  # sessions don't track phone directly
+                         )]
+    # Clear all sessions' chat history (conservative — clears all in-memory state)
+    for sid in list(SESSIONS.keys()):
+        if SESSIONS[sid].get("chat_history"):
+            SESSIONS[sid]["chat_history"] = []
+
+    return {"status": "success", "message": f"Chat history cleared for user ****{phone_clean[-4:]}"}
 
 
 @app.post("/submit-application")

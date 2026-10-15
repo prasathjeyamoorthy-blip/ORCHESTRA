@@ -98,6 +98,7 @@ export default function App() {
   const [messages, setMessages]   = useState([DEFAULT_WELCOME_MSG]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const isClearingRef = useRef(false); // prevents stale localStorage writes during clear
   const [chatSessions, setChatSessions] = useState(() => {
     try {
       const saved = localStorage.getItem("tnega_chat_sessions");
@@ -163,7 +164,7 @@ export default function App() {
       } else {
         updated = [{ id: sessionId, title, messages }, ...prev];
       }
-      try { localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
+      try { if (!isClearingRef.current) localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
       return updated;
     });
   }, [messages, sessionId]);
@@ -197,6 +198,8 @@ export default function App() {
   };
 
   const handleClearData = () => {
+    // Block localStorage sync effect from resurrecting cleared sessions
+    isClearingRef.current = true;
     // Reset all frontend state
     setChatSessions([]);
     setMessages([DEFAULT_WELCOME_MSG]);
@@ -208,6 +211,8 @@ export default function App() {
     sessionStorage.removeItem("user_phone");
     // Show OTP modal so user can log in fresh
     setShowOtpModal(true);
+    // Re-enable localStorage writes after state settles
+    setTimeout(() => { isClearingRef.current = false; }, 500);
   };
 
   // ── Init ──────────────────────────────────────────────────────────────────

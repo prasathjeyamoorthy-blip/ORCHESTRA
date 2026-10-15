@@ -267,21 +267,41 @@ export function AppSidebar({
               </button>
               <button
                 onClick={async () => {
-                  if (!userPhone) { setShowClearConfirm(false); return; }
+                  if (!userPhone) {
+                    setShowClearConfirm(false);
+                    alert("Please sign in first before clearing data.");
+                    return;
+                  }
                   setClearing(true);
                   try {
                     const base = import.meta.env.VITE_API_BASE;
-                    await Promise.all([
-                      fetch(`${base}/api/chat-history?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
-                      fetch(`${base}/api/user-documents?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
-                      fetch(`${base}/user-profile?phone_number=${encodeURIComponent(userPhone)}`, { method: "DELETE" }),
+                    const phone = encodeURIComponent(userPhone);
+
+                    const [r1, r2, r3] = await Promise.all([
+                      fetch(`${base}/api/chat-history?phone_number=${phone}`, { method: "DELETE" }),
+                      fetch(`${base}/api/user-documents?phone_number=${phone}`, { method: "DELETE" }),
+                      fetch(`${base}/user-profile?phone_number=${phone}`, { method: "DELETE" }),
                     ]);
-                  } catch (_) {}
-                  sessionStorage.removeItem("user_phone");
-                  localStorage.removeItem("tnega_chat_sessions");
-                  setShowClearConfirm(false);
-                  setClearing(false);
-                  onClearData?.();
+
+                    const allOk = [r1, r2, r3].every(r => r.ok);
+                    if (!allOk) {
+                      const bodies = await Promise.all([r1, r2, r3].map(r => r.json().catch(() => ({}))));
+                      const errMsg = bodies.map(b => b.message).filter(Boolean).join("; ") || "Server error";
+                      alert(`Failed to clear data: ${errMsg}. Please try again.`);
+                      setClearing(false);
+                      return;
+                    }
+
+                    // Only clear local state AFTER server confirms success
+                    sessionStorage.removeItem("user_phone");
+                    localStorage.removeItem("tnega_chat_sessions");
+                    setShowClearConfirm(false);
+                    setClearing(false);
+                    onClearData?.();
+                  } catch (e) {
+                    alert(`Network error: ${e.message}. Please check your connection and try again.`);
+                    setClearing(false);
+                  }
                 }}
                 disabled={clearing}
                 style={{ flex: 1, padding: "0.65rem", borderRadius: "0.5rem", background: clearing ? "#7f1d1d" : "#ef4444", border: "none", color: "#fff", cursor: clearing ? "not-allowed" : "pointer", fontSize: "0.875rem", fontWeight: 700 }}>
