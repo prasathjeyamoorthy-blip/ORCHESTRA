@@ -166,13 +166,8 @@ function NavContent({
           </button>
         )}
 
-        <button title={!open ? "Settings" : undefined}
-          style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem" }}
-          onMouseEnter={e => e.currentTarget.style.background = hover}
-          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-          <Settings size={20} style={{ flexShrink: 0 }} />
-          {open && <span style={{ whiteSpace: "nowrap" }}>Settings</span>}
-        </button>        <div ref={userMenuRef} style={{ position: "relative" }}>
+        </div>
+        <div ref={userMenuRef} style={{ position: "relative" }}>
           <button onClick={() => setUserMenu(o => !o)} title={!open ? "User" : undefined}
             style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", background: userMenu ? actBg : "transparent", color: userMenu ? colAct : col }}
             onMouseEnter={e => { if (!userMenu) e.currentTarget.style.background = hover; }}
