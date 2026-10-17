@@ -1,16 +1,18 @@
-FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
+FROM python:3.11-slim
 
 WORKDIR /app
+
+# Upgrade pip first to ensure latest wheel resolution
+RUN pip install --upgrade pip
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Ensure Playwright browsers are fully installed
-RUN playwright install chromium
+# Install Playwright browser and system dependencies
+RUN playwright install chromium --with-deps
 
 COPY . .
 
 EXPOSE 8001
 
-# Mapping port 8000 local to 8001 in Docker
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8001}"]
