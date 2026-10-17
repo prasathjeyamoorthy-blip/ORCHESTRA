@@ -437,20 +437,31 @@ input[type="date"] {
 }
 
 /* Quick replies */
-.quick-replies { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0.25rem 0; }
+.quick-replies { display: flex; gap: 0.625rem; flex-wrap: wrap; padding: 0.5rem 0; }
 .quick-reply-btn {
-  padding: 0.4375rem 1rem;
+  padding: 0.5rem 1.15rem;
   border-radius: 99px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-2);
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: #f1f5f9;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   font-family: inherit;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  backdrop-filter: blur(12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
-.quick-reply-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+.quick-reply-btn:hover {
+  border-color: rgba(56,189,248,0.5);
+  color: #38bdf8;
+  background: rgba(56,189,248,0.12);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(56,189,248,0.2);
+}
 
 /* ── Chat Input ────────────────────────────────────────────────────────────── */
 .input-bar-wrap {
