@@ -36,6 +36,7 @@ const HoverButton = React.forwardRef(({ className, children, onClick, ...props }
   return (
     <button
       ref={(node) => { buttonRef.current = node; if (typeof ref === "function") ref(node); else if (ref) ref.current = node; }}
+      className={className}
       onClick={onClick}
       onPointerMove={handlePointerMove}
       onPointerEnter={() => setIsListening(true)}

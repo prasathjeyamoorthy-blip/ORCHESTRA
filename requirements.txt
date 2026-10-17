@@ -83,3 +83,5 @@ watchfiles==1.1.1
 websockets==16.0
 xxhash==3.6.0
 zstandard==0.25.0
+pdf2image>=1.16.3
+rapidfuzz>=2.15.1

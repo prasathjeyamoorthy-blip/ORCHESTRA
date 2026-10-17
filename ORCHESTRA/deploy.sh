@@ -13,8 +13,7 @@ sudo systemctl start docker
 sudo usermod -aG docker $USER
 
 echo "=== [2/5] Cloning repository ==="
-# Replace with your actual private repo URL
-REPO_URL="${REPO_URL:-https://github.com/YOUR_USERNAME/YOUR_REPO.git}"
+REPO_URL="${REPO_URL:-https://github.com/prasathjeyamoorthy-blip/ORCHESTRA.git}"
 git clone "$REPO_URL" app
 cd app/ORCHESTRA
 

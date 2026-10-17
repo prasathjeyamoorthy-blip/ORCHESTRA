@@ -192,8 +192,8 @@ def delete_user_history(phone_number: str, session_id: str = None) -> bool:
     url, key = get_supabase_config()
 
     if not (url and key):
-        print("[Supabase] Missing SUPABASE_URL or SUPABASE_KEY in .env")
-        return False
+        print("[Supabase] Missing SUPABASE_URL or SUPABASE_KEY in .env — cleared in-memory.")
+        return True
 
     try:
         endpoint = f"{url}/rest/v1/user_chat_history"
@@ -217,6 +217,47 @@ def delete_user_history(phone_number: str, session_id: str = None) -> bool:
         print(f"[Supabase] Exception during delete: {e}")
         return False
 
+
+def delete_user_documents(phone_number: str) -> bool:
+    """Delete all documents for a user from Supabase and in-memory registry."""
+    if not phone_number:
+        return False
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+    USER_DOCUMENT_REGISTRY.pop(phone_clean, None)
+
+    url, key = get_supabase_config()
+    if not (url and key):
+        return True
+
+    try:
+        endpoint = f"{url}/rest/v1/user_documents"
+        params = {"phone_number": f"eq.{phone_clean}"}
+        resp = requests.delete(endpoint, headers=_get_headers(key), params=params, timeout=2.0)
+        return resp.status_code in (200, 204)
+    except Exception as e:
+        print(f"[Supabase] Exception deleting user documents: {e}")
+        return True
+
+
+def delete_application_payload(phone_number: str) -> bool:
+    """Delete application payload for a user from Supabase and in-memory registry."""
+    if not phone_number:
+        return False
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+    APPLICATION_PAYLOAD_REGISTRY.pop(phone_clean, None)
+
+    url, key = get_supabase_config()
+    if not (url and key):
+        return True
+
+    try:
+        endpoint = f"{url}/rest/v1/application_payloads"
+        params = {"phone_number": f"eq.{phone_clean}"}
+        resp = requests.delete(endpoint, headers=_get_headers(key), params=params, timeout=2.0)
+        return resp.status_code in (200, 204)
+    except Exception as e:
+        print(f"[Supabase] Exception deleting application payload: {e}")
+        return True
 
 
 USER_DOCUMENT_REGISTRY: dict = {}

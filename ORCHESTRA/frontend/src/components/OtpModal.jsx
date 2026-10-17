@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { X } from "lucide-react";
 import { sendOtpApi, verifyOtpApi } from "../api/chatApi";
 
 export default function OtpModal({ isOpen, onClose, onSuccess }) {
@@ -123,17 +124,6 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
     setLoading(true);
     setError("");
 
-    // TEST MODE: accept 0000 directly without backend call
-    if (code === "0000") {
-      sessionStorage.setItem("user_phone", phone);
-      setStep("pin");
-      setTimeout(() => {
-        if (pinInputRefs.current[0]) pinInputRefs.current[0].focus();
-      }, 100);
-      setLoading(false);
-      return;
-    }
-
     try {
       const res = await verifyOtpApi(phone, code, verificationId);
       if (res.success) {
@@ -164,7 +154,7 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
       const { setUserPin } = await import("../utils/crypto");
       setUserPin(phone, pinCode);
       onSuccess(phone);
-    } catch (err) {
+    } catch (_err) {
       setError("Failed to initialize security key.");
     }
   };
@@ -193,8 +183,35 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
         border: "1px solid rgba(255, 255, 255, 0.15)",
         borderRadius: "28px", padding: "2.5rem 2.25rem",
         boxShadow: "0 30px 60px -12px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 50px rgba(168, 85, 247, 0.15)",
-        color: "#f8fafc", fontFamily: "'Plus Jakarta Sans', sans-serif"
+        color: "#f8fafc", fontFamily: "'Plus Jakarta Sans', sans-serif",
+        position: "relative"
       }}>
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{
+              position: "absolute",
+              top: "1.25rem",
+              right: "1.25rem",
+              background: "rgba(255, 255, 255, 0.08)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              color: "#94a3b8",
+              cursor: "pointer",
+              borderRadius: "50%",
+              width: "32px",
+              height: "32px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease"
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255, 255, 255, 0.16)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "#94a3b8"; e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)"; }}
+            title="Close"
+          >
+            <X size={16} />
+          </button>
+        )}
         {/* Glass Tag Pill */}
         <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.5rem" }}>
           <span style={{

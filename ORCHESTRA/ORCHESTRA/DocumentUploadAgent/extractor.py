@@ -63,6 +63,36 @@ _session.mount("https://", _adapter)
 _session.mount("http://", _adapter)
 
 
+def pil_to_base64(img):
+    buffer = BytesIO()
+
+    # Compress image before encoding with high quality and 1280x1280 to prevent OCR/VLM hallucinations
+    img = img.convert("RGB")
+    img.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
+    img.save(buffer, format="JPEG", quality=88)
+
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+# keep run_vlm logic exactly as reference
+
+def get_groq_keys():
+    """Retrieve all available Groq API keys from environment variables for automatic failover."""
+    keys = []
+    raw_keys = os.getenv("GROQ_API_KEYS", "")
+    if raw_keys:
+        for k in raw_keys.split(","):
+            k = k.strip()
+            if k.startswith("gsk_") and k not in keys:
+                keys.append(k)
+    var_names = ["GROQ_API_KEY"] + [f"GROQ_API_KEY{i}" for i in range(1, 10)] + [f"GROQ_API_KEY_{i}" for i in range(1, 10)]
+    for env_var in var_names:
+        k = os.getenv(env_var, "").strip()
+        if k.startswith("gsk_") and k not in keys:
+            keys.append(k)
+    return keys
+
+
 def get_nvidia_keys():
     """Retrieve all available NVIDIA NIM API keys for automatic failover."""
     keys = []
@@ -80,24 +110,11 @@ def get_nvidia_keys():
     return keys
 
 
-# Cache API keys at module load — avoids re-reading env vars on every VLM call
-_NVIDIA_KEYS_CACHE: list = get_nvidia_keys()
-
-
-def pil_to_base64(img):
-    """Compress and base64-encode a PIL image for VLM API calls."""
-    buffer = BytesIO()
-    img = img.convert("RGB")
-    img.thumbnail((512, 512))  # optimal size to stay under TPM rate limits
-    img.save(buffer, format="JPEG", quality=75)
-    return base64.b64encode(buffer.getvalue()).decode()
-
-
 def run_vlm(image, text_prompt):
     image_b64 = pil_to_base64(image)
 
     # NVIDIA NIM API with multi-key failover
-    nvidia_keys = _NVIDIA_KEYS_CACHE or get_nvidia_keys()
+    nvidia_keys = get_nvidia_keys()
     if nvidia_keys:
         invoke_url = config.NVIDIA_API_URL
         for idx, key in enumerate(nvidia_keys):
@@ -137,13 +154,87 @@ def run_vlm(image, text_prompt):
                 print(f"[run_vlm] NVIDIA NIM Key #{idx+1} call exception: {ne}")
                 continue
 
-    raise RuntimeError("All NVIDIA NIM VLM API keys exhausted or failed.")
+    raise RuntimeError("All Groq and NVIDIA NIM VLM API keys exhausted or failed.")
 
 
-# ------- JSON helper -------
+# ------- Anti-hallucination sanitization & JSON helper -------
+
+def sanitize_extracted_data(data: dict) -> dict:
+    """Universal anti-hallucination post-processor and data sanitizer."""
+    if not isinstance(data, dict):
+        return data
+
+    cert_type = str(data.get("certificate_type", "")).strip()
+
+    # Clean strings and strip empty/null phrases
+    _EMPTY_PHRASES = {"null", "none", "n/a", "na", "-", "--", "not available", "not found", "unknown", "nil"}
+    for k, v in list(data.items()):
+        if isinstance(v, str):
+            cleaned = v.strip()
+            data[k] = "" if cleaned.lower() in _EMPTY_PHRASES else cleaned
+
+    # 1. Name Sanitization: remove honorifics / prefixes
+    name = data.get("name", "")
+    if name and isinstance(name, str):
+        name = re.sub(r"^(?:Mr\.|Mrs\.|Ms\.|Shri|Smt\.?|Thiru|Selvi|To)\s+", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"[\.,]+$", "", name).strip()
+        name = re.sub(r"\s+", " ", name)
+        data["name"] = name
+
+    # 2. Father's Name Sanitization
+    father_name = data.get("father_name", "")
+    if father_name and isinstance(father_name, str):
+        father_name = re.sub(r"^(?:C/O:?|S/O:?|D/O:?|W/O:?|Father(?:\x27s)?\s*Name:?)\s*", "", father_name, flags=re.IGNORECASE)
+        father_name = re.sub(r"[\.,]+$", "", father_name).strip()
+        father_name = re.sub(r"\s+", " ", father_name)
+        # Father's name cannot be identical to the applicant name
+        if name and father_name.lower() == name.lower():
+            father_name = ""
+        # Discard generic placeholder words
+        if father_name.lower() in {"father", "name", "father name", "husband", "son", "daughter"}:
+            father_name = ""
+        data["father_name"] = father_name
+
+    # 3. Pincode Sanitization: extract exact 6-digit Indian postal code
+    pincode = str(data.get("pincode", "")).strip()
+    if pincode:
+        m_pin = re.search(r"\b([1-9][0-9]{5})\b", pincode)
+        data["pincode"] = m_pin.group(1) if m_pin else ""
+
+    # 4. DOB Normalization to DD/MM/YYYY
+    dob = str(data.get("dob", "")).strip()
+    if dob:
+        m_dob1 = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", dob)
+        m_dob2 = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", dob)
+        if m_dob1:
+            d, m, y = m_dob1.groups()
+            data["dob"] = f"{int(d):02d}/{int(m):02d}/{y}"
+        elif m_dob2:
+            y, m, d = m_dob2.groups()
+            data["dob"] = f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 5. Anti-hallucination for Aadhaar / Driving License / PAN / Voter ID:
+    # These documents never specify religion or community
+    if any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter"]):
+        if "religion" in data:
+            data["religion"] = ""
+        if "community" in data:
+            data["community"] = ""
+
+    # 6. Address hygiene: ensure father/applicant name or C/O are not echoed in door_no/street
+    f_val = (data.get("father_name") or "").lower()
+    n_val = (data.get("name") or "").lower()
+    for addr_key in ["door_no", "street", "area", "city", "street_name", "building_no"]:
+        val = str(data.get(addr_key, "")).strip()
+        val_lower = val.lower()
+        if (f_val and val_lower == f_val) or (n_val and val_lower == n_val) or any(bad in val_lower for bad in ["c/o", "s/o", "d/o", "w/o"]):
+            data[addr_key] = ""
+
+    return data
+
 
 def parse_vlm_output(text):
-    """Safely convert the VLM text response into a Python dict."""
+    """Safely convert the VLM text response into a Python dict and sanitize it."""
     if not text:
         raise ValueError("Empty VLM response")
 
@@ -154,13 +245,15 @@ def parse_vlm_output(text):
         m_code = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned_text, re.IGNORECASE)
         if m_code:
             try:
-                return json.loads(m_code.group(1).strip())
+                parsed = json.loads(m_code.group(1).strip())
+                return sanitize_extracted_data(parsed)
             except Exception:
                 pass
 
     # 2. Direct JSON parse
     try:
-        return json.loads(cleaned_text)
+        parsed = json.loads(cleaned_text)
+        return sanitize_extracted_data(parsed)
     except Exception:
         pass
 
@@ -170,7 +263,8 @@ def parse_vlm_output(text):
     if start_idx != -1 and end_idx > start_idx:
         json_candidate = cleaned_text[start_idx:end_idx+1]
         try:
-            return json.loads(json_candidate)
+            parsed = json.loads(json_candidate)
+            return sanitize_extracted_data(parsed)
         except Exception:
             pass
 
@@ -185,8 +279,10 @@ def parse_vlm_output(text):
     ]
 
     for field in _FIELDS:
-        # Pattern 1: "field_name": "VALUE"
-        p1 = rf'"{field}"\s*[:\-]\s*"([^"]+)"'
+        variants = [re.escape(field), re.escape(f'"{field}"'), re.escape(field.replace("_", " "))]
+        var_pat = "|".join(variants)
+        # Pattern 1: field: "VALUE"
+        p1 = rf'(?:^|[\n,{{])\s*(?:{var_pat})\s*[:\-]\s*"([^"\n]+)"'
         m1 = re.search(p1, cleaned_text, re.IGNORECASE)
         if m1:
             val = m1.group(1).strip()
@@ -194,8 +290,8 @@ def parse_vlm_output(text):
                 result[field] = val
                 continue
 
-        # Pattern 2: "field_name": VALUE
-        p2 = rf'"{field}"\s*[:\-]\s*([^\n,}}]+)'
+        # Pattern 2: field: VALUE
+        p2 = rf'(?:^|[\n,{{])\s*(?:{var_pat})\s*[:\-]\s*([^\n,}}]+)'
         m2 = re.search(p2, cleaned_text, re.IGNORECASE)
         if m2:
             val = m2.group(1).strip().strip('"').strip("'")
@@ -209,12 +305,32 @@ def parse_vlm_output(text):
         if m3:
             result["father_name"] = m3.group(1).strip()
 
+    # Fallback: parse door_no, street, area from full address string if missing
+    raw_addr = result.get("address", "")
+    if raw_addr and isinstance(raw_addr, str):
+        addr_parts = [p.strip() for p in raw_addr.split(",") if p.strip()]
+        if addr_parts:
+            if not result.get("door_no"):
+                p0 = addr_parts[0]
+                if not any(bad in p0.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
+                    result["door_no"] = p0
+            if len(addr_parts) > 1 and not result.get("street"):
+                p1 = addr_parts[1]
+                if not any(bad in p1.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
+                    result["street"] = p1
+            if len(addr_parts) > 2 and not result.get("area"):
+                p2 = addr_parts[2]
+                if not any(bad in p2.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
+                    result["area"] = p2
+
     if result:
         result.setdefault("certificate_type", "Aadhaar")
-        print(f"[parse_vlm_output] Narrative extraction result: {result}")
-        return result
+        sanitized = sanitize_extracted_data(result)
+        print(f"[parse_vlm_output] Narrative extraction result: {sanitized}")
+        return sanitized
 
     raise ValueError(f"Failed to parse VLM output as JSON: {text}")
+
 
 
 # ---------- extraction logic ----------
@@ -262,14 +378,13 @@ def detect_certificate_type(image):
 
 def _process_pages(pages: list) -> list:
     """Run VLM extraction on a list of PIL page images.
-
+    
     Uses a single combined VLM call per page to detect certificate type
     AND extract fields simultaneously, halving the number of API calls.
-    All pages are processed in parallel via a thread pool.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    outputs = []
 
-    # Combined prompt: detect type and extract in one shot
+    # Combined prompt: detect type and extract in one shot with strict anti-hallucination constraints
     COMBINED_PROMPT = """
 Look at this document image and do two things in one response:
 
@@ -279,7 +394,13 @@ Look at this document image and do two things in one response:
 
 2. Extract all relevant fields based on the type.
 
-Return a single JSON object. Always include "certificate_type" as the first key.
+CRITICAL ANTI-HALLUCINATION RULES:
+- Extract ONLY facts explicitly and visibly printed on the document image.
+- NEVER guess, assume, estimate, or extrapolate any values.
+- If any field is NOT explicitly visible on the document, set its value to "" (empty string).
+- For Aadhaar, Driving License, PAN, or Voter ID cards, NEVER invent religion or community. Always set them to "".
+- For father_name on Aadhaar: look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon. NEVER set father_name equal to the applicant's own name.
+- Return a single JSON object. Always include "certificate_type" as the first key.
 
 For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, religion, community, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
 For Ration Card use keys: certificate_type, name, mother_name, number, district, taluk, state
@@ -291,27 +412,27 @@ For Caste Certificate use keys: certificate_type, name, father_name, mother_name
 For Residence Certificate use keys: certificate_type, name, father_name, religion, community, gender, address, door_no, street, area, city, state, pincode, taluk
 For Income Certificate use keys: certificate_type, name, father_name, religion, community, dob, address, income, issued_date, issuing_authority
 
-Note: for father_name on Aadhaar, look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon.
-Note: for dob, always return the full date in DD/MM/YYYY format (e.g. "23/02/2007"). If only a year is visible, still return only what is on the card.
-Note: for door_no and street fields, extract only the actual door/building number and street name. Do NOT put the C/O / S/O guardian name into these fields — that name belongs only in father_name.
-
 Return ONLY the JSON object. No explanation.
 """
+
 
     _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
     _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
 
-    def _process_single_page(i, page):
+    for i, page in enumerate(pages):
         print(f"Processing page {i+1}")
+
         resolution = get_image_resolution(page)
         print(f"Page resolution: {resolution['width']}x{resolution['height']} (total pixels: {resolution['total_pixels']})")
 
         try:
+            # Single combined VLM call — detects type and extracts fields together
             raw = run_vlm(page, COMBINED_PROMPT)
             cert_type = "Unknown"
 
+            # Refusal detection: retry with minimal prompt
             if any(p in raw.lower() for p in _REFUSAL_PHRASES):
-                print(f"[VLM] Refusal detected on page {i+1}, retrying with minimal prompt...")
+                print(f"[VLM] Refusal detected, retrying with minimal prompt...")
                 _minimal = (
                     "Read the text on this card image and return a JSON object with these keys: "
                     "certificate_type, name, gender, dob, aadhaar_number, father_name (the name after C/O: or S/O:), "
@@ -322,7 +443,7 @@ Return ONLY the JSON object. No explanation.
 
             data = parse_vlm_output(raw)
             cert_type = data.get("certificate_type", "Unknown")
-            print(f"Page {i+1} detected: {cert_type}")
+            print("Detected:", cert_type)
 
             # --- Aadhaar: two-stage fallback for father_name ---
             _current = data.get("father_name", "") or ""
@@ -336,7 +457,7 @@ Return ONLY the JSON object. No explanation.
                         data["father_name"] = _candidate
                         print(f"[regex fallback] father_name → {data['father_name']}")
 
-                # Stage 2: targeted VLM call only if still missing
+                # Stage 2: targeted VLM call directly on the image
                 if (data.get("father_name") or "").strip().lower() in _MISSING:
                     _father_prompt = (
                         "Look at this Aadhaar card image carefully.\n"
@@ -357,79 +478,337 @@ Return ONLY the JSON object. No explanation.
                         print(f"[father_name VLM fallback failed]: {_fe}")
 
             data["_resolution"] = resolution
-            return i, data
+            outputs.append(data)
 
         except Exception as e:
             print(f"Error processing page {i+1}: {e}")
-            return i, None
 
-    # Single page — no need for a thread pool
-    if len(pages) == 1:
-        _, result = _process_single_page(0, pages[0])
-        return [result] if result is not None else []
+    return outputs
 
-    # Multiple pages — process all in parallel
-    outputs = [None] * len(pages)
-    with ThreadPoolExecutor(max_workers=min(len(pages), 4)) as executor:
-        futures = {executor.submit(_process_single_page, i, page): i for i, page in enumerate(pages)}
-        for future in as_completed(futures):
-            i, data = future.result()
-            if data is not None:
-                outputs[i] = data
 
-    return [d for d in outputs if d is not None]
+# ---------- Deterministic Text Extractors ----------
+
+def _extract_aadhaar_from_text(text: str) -> dict:
+    data = {"certificate_type": "Aadhaar"}
+    clean_text = text.replace("\t", " ")
+
+    # Aadhaar Number
+    m_num = re.search(r"\b([X0-9]{4}\s+[X0-9]{4}\s+[0-9]{4})\b", clean_text)
+    if not m_num:
+        m_num = re.search(r"\b([0-9]{4}\s+[0-9]{4}\s+[0-9]{4})\b", clean_text)
+    if not m_num:
+        m_num = re.search(r"\b([0-9]{12})\b", clean_text)
+    if m_num:
+        data["aadhaar_number"] = re.sub(r"\s+", " ", m_num.group(1)).strip()
+
+    # DOB
+    m_dob = re.search(r"(?:DOB|Birth|பிறந்த\s*நாள்)[:\s/]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", clean_text, re.IGNORECASE)
+    if m_dob:
+        data["dob"] = m_dob.group(1).replace("-", "/")
+
+    # Gender
+    m_gen = re.search(r"\b(MALE|FEMALE|TRANSGENDER|ஆண்|பெண்)\b", clean_text, re.IGNORECASE)
+    if m_gen:
+        g = m_gen.group(1).upper()
+        data["gender"] = "Male" if g in ["MALE", "ஆண்"] else ("Female" if g in ["FEMALE", "பெண்"] else "Transgender")
+
+    # Name
+    m_name = re.search(r"To\s*\n[^\n]+\n([A-Za-z][A-Za-z\s\.]+)\n\s*(?:S/O|C/O|D/O|W/O)", text)
+    if not m_name:
+        m_name = re.search(r"([A-Za-z][A-Za-z\s\.]+)\s*\n[^\n]*DOB:", text)
+    if m_name:
+        data["name"] = re.sub(r"\s+", " ", m_name.group(1)).strip()
+
+    # Father Name
+    m_father = re.search(r"(?:S/O|C/O|D/O|W/O)[:\s]+([A-Za-z][A-Za-z\s\.]+?)(?:,|\n|\r|$)", clean_text)
+    if m_father:
+        data["father_name"] = m_father.group(1).strip()
+
+    # Pincode
+    m_pin = re.search(r"(?:PIN\s*Code|Pincode|Pin)[:\s]+([1-9][0-9]{5})", clean_text, re.IGNORECASE)
+    if not m_pin:
+        m_pin = re.search(r"\b([1-9][0-9]{5})\b", clean_text)
+    if m_pin:
+        data["pincode"] = m_pin.group(1)
+
+    # State & District & Taluk
+    m_dist = re.search(r"(?:District|Dist)[:\s]+([A-Za-z\s]+?)(?:,|\n|State|$)", clean_text, re.IGNORECASE)
+    if m_dist:
+        data["district"] = m_dist.group(1).strip()
+    m_state = re.search(r"(?:State)[:\s]+([A-Za-z\s]+?)(?:,|\n|PIN|$)", clean_text, re.IGNORECASE)
+    if m_state:
+        data["state"] = m_state.group(1).strip()
+    m_vtc = re.search(r"(?:VTC|Taluk)[:\s]+([A-Za-z\s]+?)(?:,|\n|PO:|$)", clean_text, re.IGNORECASE)
+    if m_vtc:
+        data["taluk"] = m_vtc.group(1).strip()
+
+    # Address
+    m_addr = re.search(r"Address:\s*([\s\S]+?)(?:\b\d{6}\b|XXXX\s*XXXX|$)", text)
+    if m_addr:
+        data["address"] = re.sub(r"\s+", " ", m_addr.group(1)).strip().rstrip(",")
+
+    # Door No & Street
+    m_door_street = re.search(r"(?:S/O:[^\n,]+,?\s*|\n)([0-9]+[A-Za-z\-/0-9]*)\s*,\s*([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", clean_text, re.IGNORECASE)
+    if not m_door_street:
+        m_door_street = re.search(r"\n([0-9]+[A-Za-z\-/0-9]*)\n([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", text, re.IGNORECASE)
+    if m_door_street:
+        data["door_no"] = m_door_street.group(1).strip()
+        data["street"] = re.sub(r"\s+", " ", m_door_street.group(2)).strip()
+
+    return sanitize_extracted_data(data)
+
+
+def _extract_dl_from_text(text: str) -> dict:
+    data = {"certificate_type": "Driving License"}
+    clean_text = text.replace("\t", " ")
+
+    # License No
+    m_lic = re.search(r"License\s*No\.?\s*[:\s]+([A-Z0-9\s/-]+?)(?=\n|Date\s*of\s*Expiry|Valid|$)", clean_text, re.IGNORECASE)
+    if m_lic:
+        data["dl_number"] = re.sub(r"\s+", " ", m_lic.group(1)).strip()
+
+    # Name
+    m_name = re.search(r"Name\s*[:\s]+([A-Za-z\s\.]+?)(?=\n|DOB|Date\s*of\s*Birth|Blood|$)", clean_text)
+    if m_name:
+        data["name"] = re.sub(r"\s+", " ", m_name.group(1)).strip()
+
+    # DOB
+    m_dob = re.search(r"DOB\s*[:\s]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", clean_text, re.IGNORECASE)
+    if m_dob:
+        data["dob"] = m_dob.group(1).replace("-", "/")
+
+    # Father Name / S/W/D
+    m_swd = re.search(r"S/W/D\s*[:\s]+([A-Za-z\s\.]+?)(?=\n|Present\s*Address|Address|Permanent|$)", clean_text)
+    if m_swd:
+        data["father_name"] = re.sub(r"\s+", " ", m_swd.group(1)).strip()
+
+    # Pincode
+    m_pin = re.search(r"\b([1-9][0-9]{5})\b", clean_text)
+    if m_pin:
+        data["pincode"] = m_pin.group(1)
+
+    # Address
+    m_addr = re.search(r"(?:Present\s*Address|Address)\s*[:\s]+([\s\S]+?)(?=Permanent|Note|Powered|$)", clean_text)
+    if m_addr:
+        raw_addr = re.sub(r"\s+", " ", m_addr.group(1)).strip()
+        data["address"] = raw_addr
+        m_parts = re.search(r"^([0-9]+[A-Za-z\-/0-9]*)\s*,\s*([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", raw_addr, re.IGNORECASE)
+        if m_parts:
+            data["door_no"] = m_parts.group(1).strip()
+            data["street"] = re.sub(r"\s+", " ", m_parts.group(2)).strip()
+
+    # State
+    if "TAMIL NADU" in clean_text.upper():
+        data["state"] = "Tamil Nadu"
+
+    return sanitize_extracted_data(data)
+
+
+def _extract_ration_from_text(text: str) -> dict:
+    data = {"certificate_type": "Ration Card"}
+    clean_text = text.replace("\t", " ")
+
+    # Card / UFC No
+    m_num = re.search(r"(?:Ration\s*Card\s*No|Card\s*No|UFC\s*No|Family\s*Card\s*No|எண்)[:\s]+([A-Z0-9/]+)", clean_text, re.IGNORECASE)
+    if not m_num:
+        m_num = re.search(r"\b([0-9]{2}/[A-Z0-9]/[0-9]{6,})\b", clean_text)
+    if m_num:
+        data["number"] = m_num.group(1).strip()
+        data["ration_card_number"] = data["number"]
+
+    # Name
+    m_name = re.search(r"(?:Head\s*of\s*Family|Name|பெயர்|குடும்பத்தலைவர்)[:\s]+([A-Za-z\s\.]+)", clean_text)
+    if m_name:
+        data["name"] = re.sub(r"\s+", " ", m_name.group(1)).strip()
+
+    m_dist = re.search(r"(?:District|மாவட்டம்)[:\s]+([A-Za-z\s]+)", clean_text)
+    if m_dist:
+        data["district"] = m_dist.group(1).strip()
+
+    m_taluk = re.search(r"(?:Taluk|வட்டம்)[:\s]+([A-Za-z\s]+)", clean_text)
+    if m_taluk:
+        data["taluk"] = m_taluk.group(1).strip()
+
+    return sanitize_extracted_data(data)
+
+
+def _extract_pan_from_text(text: str) -> dict:
+    data = {"certificate_type": "PAN"}
+    clean_text = text.replace("\t", " ")
+
+    # 10-character PAN
+    m_pan = re.search(r"\b([A-Z]{5}[0-9]{4}[A-Z])\b", clean_text)
+    if m_pan:
+        data["pan_number"] = m_pan.group(1).strip()
+
+    # DOB
+    m_dob = re.search(r"(?:DOB|Date\s*of\s*Birth)[:\s/]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", clean_text, re.IGNORECASE)
+    if m_dob:
+        data["dob"] = m_dob.group(1).replace("-", "/")
+
+    # Name and Father Name
+    m_name = re.search(r"Name\s*[:\s]+([A-Za-z\s\.]+?)(?=\n|Father|$)", clean_text)
+    if m_name:
+        data["name"] = re.sub(r"\s+", " ", m_name.group(1)).strip()
+    m_f = re.search(r"Father(?:\x27s)?\s*Name\s*[:\s]+([A-Za-z\s\.]+?)(?=\n|DOB|$)", clean_text)
+    if m_f:
+        data["father_name"] = re.sub(r"\s+", " ", m_f.group(1)).strip()
+
+    return sanitize_extracted_data(data)
+
+
+def _extract_general_cert_from_text(text: str) -> dict:
+    clean_text = text.replace("\t", " ")
+    u = clean_text.upper()
+    data = {}
+
+    if "INCOME" in u and ("CERTIFICATE" in u or "CERTFICATE" in u):
+        data["certificate_type"] = "Income Certificate"
+    elif "CASTE" in u or "COMMUNITY" in u:
+        data["certificate_type"] = "Caste Certificate"
+    elif "RESIDENCE" in u or "NATIVITY" in u:
+        data["certificate_type"] = "Residence Certificate"
+    else:
+        return None
+
+    # Name
+    m_name = re.search(r"certify\s*that\s*(?:Thiru\s*/?\s*|Tmt\.?\s*/?\s*|Selvi\.?\s*/?\s*)*([A-Za-z\s\.]+?)(?=\.|\n|Son|Daughter|Wife|residing|$)", clean_text, re.IGNORECASE)
+    if m_name:
+        data["name"] = re.sub(r"[\.\s]+$", "", m_name.group(1)).strip()
+
+    # Father Name
+    m_f = re.search(r"(?:Son|Daughter|Wife)\s*/?\s*(?:Daughter|Wife)?\s*of\s*(?:Thiru|Tmt|Mr\.)?\s*([A-Za-z\s\.]+?)(?=\.|\n|residing|$)", clean_text, re.IGNORECASE)
+    if m_f:
+        data["father_name"] = re.sub(r"[\.\s]+$", "", m_f.group(1)).strip()
+
+    if "PUDUCHERRY" in u:
+        data["state"] = "Puducherry"
+    elif "TAMIL NADU" in u:
+        data["state"] = "Tamil Nadu"
+
+    m_pin = re.search(r"\b([1-9][0-9]{5})\b", clean_text)
+    if m_pin:
+        data["pincode"] = m_pin.group(1)
+
+    return sanitize_extracted_data(data)
+
+
+def extract_deterministic_from_text(text: str) -> dict:
+    """Detect document type and run deterministic regex extractor on digital text."""
+    if not text or len(text.strip()) < 20:
+        return None
+
+    u = re.sub(r"\s+", " ", text).upper()
+    if "ENROLMENT NO" in u or "AADHAAR" in u or "UIDAI" in u or re.search(r"\b[X0-9]{4}\s+[X0-9]{4}\s+[0-9]{4}\b", text):
+        return _extract_aadhaar_from_text(text)
+    elif "DRIVING LICENSE" in u or "UNION OF INDIA DRIVING" in u or "AUTHORIZATION TO DRIVE" in u or "DL NO" in u:
+        return _extract_dl_from_text(text)
+    elif "RATION" in u or "CIVIL SUPPLIES" in u or "FAMILY CARD" in u:
+        return _extract_ration_from_text(text)
+    elif "PERMANENT ACCOUNT NUMBER" in u or re.search(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b", text):
+        return _extract_pan_from_text(text)
+    else:
+        return _extract_general_cert_from_text(text)
+
 
 
 def run_text_llm(text_content: str) -> dict:
-    prompt = f"""
-Look at this document text and extract all relevant fields.
+    """Extract document fields from digital text using deterministic parsing with LLM fallback."""
+    if not text_content or len(text_content.strip()) < 20:
+        return None
 
-1. Identify the certificate type. Choose ONLY from:
-   Aadhaar, Ration Card, Address Proof, PAN, Driving License,
-   Voter ID, Caste Certificate, Residence Certificate, Income Certificate
+    # First, run ultra-fast deterministic regex extraction (zero-latency, zero-hallucination)
+    det = extract_deterministic_from_text(text_content)
+    if det and det.get("name") and (det.get("aadhaar_number") or det.get("dl_number") or det.get("pincode") or det.get("dob")):
+        print(f"[run_text_llm] Deterministic extraction succeeded for {det.get('certificate_type')}: {det.get('name')}")
+        return det
 
-2. Extract all relevant fields based on the type.
+    prompt = f"""You are a precise Indian government document data extraction system.
+Extract all relevant fields from the following document text into a single JSON object.
 
-Return a single JSON object. Always include "certificate_type" as the first key.
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Extract ONLY facts explicitly printed in the text below.
+2. NEVER guess, assume, or extrapolate any values.
+3. If any field is not explicitly printed in the text, you MUST return an empty string "".
+4. Do NOT guess religion or community for Aadhaar, Driving License, PAN or Voter ID cards. Always set them to "".
+5. For father_name on Aadhaar: extract ONLY the name following C/O or S/O. NEVER use the applicant's own name.
 
-For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, religion, community, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
-For Ration Card use keys: certificate_type, name, mother_name, number, district, taluk, state
-For Driving License use keys: certificate_type, name, dob, dl_number, address, state, pincode
-For Address Proof use keys: certificate_type, username, father_name, religion, community, door_no, address, street_name, pincode, from_date, to_date, state, district, taluk, count_of_residence_years
-For PAN use keys: certificate_type, name, father_name, dob, pan_number
-For Voter ID use keys: certificate_type, name, father_name, dob, voter_id
-
-Note: for dob, always return the full date in DD/MM/YYYY format (e.g. "23/02/2007"). If only a year is visible, return what is on the document.
-Note: for door_no and street fields, extract only the actual door/building number and street name. Do NOT put the C/O / S/O guardian name into these fields.
-
-Return ONLY the JSON object. No explanation.
+Keys to include:
+certificate_type (e.g. "Aadhaar", "Driving License", "Ration Card", "PAN", "Income Certificate", "Caste Certificate", "Residence Certificate")
+name
+father_name
+dob (DD/MM/YYYY)
+gender
+aadhaar_number
+dl_number
+pan_number
+address
+door_no
+street
+area
+city
+district
+taluk
+state
+pincode
 
 Document Text:
-{text_content}
+{text_content[:4000]}
+
+Return ONLY the JSON object.
 """
-    # Use NVIDIA NIM for text LLM extraction
-    nvidia_keys = _NVIDIA_KEYS_CACHE or get_nvidia_keys()
-    for idx, key in enumerate(nvidia_keys):
-        if not (key and key.startswith("nvapi-")):
-            continue
+    # Try NVIDIA NIM text completion
+    nvidia_keys = get_nvidia_keys()
+    for key in nvidia_keys:
         try:
-            url = config.NVIDIA_API_URL
             headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
             payload = {
-                "model": "meta/llama-3.3-70b-instruct",
-                "temperature": 0,
-                "max_tokens": 450,
-                "messages": [{"role": "user", "content": prompt}]
+                "model": "meta/llama-3.2-11b-vision-instruct",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0,
+                "max_tokens": 500
             }
-            res = requests.post(url, headers=headers, json=payload, timeout=30)
+            res = requests.post(config.NVIDIA_API_URL, headers=headers, json=payload, timeout=20)
             if res.status_code == 200:
-                return parse_vlm_output(res.json()["choices"][0]["message"]["content"])
-            elif res.status_code == 429:
-                print(f"[run_text_llm] NVIDIA Key #{idx+1} rate limited — trying next key...")
-                continue
-        except Exception as e:
-            print(f"[run_text_llm] NVIDIA Key #{idx+1} failed: {e}")
+                content = res.json()["choices"][0]["message"]["content"]
+                parsed = parse_vlm_output(content)
+                if parsed:
+                    if det:
+                        for k, v in det.items():
+                            if v and not parsed.get(k):
+                                parsed[k] = v
+                    return sanitize_extracted_data(parsed)
+        except Exception:
             continue
+
+    # Try Groq API keys if configured
+    groq_keys = get_groq_keys()
+    for key in groq_keys:
+        try:
+            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0,
+                "max_tokens": 500
+            }
+            res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=20)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"]
+                parsed = parse_vlm_output(content)
+                if parsed:
+                    if det:
+                        for k, v in det.items():
+                            if v and not parsed.get(k):
+                                parsed[k] = v
+                    return sanitize_extracted_data(parsed)
+        except Exception:
+            continue
+
+    # Fallback to deterministic extraction if LLM is offline or unconfigured
+    if det:
+        return sanitize_extracted_data(det)
+
     return None
 
 
@@ -468,13 +847,23 @@ def extract_from_pdf(pdf_input) -> list:
     if pdf_bytes.startswith(PDF_MAGIC):
         # Fast path: Try extracting digital text directly using pypdf
         try:
-            import pypdf
+            try:
+                import pypdf
+            except ImportError:
+                for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
+                    if p not in sys.path:
+                        sys.path.append(p)
+                import pypdf
+
             reader = pypdf.PdfReader(BytesIO(pdf_bytes))
             extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             if len(extracted_text.strip()) > 50:
-                print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using fast LLM text extraction.")
+                print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")
                 raw_json = run_text_llm(extracted_text)
-                if raw_json:
+                if not raw_json:
+                    raw_json = extract_deterministic_from_text(extracted_text)
+                if raw_json and raw_json.get("name"):
+                    print(f"[extractor] Successfully extracted {raw_json.get('certificate_type')} digitally: {raw_json.get('name')}")
                     return [raw_json]
         except Exception as te:
             print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
@@ -503,4 +892,5 @@ def extract_from_pdf(pdf_input) -> list:
             )
 
     return _process_pages(pages)
+
 

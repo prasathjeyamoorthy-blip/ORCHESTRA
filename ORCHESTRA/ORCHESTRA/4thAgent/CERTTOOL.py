@@ -20,12 +20,17 @@ class TNeGACertificateDownloader:
         transaction_id = config.get("transaction_id")
         
         playwright = sync_playwright().start()
-        launch_kwargs = {"headless": True}
+        is_headless = os.getenv("HEADLESS", "").lower() in ("true", "1")
+        launch_kwargs = {"headless": is_headless}
         for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
             if os.path.exists(chrome_path):
                 launch_kwargs["executable_path"] = chrome_path
                 break
-        browser = playwright.chromium.launch(**launch_kwargs) 
+        try:
+            browser = playwright.chromium.launch(**launch_kwargs) 
+        except Exception:
+            launch_kwargs["headless"] = True
+            browser = playwright.chromium.launch(**launch_kwargs) 
         context = browser.new_context()
         page = context.new_page()
 

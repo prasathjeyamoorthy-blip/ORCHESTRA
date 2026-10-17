@@ -39,6 +39,7 @@ export default function ChatBubble({ sender, message }) {
                 hr:         () => <hr className="msg-hr" style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.12)", margin: "1rem 0" }} />,
                 code:       ({ children }) => <code className="msg-code" style={{ background: "rgba(255,255,255,0.08)", padding: "0.15rem 0.4rem", borderRadius: "0.25rem", fontSize: "0.875em", color: "#f1f5f9" }}>{children}</code>,
                 blockquote: ({ children }) => <blockquote className="msg-blockquote" style={{ borderLeft: "3px solid #a855f7", margin: "0.75rem 0", paddingLeft: "0.875rem", fontStyle: "italic", color: "#cbd5e1" }}>{children}</blockquote>,
+                a:          ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600, wordBreak: "break-all" }}>{children}</a>,
               }}
             >
               {message}

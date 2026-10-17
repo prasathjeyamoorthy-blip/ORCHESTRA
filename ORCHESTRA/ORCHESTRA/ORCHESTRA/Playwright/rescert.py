@@ -255,7 +255,7 @@ class TNeSevaiBackendAgent:
         if not value: return False
         try:
             dropdown = page.locator(selector)
-            dropdown.wait_for(state="visible", timeout=5000)
+            dropdown.wait_for(state="visible", timeout=15000)
             time.sleep(0.5)
             
             try:
@@ -344,13 +344,19 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                launch_kwargs = {
-                    "headless": True,
-                    "slow_mo": 50,
-                    "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-                }
-                # Remove executable_path search — use Playwright's bundled Chromium
-                browser = playwright.chromium.launch(**launch_kwargs)
+                is_headless = os.getenv("HEADLESS", "").lower() in ("true", "1")
+                launch_kwargs = {"headless": is_headless, "slow_mo": 200 if not is_headless else 0}
+                for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
+                    if os.path.exists(chrome_path):
+                        launch_kwargs["executable_path"] = chrome_path
+                        break
+                try:
+                    browser = playwright.chromium.launch(**launch_kwargs)
+                except Exception as launch_err:
+                    self.log(f"Headful browser launch failed ({launch_err}). Falling back to headless mode...")
+                    launch_kwargs["headless"] = True
+                    launch_kwargs["slow_mo"] = 0
+                    browser = playwright.chromium.launch(**launch_kwargs)
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
 
@@ -377,15 +383,7 @@ class TNeSevaiBackendAgent:
                     page.get_by_role("textbox", name="Enter Captcha Code").fill(user_captcha)
                     self.log("Clicking Login...")
                     page.get_by_role("button", name="Login").click()
-                    # Wait for either a login error indicator or successful dashboard
-                    try:
-                        page.wait_for_selector(
-                            "text=does not match the code, text=invalid captcha, text=captcha is incorrect, "
-                            "a[href*='Revenue'], a:has-text('Revenue'), #userDashboard",
-                            timeout=15000
-                        )
-                    except Exception:
-                        pass  # proceed to HTML check below
+                    time.sleep(3)
 
                     # Check if login failed — inspect page HTML for known error strings
                     page_html = page.content().lower()
@@ -423,22 +421,15 @@ class TNeSevaiBackendAgent:
                 
                 page_form = popup_info.value
                 page_form.wait_for_load_state("domcontentloaded")
+                time.sleep(4)
                 page_form.get_by_role("button", name="Proceed").click()
-                # Wait for CAN search field to appear — confirms page loaded
-                page_form.wait_for_selector('[id="statusform:aadhar"]', timeout=20000)
+                time.sleep(4)
                 
                 # --- CAN Search & Aadhaar ---
                 self.log(f"Searching CAN: {self.applicant.get('can_number')}...")
                 page_form.locator('[id="statusform:aadhar"]').fill(self.applicant.get("can_number")) 
                 page_form.get_by_role("button", name="Search").click()
-                # Wait for the result row radio button to appear instead of sleeping 8s
-                try:
-                    page_form.wait_for_selector(
-                        'input[type="radio"], [id*="citRadio"], tr.rich-table-row',
-                        timeout=15000
-                    )
-                except Exception:
-                    pass  # row may already be visible
+                time.sleep(8) 
                 
                 try: page_form.get_by_label("").check() 
                 except: pass 
@@ -451,19 +442,7 @@ class TNeSevaiBackendAgent:
                 except AttributeError: aadhar_input.type(self.applicant.get("aadhar_number"), delay=150)
                 
                 aadhar_input.press("Tab")
-                # Wait for DOB field to become active/populated by the portal
-                try:
-                    page_form.wait_for_function(
-                        """() => {
-                            const el = document.querySelector(
-                                'input[id*="citAapDOB"], input[id*="DOBInputDate"]'
-                            );
-                            return el && (el.value.length > 0 || !el.hasAttribute('disabled'));
-                        }""",
-                        timeout=5000
-                    )
-                except Exception:
-                    pass  # proceed with DOB injection regardless
+                time.sleep(5)
                 
                 # --- DOB Injection ---
                 self.log("Injecting Date of Birth...")
@@ -477,23 +456,13 @@ class TNeSevaiBackendAgent:
                 )
                 self.log(f"Raw Date of Birth from payload: '{dob_val}'")
 
-                # Normalise: if VLM only returned a year (e.g. "2007"), we cannot inject it
-                # as a full date. Log clearly and skip so the portal shows a useful error.
-                if dob_val:
-                    dob_str_clean = str(dob_val).strip()
-                    # Reject bare 4-digit years — portal requires a full date
-                    import re as _re
-                    if _re.fullmatch(r'\d{4}', dob_str_clean):
-                        self.log(f"⚠ WARNING: VLM only extracted year '{dob_str_clean}' for DOB — full date required. Skipping injection.")
-                        dob_val = None
-
                 if dob_val:
                     fmt_dob_slash = self.format_date_for_injection(dob_val, "%d/%m/%Y")
                     fmt_dob_dash_mon = self.format_date_for_injection(dob_val, "%d-%b-%Y")
                     fmt_dob_dash_num = self.format_date_for_injection(dob_val, "%d-%m-%Y")
                     self.log(f"Formatted DOB candidates: '{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}'")
 
-                    # Step 1: Remove readonly / disabled so Playwright can interact
+                    # Step 1: Remove readonly attribute via JS immediately to prevent Playwright 30s timeouts
                     page_form.evaluate("""
                         (() => {
                             document.querySelectorAll('input[id*="citAapDOB"], input[id*="DOBInputDate"], input[id*="DOB"]').forEach(el => {
@@ -503,7 +472,7 @@ class TNeSevaiBackendAgent:
                         })()
                     """)
 
-                    # Step 2: JS injection — set value + fire all events + RichFaces API
+                    # Step 2: Instant JS evaluation + RichFaces Date object + popup collapse
                     js_res = page_form.evaluate(f"""
                         (() => {{
                             const formattedDates = ['{fmt_dob_slash}', '{fmt_dob_dash_mon}', '{fmt_dob_dash_num}', '{dob_val}'];
@@ -568,11 +537,8 @@ class TNeSevaiBackendAgent:
                     """)
                     self.log(f"DOB JS Injection Result: '{js_res}'")
 
-                    # Step 3: Playwright locator fallback — triple-click to select all,
-                    # then type character-by-character to bypass readonly and trigger
-                    # the RichFaces internal change handler properly.
-                    dob_filled = bool(js_res and js_res.strip())
-                    if not dob_filled:
+                    # Step 3: Fast locator fallback with short 1s timeout
+                    if not js_res:
                         dob_selectors = [
                             '[id="statusform:citAapDOBInputDate"]',
                             'input[id*="citAapDOBInputDate"]',
@@ -583,27 +549,15 @@ class TNeSevaiBackendAgent:
                                 loc = page_form.locator(selector)
                                 if loc.count() > 0:
                                     dob_el = loc.first
-                                    # Ensure editable
                                     dob_el.evaluate("el => { el.removeAttribute('readonly'); el.removeAttribute('disabled'); }")
-                                    dob_el.click()
-                                    # Select all existing text and replace
-                                    dob_el.press("Control+a")
-                                    dob_el.press("Delete")
-                                    # Type the date using press_sequentially — one char at a time,
-                                    # triggering keydown/keyup per character (what RichFaces listens to)
-                                    try:
-                                        dob_el.press_sequentially(fmt_dob_slash, delay=60)
-                                    except AttributeError:
-                                        dob_el.type(fmt_dob_slash, delay=60)
+                                    dob_el.fill(fmt_dob_slash, timeout=1000)
+                                    dob_el.press("Escape")
                                     dob_el.press("Tab")
-                                    filled_val = dob_el.input_value()
-                                    self.log(f"DOB keyboard-type fallback result: '{filled_val}'")
-                                    if filled_val.strip():
-                                        dob_filled = True
-                                        break
+                                    self.log(f"Filled DOB via fallback locator: '{dob_el.input_value()}'")
+                                    break
                             except Exception as e:
-                                self.log(f"DOB keyboard fallback error on '{selector}': {e}")
-
+                                pass
+                    time.sleep(1)
                 else:
                     self.log("⚠ WARNING: No Date of Birth found in applicant details payload!")
                 
@@ -620,15 +574,7 @@ class TNeSevaiBackendAgent:
 
                     page_form.locator('[id="statusform:otp_id"]').fill(user_otp)
                     page_form.get_by_role("button", name="Confirm OTP").click()
-                    # Wait for either an OTP error or the form proceeding
-                    try:
-                        page_form.wait_for_selector(
-                            "text=please enter valid otp, text=invalid otp, text=otp does not match, "
-                            "[id*='proceed'], button:has-text('Proceed'), [id*='otp_id']",
-                            timeout=10000
-                        )
-                    except Exception:
-                        pass
+                    time.sleep(3)
 
                     # Check if OTP failed — inspect page HTML for known error strings
                     otp_page_html = page_form.content().lower()
@@ -661,12 +607,28 @@ class TNeSevaiBackendAgent:
                 
                 self.log("OTP Confirmed. Proceeding to Form...")
                 page_form.get_by_role("button", name="Proceed").click()
-                # networkidle already waits for all requests to finish — no extra sleep needed
-                page_form.wait_for_load_state("networkidle")
+                # Wait for both network and DOM to settle — portal uses AJAX to populate dropdowns
+                try:
+                    page_form.wait_for_load_state("networkidle", timeout=30000)
+                except Exception:
+                    pass
+                time.sleep(6)  # extra buffer for AJAX-populated dropdowns
 
                 # --- Fill Form Details ---
                 self.log("Filling Form Details...")
-                page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=10000)
+
+                # Wait for form to fully load — the village dropdown is dynamically populated
+                # so we wait for it with a generous timeout, falling back gracefully if absent
+                try:
+                    page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=30000)
+                except Exception:
+                    # Dropdown may not appear immediately — wait an extra few seconds and continue
+                    self.log("WARNING: Village dropdown did not appear within 30s — retrying after additional wait...")
+                    time.sleep(5)
+                    try:
+                        page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=20000)
+                    except Exception:
+                        self.log("WARNING: Village dropdown still not visible — proceeding without it.")
                 
                 def is_field_empty(locator_str):
                     try:
@@ -691,22 +653,7 @@ class TNeSevaiBackendAgent:
                     try: page_form.locator('[id="residence:fatherName"]').fill(self.applicant.get("father_name"))
                     except: pass
 
-                # Fill gender dropdown if present and empty
-                if self.applicant.get("gender"):
-                    self.safe_select_dropdown(page_form, '[id="residence:genderId"], select[id*="gender"]', self.applicant.get("gender"), "Gender")
-
-                # Fill religion dropdown if present and empty
-                if self.applicant.get("religion"):
-                    self.safe_select_dropdown(page_form, '[id="residence:religionId"], select[id*="religion"]', self.applicant.get("religion"), "Religion")
-
-                # Fill community dropdown if present and empty
-                if self.applicant.get("community"):
-                    self.safe_select_dropdown(page_form, '[id="residence:communityId"], select[id*="community"]', self.applicant.get("community"), "Community")
-
-                revenue_village_value = (
-                    self.address.get("village")
-                    or self.address.get("area")
-                )
+                revenue_village_value = self.address.get("area") or self.address.get("village")
                 if is_dropdown_empty('[id="residence:cRvillageListId"]'):
                     if revenue_village_value:
                         success = self.safe_select_dropdown(page_form, '[id="residence:cRvillageListId"]', revenue_village_value, "Revenue Village")
@@ -720,10 +667,30 @@ class TNeSevaiBackendAgent:
                                         break
                             except: pass
 
-                if self.address.get("building_no") and is_field_empty('[id="residence:buildForList"]'):
-                    page_form.locator('[id="residence:buildForList"]').fill(self.address.get("building_no"))
-                if self.address.get("street_name") and is_field_empty('[id="residence:streetForList"]'):
-                    page_form.locator('[id="residence:streetForList"]').fill(self.address.get("street_name"))
+                def is_valid_addr(val):
+                    if not val: return False
+                    v_s = str(val).strip().lower()
+                    if not v_s: return False
+                    app_n = (self.applicant.get("name") or "").strip().lower()
+                    f_n = (self.applicant.get("father_name") or "").strip().lower()
+                    if app_n and v_s == app_n: return False
+                    if f_n and v_s == f_n: return False
+                    if any(bad in v_s for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]): return False
+                    return True
+
+                bldg_val = self.address.get("building_no") or self.address.get("door_no")
+                street_val = self.address.get("street_name") or self.address.get("area")
+
+                if bldg_val and is_valid_addr(bldg_val) and is_field_empty('[id="residence:buildForList"]'):
+                    page_form.locator('[id="residence:buildForList"]').fill(str(bldg_val))
+                elif not bldg_val and street_val and is_valid_addr(street_val) and is_field_empty('[id="residence:buildForList"]'):
+                    page_form.locator('[id="residence:buildForList"]').fill(str(street_val))
+
+                # Street Name field is MANDATORY on TNeSevai portal (marked with red asterisk)
+                st_to_fill = street_val if (street_val and is_valid_addr(street_val)) else (bldg_val if (bldg_val and is_valid_addr(bldg_val)) else "")
+                if st_to_fill and is_field_empty('[id="residence:streetForList"]'):
+                    page_form.locator('[id="residence:streetForList"]').fill(str(st_to_fill))
+
                 if self.address.get("pincode") and is_field_empty('[id="residence:pinForList"]'):
                     page_form.locator('[id="residence:pinForList"]').fill(self.address.get("pincode"))
 
@@ -777,17 +744,11 @@ class TNeSevaiBackendAgent:
 
                 if self.applicant.get("ration_card_no") and is_field_empty('[id="residence:rationCardId"]'):
                     page_form.locator('[id="residence:rationCardId"]').fill(self.applicant.get("ration_card_no"))
+                    time.sleep(2) 
 
                 self.log("Submitting Details Table...")
                 page_form.get_by_role("button", name="Add").click()
-                # Wait for the table row to appear confirming the Add was processed
-                try:
-                    page_form.wait_for_selector(
-                        "tr.rich-table-row, [id*='detailsTable'] tr, [id*='residenceTable'] tr",
-                        timeout=8000
-                    )
-                except Exception:
-                    pass
+                time.sleep(4)
 
                 # Dialog Handler
                 def safe_dialog_handler(dialog):
@@ -797,8 +758,8 @@ class TNeSevaiBackendAgent:
 
                 self.log("Submitting Form...")
                 page_form.get_by_role("button", name="Submit").click()
-                # networkidle already waits — no extra sleep needed
                 page_form.wait_for_load_state("networkidle")
+                time.sleep(6) 
 
                 # --- DOCUMENT UPLOAD HELPER ---
                 def process_document_upload(doc_label, file_source, doc_no=None):
@@ -809,55 +770,91 @@ class TNeSevaiBackendAgent:
                     temp_path = None
                     target_path = None
 
+                    # ── Fetch file to local temp path ──────────────────────────────────────
                     if isinstance(file_source, str) and (file_source.startswith("http://") or file_source.startswith("https://")):
                         try:
                             self.log(f"Fetching {doc_label} from Supabase Storage: {file_source}...")
                             req = urllib.request.Request(file_source, headers={"User-Agent": "Mozilla/5.0"})
                             with urllib.request.urlopen(req, timeout=30) as resp:
                                 file_bytes = resp.read()
-
                             ext = ".pdf"
                             src_lower = file_source.lower()
-                            if ".jpg" in src_lower or ".jpeg" in src_lower:
-                                ext = ".jpg"
-                            elif ".png" in src_lower:
-                                ext = ".png"
-
+                            if ".jpg" in src_lower or ".jpeg" in src_lower: ext = ".jpg"
+                            elif ".png" in src_lower: ext = ".png"
                             import tempfile
                             with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tf:
                                 tf.write(file_bytes)
                                 temp_path = tf.name
                             target_path = temp_path
                         except Exception as e:
-                            self.log(f"WARNING: Failed to fetch {doc_label} from Supabase URL '{file_source}': {e}")
+                            self.log(f"WARNING: Failed to fetch {doc_label} from Supabase URL: {e}")
                             return
-                    elif isinstance(file_source, str) and os.path.exists(file_source):
-                        target_path = file_source
+                    elif isinstance(file_source, str):
+                        candidate_paths = [
+                            file_source,
+                            os.path.abspath(file_source),
+                            os.path.join(os.path.dirname(__file__), "..", "..", "DocumentUploadAgent", "uploads", os.path.basename(file_source)),
+                            os.path.join(os.path.dirname(__file__), "..", "..", "DocumentUploadAgent", file_source),
+                            os.path.join(os.path.dirname(__file__), "uploads", os.path.basename(file_source)),
+                            os.path.join(os.path.dirname(__file__), os.path.basename(file_source)),
+                        ]
+                        for cp in candidate_paths:
+                            if os.path.exists(cp):
+                                target_path = os.path.abspath(cp)
+                                break
+                        if not target_path:
+                            self.log(f"WARNING: File not found for '{doc_label}': {file_source}. Skipping...")
+                            return
                     else:
-                        self.log(f"WARNING: File not found or invalid source for '{doc_label}': {file_source}. Skipping...")
+                        self.log(f"WARNING: Invalid file source for '{doc_label}': {file_source}. Skipping...")
                         return
+
+                    # Optimize file size if exceeding portal limit (Photo <= 50KB)
+                    try:
+                        file_sz = os.path.getsize(target_path)
+                        if doc_label == "Photo" and file_sz > 48 * 1024:
+                            self.log(f"Photo size ({file_sz / 1024:.1f} KB) exceeds 50 KB portal limit. Auto-compressing...")
+                            from PIL import Image
+                            import tempfile
+                            with Image.open(target_path) as im:
+                                im_rgb = im.convert("RGB")
+                                im_rgb.thumbnail((400, 500))
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tf_opt:
+                                    quality = 85
+                                    while quality >= 20:
+                                        tf_opt.seek(0)
+                                        tf_opt.truncate()
+                                        im_rgb.save(tf_opt, format="JPEG", quality=quality, optimize=True)
+                                        if tf_opt.tell() <= 48 * 1024:
+                                            break
+                                        quality -= 10
+                                    temp_path = tf_opt.name
+                                    target_path = temp_path
+                            self.log(f"✓ Photo compressed to {os.path.getsize(target_path) / 1024:.1f} KB")
+                    except Exception as sz_err:
+                        self.log(f"Image compression note: {sz_err}")
 
                     try:
                         self.log(f"Uploading {doc_label} to portal...")
 
-                        # 1. Select document type — target exact document dropdown selectors
+                        # STEP 1 — Select document type from dropdown
                         doc_type_selected = False
                         doc_selectors = [
+                            '[id="ss:dsctype"]',
+                            'select[id*="dsctype"]',
                             'select[id*="docType"]',
                             'select[id*="DocType"]',
                             'select[name*="docType"]',
                             'select[id*="docTypeList"]',
                             '[id="statusform:docType"]',
                             '[id="statusform:docTypeList"]',
-                            '[id="ss:dsctype"]',
-                            '[id="ss:docType"]',
                             '[id="ss:documentType"]'
                         ]
                         for selector in doc_selectors:
                             try:
                                 el = page_form.locator(selector)
                                 if el.count() > 0 and el.first.is_visible():
-                                    el.first.select_option(label=doc_label, timeout=2000)
+                                    el.first.select_option(label=doc_label, timeout=3000)
                                     doc_type_selected = True
                                     self.log(f"Selected doc type '{doc_label}' via {selector}")
                                     break
@@ -865,75 +862,89 @@ class TNeSevaiBackendAgent:
                                 pass
 
                         if not doc_type_selected:
-                            # Search select elements inside upload container or page
-                            try:
-                                select_els = page_form.locator('select:not([disabled])').all()
-                                for sel in select_els:
-                                    sel_id = sel.get_attribute('id') or ''
-                                    sel_name = sel.get_attribute('name') or ''
-                                    if 'village' not in sel_id.lower() and 'village' not in sel_name.lower():
-                                        try:
-                                            sel.select_option(label=doc_label, timeout=2000)
-                                            doc_type_selected = True
-                                            self.log(f"Selected doc type '{doc_label}' via generic select ({sel_id})")
-                                            break
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                pass
+                            # Generic fallback — find first non-address select
+                            ignore_kw = ['village', 'district', 'state', 'taluk', 'community', 'religion', 'gender']
+                            for sel in page_form.locator('select:not([disabled])').all():
+                                sel_id = (sel.get_attribute('id') or '').lower()
+                                sel_name = (sel.get_attribute('name') or '').lower()
+                                if not any(kw in sel_id or kw in sel_name for kw in ignore_kw):
+                                    try:
+                                        sel.select_option(label=doc_label, timeout=2000)
+                                        doc_type_selected = True
+                                        self.log(f"Selected doc type '{doc_label}' via generic select ({sel_id})")
+                                        break
+                                    except Exception:
+                                        pass
+
+                        if not doc_type_selected:
                             try:
                                 enabled_combos = page_form.locator("select:not([disabled])")
                                 enabled_combos.first.select_option(label=doc_label)
                                 doc_type_selected = True
-                                self.log("Selected doc type via first enabled combobox")
+                                self.log(f"Selected doc type '{doc_label}' via first enabled combobox")
                             except Exception as e:
                                 self.log(f"WARNING: Could not select doc type '{doc_label}': {e}")
 
-                        # Wait for the portal to react to the dropdown change
-                        try:
-                            page_form.wait_for_load_state("networkidle", timeout=4000)
-                        except Exception:
-                            pass
+                        time.sleep(3)
 
-                        # 2. Fill document number BEFORE file upload (if needed)
+                        # STEP 2 — Fill document number (if provided)
                         if doc_no:
-                            doc_input = page_form.locator('[id="ss:dscnum"]')
-                            doc_input.click()
-                            doc_input.fill(doc_no)
-                            doc_input.press("Tab")
-                            # Short wait for portal validation
                             try:
-                                page_form.wait_for_load_state("networkidle", timeout=3000)
-                            except Exception:
-                                pass
+                                doc_input = page_form.locator('[id="ss:dscnum"]')
+                                if doc_input.count() > 0 and doc_input.first.is_visible():
+                                    doc_input.click()
+                                    doc_input.fill(str(doc_no))
+                                    doc_input.press("Tab")
+                                    time.sleep(2)
+                                    self.log(f"Filled document number: {doc_no}")
+                            except Exception as de:
+                                self.log(f"WARNING: Could not fill document number: {de}")
 
-                        # 3. Use set_input_files() to attach file WITHOUT opening file explorer
-                        page_form.locator("input[type='file']").last.set_input_files(target_path)
-                        # Wait for upload preview/indicator to appear instead of hardcoded 8s
+                        # STEP 3 — Use set_input_files() to attach file WITHOUT opening native file dialog
                         try:
-                            page_form.wait_for_function(
-                                """() => {
-                                    const inputs = document.querySelectorAll("input[type='file']");
-                                    const last = inputs[inputs.length - 1];
-                                    return last && last.files && last.files.length > 0;
-                                }""",
-                                timeout=6000
-                            )
-                        except Exception:
-                            pass
+                            self.log(f"Attaching file for {doc_label}: {target_path}...")
+                            file_input = page_form.locator("input[type='file']")
+                            file_input.wait_for(state="attached", timeout=10000)
+                            file_input.last.set_input_files(target_path)
+                            self.log(f"File attached for {doc_label}: {os.path.basename(target_path)}")
+                            time.sleep(6)
+                        except Exception as fe:
+                            self.log(f"WARNING: Failed to attach file for {doc_label}: {fe}")
 
-                        # 4. Click "Upload" button
+                        # STEP 4 — Click "Upload" button (RichFaces exact text / button)
                         self.log(f"Clicking Upload for {doc_label}...")
-                        page_form.get_by_text("Upload", exact=True).click(force=True)
-                        # Wait for upload to complete — look for success indicator or networkidle
+                        upload_done = False
                         try:
-                            page_form.wait_for_load_state("networkidle", timeout=12000)
+                            page_form.get_by_text("Upload", exact=True).click(force=True)
+                            upload_done = True
+                            self.log(f"Clicked Upload exact text for {doc_label}")
                         except Exception:
                             pass
+
+                        if not upload_done:
+                            for sel in ["input[value='Upload']", "button:has-text('Upload')", "[id*='upload']"]:
+                                try:
+                                    el = page_form.locator(sel)
+                                    if el.count() > 0 and el.first.is_visible():
+                                        el.first.click(force=True)
+                                        upload_done = True
+                                        self.log(f"Clicked Upload via {sel} for {doc_label}")
+                                        break
+                                except Exception:
+                                    pass
+
+                        time.sleep(8)
+
+                        # Verify document appeared in table
+                        try:
+                            rows = page_form.locator("table tr").count()
+                            self.log(f"✓ {doc_label} uploaded — table now has {rows} row(s)")
+                        except Exception:
+                            pass
+
                     finally:
                         if temp_path and os.path.exists(temp_path):
-                            try:
-                                os.remove(temp_path)
+                            try: os.remove(temp_path)
                             except: pass
 
                 # =============================================
@@ -1006,74 +1017,182 @@ class TNeSevaiBackendAgent:
                     self.docs.get("address_doc_no")
                 )
 
-                # --- FINAL STEP ---
+                # --- FINAL STEP: Click Proceed to reach the Payment Details page ---
                 self.log("All Documents Uploaded! Navigating to Payment...")
-                button_clicked = False
-                for button_name in ["Proceed", "Submit", "Make Payment", "Continue"]:
-                    try:
-                        page_form.get_by_role("button", name=button_name).click(force=True)
-                        self.log(f"Clicked '{button_name}' button")
-                        button_clicked = True
-                        break
-                    except: continue
-                
-                if not button_clicked:
-                    for button_value in ["Proceed", "Submit", "Make Payment"]:
-                        try:
-                            page_form.locator(f'input[value="{button_value}"]').first.click(force=True)
-                            self.log(f"Clicked '{button_value}' button")
-                            button_clicked = True
-                            break
-                        except: continue
+                time.sleep(5)  # Give portal time to register all uploads
 
-                self.log("SUCCESS! Payment page reached. Backend job complete.")
-
-                # Accept T&C and click Make Payment
+                # Take a screenshot to log what page we're on before clicking
                 try:
-                    page_form.scroll_into_view_if_needed = lambda: None  # no-op guard
-                    # Scroll to bottom to reveal T&C and Make Payment button
-                    page_form.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page_form.screenshot(path=os.path.join(os.path.dirname(__file__), "before_payment_click.png"))
+                    self.log("Screenshot saved: before_payment_click.png")
+                except Exception:
+                    pass
 
-                    # Accept Terms & Conditions checkbox
-                    try:
-                        tc_checkbox = page_form.locator(
-                            "input[type='checkbox']"
-                        ).last
-                        if not tc_checkbox.is_checked():
-                            tc_checkbox.check(force=True)
-                            self.log("Terms & Conditions accepted.")
-                    except Exception as e:
-                        self.log(f"T&C checkbox not found or already checked: {e}")
+                # Log the current URL and page title for debugging
+                self.log(f"Current URL before payment click: {page_form.url}")
+                try:
+                    self.log(f"Page title: {page_form.title()}")
+                except Exception:
+                    pass
 
-                    # Click Make Payment button
-                    try:
-                        page_form.get_by_role("button", name="Make Payment").click(force=True)
-                        self.log("Make Payment clicked.")
-                    except:
-                        try:
-                            page_form.locator("input[value='Make Payment'], button:has-text('Make Payment'), a:has-text('Make Payment')").first.click(force=True)
-                            self.log("Make Payment clicked (fallback).")
-                        except Exception as e:
-                            self.log(f"Make Payment button not found: {e}")
+                # Verify documents in table before clicking Make Payment
+                try:
+                    rows = page_form.locator("table tr").count()
+                    self.log(f"Documents table row count: {rows}")
+                except Exception:
+                    pass
 
-                    time.sleep(3)
+                # Auto-accept any confirmation dialogs (e.g. 'Are you sure you want to proceed to payment?')
+                page_form.on("dialog", lambda dialog: dialog.accept())
 
-                    # Get the payment gateway URL and send to frontend to open in browser
-                    try:
-                        payment_url = page_form.url
-                        self.log(f"Payment gateway URL: {payment_url}")
-                        if self.ws_manager:
-                            self.ws_manager.send_event_sync({
-                                "type": "OPEN_PAYMENT_URL",
-                                "url": payment_url
-                            })
-                    except Exception as e:
-                        self.log(f"Could not get payment URL: {e}")
+                # Click ONLY "Make Payment" on uploadDocs.xhtml.
+                # Crucial: NEVER search for generic "Submit" or "Proceed" on this page,
+                # because the table row delete button (<input type="submit"> with red 'X') defaults
+                # to accessible name "Submit" and will delete uploaded documents (e.g. Photo)!
+                make_pay_clicked = False
+                make_payment_selectors = [
+                    "input[value='Make Payment']",
+                    "input[value*='Payment']",
+                    "button:has-text('Make Payment')",
+                    "a:has-text('Make Payment')",
+                    "[id*='payment']",
+                    "[id*='Payment']"
+                ]
+
+                # First try exact get_by_role("button", name="Make Payment")
+                try:
+                    btn = page_form.get_by_role("button", name="Make Payment", exact=True)
+                    if btn.count() > 0 and btn.first.is_visible():
+                        btn.first.scroll_into_view_if_needed()
+                        time.sleep(0.5)
+                        btn.first.click()
+                        self.log("Clicked 'Make Payment' button via role")
+                        make_pay_clicked = True
                 except Exception as e:
-                    self.log(f"Payment step error: {e}")
+                    self.log(f"Role click note: {e}")
 
-                self.log("User redirected to payment gateway. Backend job complete.")
-                browser.close()
+                if not make_pay_clicked:
+                    for sel in make_payment_selectors:
+                        try:
+                            el = page_form.locator(sel).first
+                            if el.is_visible():
+                                el.scroll_into_view_if_needed()
+                                time.sleep(0.5)
+                                el.click()
+                                self.log(f"Clicked Make Payment via {sel}")
+                                make_pay_clicked = True
+                                break
+                        except Exception:
+                            continue
+
+                if not make_pay_clicked:
+                    try:
+                        page_form.locator("input[value='Make Payment']").first.click(force=True)
+                        self.log("Clicked 'Make Payment' via force click fallback")
+                        make_pay_clicked = True
+                    except Exception as e:
+                        self.log(f"WARNING: Could not find or click Make Payment button: {e}")
+
+                # Wait for navigation away from uploadDocs.xhtml
+                try:
+                    self.log("Waiting for portal to navigate away from uploadDocs to payment...")
+                    page_form.wait_for_url(lambda u: "uploaddocs" not in u.lower(), timeout=35000)
+                    self.log(f"Navigated away from uploadDocs! New URL: {page_form.url}")
+                except Exception as ne:
+                    self.log(f"Navigation wait note: {ne}")
+
+                try:
+                    page_form.wait_for_load_state("domcontentloaded", timeout=15000)
+                    page_form.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+
+                time.sleep(3)
+
+                # Check if we are on an intermediate Payment Confirmation / Challan page
+                # If so, handle Terms & Conditions and the final confirmation button
+                try:
+                    page_form.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1)
+
+                    tc_checkboxes = page_form.locator("input[type='checkbox']")
+                    for i in range(tc_checkboxes.count()):
+                        try:
+                            cb = tc_checkboxes.nth(i)
+                            if cb.is_visible() and not cb.is_checked():
+                                cb.check(force=True)
+                                self.log("Terms & Conditions checkbox checked on payment confirmation page.")
+                        except Exception:
+                            pass
+
+                    time.sleep(1)
+
+                    for conf_sel in [
+                        "input[value='Make Payment']",
+                        "input[value='Proceed to Pay']",
+                        "input[value='Pay']",
+                        "input[value='Confirm Payment']",
+                        "button:has-text('Make Payment')",
+                        "button:has-text('Proceed to Pay')",
+                        "button:has-text('Pay')",
+                        "button:has-text('Confirm Payment')"
+                    ]:
+                        try:
+                            c_btn = page_form.locator(conf_sel).first
+                            if c_btn.is_visible():
+                                self.log(f"Clicking final confirmation payment button via {conf_sel}...")
+                                c_btn.scroll_into_view_if_needed()
+                                c_btn.click()
+                                time.sleep(3)
+                                break
+                        except Exception:
+                            pass
+                except Exception as e:
+                    self.log(f"Confirmation page handling note: {e}")
+
+                # Wait for final payment gateway URL (BillDesk or similar)
+                try:
+                    page_form.wait_for_load_state("domcontentloaded", timeout=15000)
+                    page_form.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+
+                time.sleep(3)
+
+                # Save screenshot of the payment page
+                try:
+                    after_path = os.path.join(os.path.dirname(__file__), "after_payment_click.png")
+                    page_form.screenshot(path=after_path)
+                    self.log("Screenshot saved: after_payment_click.png")
+                except Exception:
+                    pass
+
+                # Get the payment gateway URL and send to frontend
+                try:
+                    payment_url = page_form.url
+                    self.log(f"Payment gateway URL: {payment_url}")
+                    if self.ws_manager:
+                        self.ws_manager.send_event_sync({
+                            "type": "OPEN_PAYMENT_URL",
+                            "url": payment_url
+                        })
+                        self.ws_manager.send_event_sync({
+                            "type": "STATUS_MESSAGE",
+                            "message": "Payment page reached! Please complete payment in the opened tab."
+                        })
+                except Exception as e:
+                    self.log(f"Could not get payment URL: {e}")
+
+                self.log("SUCCESS! User redirected to payment gateway. Keeping session alive for user to complete payment...")
+
+                # Keep browser session open for up to 15 minutes (90 x 10s) so session cookies stay valid
+                for _ in range(90):
+                    time.sleep(10)
+                    try:
+                        if page_form.is_closed() or not browser.is_connected():
+                            break
+                    except Exception:
+                        break
 
         except Exception as e:
             self.log(f"CRITICAL ERROR: {str(e)}")

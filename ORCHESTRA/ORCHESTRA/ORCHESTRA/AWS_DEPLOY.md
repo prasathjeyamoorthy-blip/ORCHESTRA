@@ -2,12 +2,13 @@
 
 ## Architecture
 ```
-EC2 Instance (Mumbai: ap-south-1)
+EC2 Instance (Mumbai: ap-south-1) — 13.207.224.41 (residence-cert.duckdns.org)
+  ├── Nginx reverse proxy (SSL via Let's Encrypt, DuckDNS)
   ├── Docker container: ORCHESTRA backend      → port 8001
   └── Docker container: DocumentUploadAgent   → port 8000
 
 AWS Amplify
-  └── Frontend (React + Vite)                 → https://*.amplifyapp.com
+  └── Frontend (React + Vite)                 → https://vercel-render-production.d3jgbmm7hml0rf.amplifyapp.com
 ```
 
 ---
@@ -18,68 +19,66 @@ AWS Amplify
 - **AMI:** Ubuntu 22.04 LTS
 - **Instance type:** `t3.medium` (2 vCPU, 4GB RAM) — minimum for Playwright
 - **Region:** `ap-south-1` (Mumbai)
-- **Storage:** 20GB gp3
+- **Elastic IP:** `13.207.224.41`
+- **Domain:** `residence-cert.duckdns.org`
 - **Security Group inbound rules:**
   ```
-  Port 22   — SSH (your IP only)
-  Port 8000 — DocumentUploadAgent (anywhere or frontend IP)
-  Port 8001 — ORCHESTRA backend (anywhere or frontend IP)
+  Port 22   — SSH
+  Port 80   — HTTP (redirects to HTTPS)
+  Port 443  — HTTPS (Nginx SSL)
+  Port 8000 — DocumentUploadAgent
+  Port 8001 — ORCHESTRA backend
   ```
 
-### 1.2 SSH into EC2 and Run Deploy Script
+### 1.2 SSH into EC2
 ```bash
-ssh -i your-key.pem ubuntu@<EC2_PUBLIC_IP>
-
-# Download and run deploy script
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/ORCHESTRA/deploy.sh | bash
+ssh -i residence-cert-key.pem ubuntu@13.207.224.41
 ```
 
-### 1.3 Fill in environment variables
+### 1.3 Deploy and Run
 ```bash
-cd ~/app/ORCHESTRA
-nano .env   # fill in all values from .env.example
+cd ~/app && git pull origin vercel-render-production
+cd ORCHESTRA && docker compose down && docker compose up -d --build
 ```
 
-### 1.4 Start the services
-```bash
-docker compose up -d --build
-```
-
-### 1.5 Verify both services are running
+### 1.4 Verify Services
 ```bash
 curl http://localhost:8001/   # → {"status":"online","service":"ORCHESTRA Backend Agent"}
 curl http://localhost:8000/   # → {"status":"online","service":"Document Upload Agent"}
+curl https://residence-cert.duckdns.org/
 ```
 
 ---
 
 ## Part 2: AWS Amplify (Frontend)
 
-### 2.1 Go to AWS Amplify Console
-- Region: `ap-south-1`
-- New App → Host Web App → Connect GitHub
-
-### 2.2 Build Settings
+### 2.1 Build Settings
 - **Root directory:** `ORCHESTRA/frontend`
-- Amplify auto-detects `amplify.yml` in the frontend folder
+- Build spec uses `ORCHESTRA/frontend/amplify.yml`:
+  ```yaml
+  version: 1
+  frontend:
+    phases:
+      preBuild:
+        commands:
+          - npm install
+      build:
+        commands:
+          - npm run build
+    artifacts:
+      baseDirectory: dist
+      files:
+        - "**/*"
+    cache:
+      paths:
+        - node_modules/**/*
+  ```
 
-### 2.3 Set Environment Variables in Amplify Console
+### 2.2 Environment Variables (Amplify Console)
 ```
-VITE_API_BASE      = http://<EC2_PUBLIC_IP>:8001
-VITE_DOC_API_BASE  = http://<EC2_PUBLIC_IP>:8000
-VITE_WS_BASE       = ws://<EC2_PUBLIC_IP>:8001
-```
-> If you set up a domain with HTTPS, use `https://` and `wss://` instead.
-
-### 2.4 Update ALLOWED_ORIGINS on EC2
-After Amplify gives you the URL (`https://xxxxx.amplifyapp.com`):
-```bash
-# Edit .env on EC2
-nano ~/app/ORCHESTRA/.env
-# Set: ALLOWED_ORIGINS=https://xxxxx.amplifyapp.com,http://localhost:5173
-
-# Restart containers to pick up the new env var
-docker compose down && docker compose up -d
+VITE_API_BASE      = https://residence-cert.duckdns.org
+VITE_DOC_API_BASE  = https://residence-cert.duckdns.org
+VITE_WS_BASE       = wss://residence-cert.duckdns.org
 ```
 
 ---
@@ -94,15 +93,8 @@ docker compose restart orchestra
 docker compose restart document-upload
 
 # Pull latest code and redeploy
-git pull && docker compose up -d --build
+cd ~/app && git pull origin vercel-render-production && cd ORCHESTRA && docker compose down && docker compose up -d --build
 
 # Check container status
 docker compose ps
 ```
-
----
-
-## EC2 Free Tier Note
-AWS Free Tier gives you **750 hours/month** of `t2.micro` (1 vCPU, 1GB RAM).
-`t2.micro` is too small for Playwright + both backends.
-Use `t3.medium` — costs ~$0.04/hour (~₹100/day).

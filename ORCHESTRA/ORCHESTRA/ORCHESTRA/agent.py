@@ -80,12 +80,20 @@ def get_qdrant_client():
     qdrant_url = os.getenv("QDRANT_URL")
     qdrant_api_key = os.getenv("QDRANT_API_KEY")
     if not qdrant_url or not qdrant_api_key:
-        raise ValueError("[agent] Critical: QDRANT_URL or QDRANT_API_KEY is missing in .env. Qdrant Cloud is required.")
+        print("[agent] Warning: QDRANT_URL or QDRANT_API_KEY is missing in .env.")
+        return None
 
-    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key, check_compatibility=False, timeout=10)
-    client.get_collections()
-    print(f"[agent] Connected exclusively to Qdrant Cloud: {qdrant_url}")
-    return client
+    try:
+        client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key, check_compatibility=False, timeout=10)
+        try:
+            client.get_collections()
+            print(f"[agent] Connected exclusively to Qdrant Cloud: {qdrant_url}")
+        except Exception as conn_err:
+            print(f"[agent] Warning: Initial Qdrant connectivity check failed ({conn_err}). Will retry dynamically.")
+        return client
+    except Exception as e:
+        print(f"[agent] Warning: Failed to initialize QdrantClient: {e}")
+        return None
 
 qdrant_client = get_qdrant_client()
 
@@ -208,7 +216,7 @@ _COLLECTION_VERIFIED = False
 
 def ensure_collection_exists():
     global _COLLECTION_VERIFIED
-    if _COLLECTION_VERIFIED:
+    if _COLLECTION_VERIFIED or not qdrant_client:
         return
     try:
         exists = qdrant_client.collection_exists(COLLECTION_NAME)
@@ -222,6 +230,8 @@ def ensure_collection_exists():
 
 
 def _qdrant_search(query_vec: np.ndarray, top_k: int = 15) -> List[str]:
+    if not qdrant_client:
+        return []
     ensure_collection_exists()
     try:
         vec_list = query_vec.tolist() if hasattr(query_vec, 'tolist') else list(query_vec)

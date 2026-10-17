@@ -148,25 +148,24 @@ Output JSON only.
 
 RESIDENCE_PROMPT = """
 Extract ONLY the following fields from this Residence Certificate.
-Return strict JSON:
+Return strict JSON: 
 {
-    "certificate_type": "Residence Certificate",
-    "name": "",
+ "certificate_type": "Residence Certificate",
+    "name":"",
     "father_name": "",
     "religion": "",
     "community": "",
-    "gender": "",
-    "address": "",
-    "door_no": "",
-    "street": "",
+    "gender":"",
+    "pincode": "",
+    "taluk": "",
+}   "street": "",
     "area": "",
     "city": "",
     "state": "",
-    "district": "",
-    "taluk": "",
     "pincode": ""
+    "taluk": "",
 }
-Output JSON only.
+OUTPUT JSON ONLY
 """
 
 DRIVING_LICENSE_PROMPT = """

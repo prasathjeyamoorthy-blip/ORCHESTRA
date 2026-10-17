@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
 
 function ElegantShape({
   className,
@@ -7,7 +6,6 @@ function ElegantShape({
   width = 400,
   height = 100,
   rotate = 0,
-  gradient = "from-white/[0.08]",
 }) {
   return (
     <motion.div

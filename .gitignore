@@ -1,0 +1,34 @@
+# Environment variables (contains sensitive secrets & keys)
+.env
+.env.local
+.env.*.local
+*.env
+test_*.py
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+ENV/
+env/
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Build and dist outputs
+dist/
+build/
+*.egg-info/
+
+# Local runtime & debug files
+*.log
+last_payload.json
+backend_captcha.png
+after_payment_click.png
+before_payment_click.png
+.DS_Store
+.vscode/

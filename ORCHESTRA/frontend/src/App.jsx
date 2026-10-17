@@ -23,7 +23,6 @@ import "./index.css";
 const TYPING_WORDS = ["TNeGA AI Assistant", "e-Sevai Automation"];
 
 function LandingOverlay({ onStart }) {
-  const [displayed, setDisplayed] = useState("");
   const [wordIdx, setWordIdx] = useState(0);
   const [charIdx, setCharIdx] = useState(0);
   const [deleting, setDeleting] = useState(false);
@@ -38,12 +37,15 @@ function LandingOverlay({ onStart }) {
     } else if (deleting && charIdx > 0) {
       timeout = setTimeout(() => setCharIdx(i => i - 1), 45);
     } else if (deleting && charIdx === 0) {
-      setDeleting(false);
-      setWordIdx(i => (i + 1) % TYPING_WORDS.length);
+      timeout = setTimeout(() => {
+        setDeleting(false);
+        setWordIdx(i => (i + 1) % TYPING_WORDS.length);
+      }, 200);
     }
-    setDisplayed(word.slice(0, charIdx));
     return () => clearTimeout(timeout);
   }, [charIdx, deleting, wordIdx]);
+
+  const displayed = TYPING_WORDS[wordIdx].slice(0, charIdx);
 
   return (
     <div style={{
@@ -98,7 +100,6 @@ export default function App() {
   const [messages, setMessages]   = useState([DEFAULT_WELCOME_MSG]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
-  const isClearingRef = useRef(false); // prevents stale localStorage writes during clear
   const [chatSessions, setChatSessions] = useState(() => {
     try {
       const saved = localStorage.getItem("tnega_chat_sessions");
@@ -108,23 +109,31 @@ export default function App() {
   const [showChecklist, setShowChecklist] = useState(false);
   const [showOtpModal, setShowOtpModal]   = useState(false);
   const [userPhone, setUserPhone]         = useState(() => sessionStorage.getItem("user_phone") || "");
+  const [currentLanguage, _setCurrentLanguage] = useState("en");
   const [waitingForDocReply, setWaitingForDocReply] = useState(false);
-  const [isChecklistProceeding, setIsChecklistProceeding] = useState(false);
-  const [currentLanguage] = useState("en");
+  const [isChecklistProceeding, _setIsChecklistProceeding] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [isClearingData, setIsClearingData] = useState(false);
   const chatEndRef = useRef(null);
 
   // ── Dark mode — always dark ───────────────────────────────────────────────
   const [dark, setDark] = useState(true);
   
   useEffect(() => {
-    document.documentElement.classList.add("dark");
-    localStorage.setItem("theme", "dark");
-  }, []);
+    if (dark) {
+      document.documentElement.classList.add("dark");
+      document.documentElement.classList.remove("light");
+    } else {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("light");
+    }
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
   const [activePage, setActivePage] = useState(() => {
     const hash = window.location.hash.replace("#", "");
     return ["faq", "status", "contact"].includes(hash) ? hash : "home";
   });
-  const [pageHistory, setPageHistory] = useState(["home"]);
+  const [_pageHistory, setPageHistory] = useState(["home"]);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const navigate = (page) => {
@@ -134,7 +143,7 @@ export default function App() {
     setDrawerOpen(false);
   };
 
-  const navigateBack = () => {
+  const _navigateBack = () => {
     window.history.back();
   };
 
@@ -164,7 +173,7 @@ export default function App() {
       } else {
         updated = [{ id: sessionId, title, messages }, ...prev];
       }
-      try { if (!isClearingRef.current) localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
+      try { localStorage.setItem("tnega_chat_sessions", JSON.stringify(updated)); } catch (_) {}
       return updated;
     });
   }, [messages, sessionId]);
@@ -182,8 +191,6 @@ export default function App() {
     if (target) {
       setSessionId(target.id);
       setMessages(target.messages || [DEFAULT_WELCOME_MSG]);
-      setShowChecklist(false);   // never carry checklist state across sessions
-      setWaitingForDocReply(false);
       setActivePage("home");
     }
   };
@@ -195,24 +202,6 @@ export default function App() {
     if (id === sessionId) {
       handleNewChat();
     }
-  };
-
-  const handleClearData = () => {
-    // Block localStorage sync effect from resurrecting cleared sessions
-    isClearingRef.current = true;
-    // Reset all frontend state
-    setChatSessions([]);
-    setMessages([DEFAULT_WELCOME_MSG]);
-    setUserPhone("");
-    setShowChecklist(false);
-    setWaitingForDocReply(false);
-    handleNewChat();
-    try { localStorage.removeItem("tnega_chat_sessions"); } catch (_) {}
-    sessionStorage.removeItem("user_phone");
-    // Show OTP modal so user can log in fresh
-    setShowOtpModal(true);
-    // Re-enable localStorage writes after state settles
-    setTimeout(() => { isClearingRef.current = false; }, 500);
   };
 
   // ── Init ──────────────────────────────────────────────────────────────────
@@ -354,42 +343,22 @@ I am the official ORCHESTRA assistant for the TNeGA e-Sevai Residence Certificat
 Just type your question in plain language and I will assist you right away.`,
   };
 
-  const callBackend = async (text) => {
-    setIsGenerating(true);
-    try {
-      const res = await sendMessage(sessionId, text);
-      pushBot(res.answer || "Please provide more details.");
-    } catch (err) {
-      pushBot(`Error: ${err.message}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const checkShouldShowChecklist = (res, userText, botAnswer) => {
     if (res?.stage === "SHOW_DOCUMENTS") return true;
 
     const u = (userText || "").toLowerCase().trim();
     const b = (botAnswer || "").toLowerCase().trim();
 
-    // Only trigger on explicit application / document submission intent
-    // Avoid casual words like "yes", "ready", "proceed" that fire on any reply
     const userPhrases = [
-      "submit documents", "upload documents", "apply now", "start application",
-      "submit application", "start process", "begin application",
-      "i want to apply", "i want to submit", "let's start the application",
-      "ready to submit", "upload my documents", "start uploading",
-      "yeah we can go", "we can go", "go ahead and apply",
+      "yeah we can go", "we can go", "let's go", "lets go", "go ahead", "ready", "ready to apply",
+      "submit documents", "upload documents", "apply now", "start application", "yes proceed", "proceed",
+      "submit application", "start process", "begin application", "i want to apply", "yes", "yeah"
     ];
     if (userPhrases.some(p => u.includes(p))) return true;
 
-    // Bot must explicitly mention document upload or checklist — not just any question
     const botPhrases = [
-      "document upload checklist",
-      "upload your documents now",
-      "proceed with submitting your documents",
-      "ready to begin uploading",
-      "click here to upload",
+      "provide the required documents", "proceed with submitting", "submit your residence certificate",
+      "upload your documents", "ready to begin", "upload the required documents", "document upload checklist"
     ];
     if (botPhrases.some(p => b.includes(p))) return true;
 
@@ -431,7 +400,7 @@ Just type your question in plain language and I will assist you right away.`,
       );
 
       if (checkShouldShowChecklist(res, text, finalAnswer)) setShowChecklist(true);
-    } catch (err) {
+    } catch (_err) {
       try {
         const res = await sendMessage(sessionId, text);
         const finalAnswer = res.answer || "";
@@ -478,7 +447,7 @@ Just type your question in plain language and I will assist you right away.`,
       if (checkShouldShowChecklist(res, reply, finalAnswer)) {
         setShowChecklist(true);
       }
-    } catch (err) {
+    } catch (_err) {
       try {
         const res = await sendMessage(sessionId, reply);
         const finalAnswer = res.answer || "";
@@ -499,7 +468,43 @@ Just type your question in plain language and I will assist you right away.`,
   const handleChecklistExit = () => {
     sendWS({ type: "USER_CLOSE" });
     setShowChecklist(false);
-    setFinalPageImage("");
+  };
+
+  // ── Apply Now — open checklist directly ──────────────────────────────────
+  const handleApplyNow = () => {
+    navigate("home");
+    setShowChecklist(true);
+  };
+
+  // ── Clear My Data — delete all user data from backend + local state ───────
+  const handleClearDataConfirm = async () => {
+    setIsClearingData(true);
+    try {
+      const phone = userPhone || sessionStorage.getItem("user_phone") || "";
+      const apiBase = import.meta.env.VITE_API_BASE;
+      const docBase = import.meta.env.VITE_DOC_API_BASE;
+
+      const requests = [
+        fetch(`${docBase}/clear-cache`, { method: "POST" }).catch(() => {}),
+      ];
+      if (phone) {
+        requests.push(
+          fetch(`${apiBase}/api/chat-history?phone_number=${encodeURIComponent(phone)}`, { method: "DELETE" }).catch(() => {})
+        );
+      }
+      await Promise.all(requests);
+
+      // Clear local state
+      setChatSessions([]);
+      localStorage.removeItem("tnega_chat_sessions");
+      setMessages([DEFAULT_WELCOME_MSG]);
+      setShowChecklist(false);
+      setShowClearModal(false);
+    } catch (err) {
+      alert("Error clearing data: " + (err.message || "Unknown error"));
+    } finally {
+      setIsClearingData(false);
+    }
   };
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
@@ -509,7 +514,6 @@ Just type your question in plain language and I will assist you right away.`,
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
   const [showDocumentNumber, setShowDocumentNumber]   = useState(false);
   const [automationStatus, setAutomationStatus]       = useState("");
-  const [finalPageImage, setFinalPageImage]           = useState("");
 
   const openAutomationSocket = () => new Promise((resolve) => {
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
@@ -519,83 +523,41 @@ Just type your question in plain language and I will assist you right away.`,
       wsRef.current.close();
     }
     let resolved = false;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 10;
-    let pollInterval = null;
-
-    const processEvent = (data) => {
-      if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
-      else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
-      else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-      else if (data.type === "FINAL_PAGE_SCREENSHOT")       { /* no-op */ }
-      else if (data.type === "OPEN_PAYMENT_URL")            { if (data.url) window.open(data.url, "_blank"); }
-      else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
-      else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
-      else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
-      else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
-      else                                                   { setAutomationEvent(data); }
-    };
-
-    // Start HTTP polling as reliable fallback
-    let lastEventSeen = null;
-    const startPolling = () => {
-      if (pollInterval) return;
-      console.log("[WS Fallback] Starting HTTP polling for automation status");
-      pollInterval = setInterval(async () => {
-        try {
-          const res = await fetch(`${import.meta.env.VITE_API_BASE}/automation/status`);
-          const data = await res.json();
-          if (data.latest_event && JSON.stringify(data.latest_event) !== lastEventSeen) {
-            lastEventSeen = JSON.stringify(data.latest_event);
-            processEvent(data.latest_event);
-          }
-        } catch (_) {}
-      }, 1500);
-    };
-
     const connect = () => {
-      attempts++;
       const socket = new WebSocket(`${import.meta.env.VITE_WS_BASE}/ws/automation`);
       let ping;
-
       socket.onopen = () => {
-        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
         if (!resolved) { resolved = true; resolve(); }
       };
-
       socket.onmessage = (e) => {
-        try { processEvent(JSON.parse(e.data)); } catch (_) {}
-      };
-
-      socket.onclose = () => {
-        clearInterval(ping);
-        if (resolved) {
-          // Was connected before — reconnect
-          setTimeout(() => wsRef.current === socket && connect(), 2000);
-        } else if (attempts < MAX_ATTEMPTS) {
-          setTimeout(() => connect(), 1000);
-        } else {
-          // WebSocket completely failed — use polling
-          startPolling();
-          if (!resolved) { resolved = true; resolve(); }
+        const data = JSON.parse(e.data);
+        if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+        else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+        else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+        else if (data.type === "OPEN_PAYMENT_URL")            {
+          if (data.url) {
+            window.open(data.url, "_blank");
+            setMessages(prev => [
+              ...prev,
+              {
+                sender: "agent",
+                text: `💳 **Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n👉 [**Proceed to Payment Gateway**](${data.url})`
+              }
+            ]);
+          }
         }
+        else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+        else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+        else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+        else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
+        else                                                   { setAutomationEvent(data); }
       };
-
-      socket.onerror = () => { clearInterval(ping); };
+      socket.onclose = () => { clearInterval(ping); setTimeout(() => wsRef.current === socket && connect(), 1000); };
+      socket.onerror = () => { clearInterval(ping); if (!resolved) { resolved = true; resolve(); } };
       wsRef.current = socket;
     };
-
     connect();
-
-    // After 6s if still not connected, start polling and resolve
-    setTimeout(() => {
-      if (!resolved) {
-        startPolling();
-        resolved = true;
-        resolve();
-      }
-    }, 6000);
   });
 
   const sendWS = (payload) => {
@@ -627,7 +589,8 @@ Just type your question in plain language and I will assist you right away.`,
           onDeleteChat={handleDeleteChat}
           onOpenOtpModal={() => setShowOtpModal(true)}
           userPhone={userPhone}
-          onClearData={handleClearData}
+          onApplyNow={handleApplyNow}
+          onClearData={() => setShowClearModal(true)}
         />
       )}
 
@@ -739,6 +702,38 @@ Just type your question in plain language and I will assist you right away.`,
       <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} onAction={handleAutomationAction} />
       <SelfDeclarationModal isOpen={showSelfDeclaration}  downloadPath={selfDeclarationPath} onSubmit={handleSelfDeclarationSubmit} onExit={handleSelfDeclarationExit} />
       <DocumentNumberModal  isOpen={showDocumentNumber}   onSubmit={handleDocumentNumberSubmit} />
+
+      {/* ── Clear My Data Confirmation Modal ── */}
+      {showClearModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div style={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1.25rem", padding: "2rem", maxWidth: "22rem", width: "100%", textAlign: "center", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
+            <div style={{ width: "3.5rem", height: "3.5rem", borderRadius: "50%", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
+              <span style={{ fontSize: "1.5rem" }}>🗑</span>
+            </div>
+            <h3 style={{ color: "#fff", fontWeight: 700, fontSize: "1.1rem", marginBottom: "0.5rem" }}>Clear All My Data?</h3>
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.875rem", lineHeight: 1.6, marginBottom: "1.5rem" }}>
+              This permanently deletes your chat history, uploaded documents, and saved application data. Your account stays active.
+            </p>
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              <button
+                onClick={() => setShowClearModal(false)}
+                disabled={isClearingData}
+                style={{ flex: 1, padding: "0.7rem", borderRadius: "9999px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", fontWeight: 600, fontSize: "0.875rem", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearDataConfirm}
+                disabled={isClearingData}
+                style={{ flex: 1, padding: "0.7rem", borderRadius: "9999px", background: isClearingData ? "rgba(239,68,68,0.4)" : "linear-gradient(135deg,#ef4444,#dc2626)", border: "none", color: "#fff", fontWeight: 700, fontSize: "0.875rem", cursor: isClearingData ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}
+              >
+                {isClearingData ? <><span style={{ width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} /> Deleting…</> : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <OtpModal
         isOpen={showOtpModal}
         onClose={() => setShowOtpModal(false)}

@@ -20,7 +20,7 @@ const QUICK_ACTIONS = [
   { label: "General Help",        send: "general help" },
 ];
 
-export default function ChatInput({ onSend, disabled, isGenerating, onStop, showChips, currentLanguage = "en" }) {
+export default function ChatInput({ onSend, disabled, isGenerating, onStop, _showChips, currentLanguage = "en" }) {
   const [input, setInput] = useState("");
   const { ref, adjust } = useAutoResize(48, 150);
 

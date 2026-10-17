@@ -37,7 +37,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
 
       const data = await response.json();
       onSubmit(data.file_path);
-    } catch (error) {
+    } catch (_error) {
       alert("Failed to upload signed declaration. Please try again.");
       setIsUploading(false);
     }

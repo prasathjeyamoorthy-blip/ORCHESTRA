@@ -7,37 +7,34 @@ export default function AutomationModal({ isOpen, eventData, onSubmit, onAction 
   const [multiInputValues, setMultiInputValues] = useState({});
   const [refreshing, setRefreshing]           = useState(false);
   const [otpSending, setOtpSending]           = useState(false);
+  const [prevEventData, setPrevEventData]     = useState(null);
 
-  useEffect(() => {
+  if (eventData !== prevEventData) {
+    setPrevEventData(eventData);
     setInputValue("");
-    setMultiInputValues({});
     setRefreshing(false);
-
-    if (eventData?.type === 'REQUEST_CAPTCHA') {
-      if (eventData.image) {
-        setCaptchaSrc(eventData.image);
-      } else {
-        fetch(`${import.meta.env.VITE_API_BASE}/automation/captcha-b64?t=${Date.now()}`)
-          .then(r => r.json())
-          .then(d => { if (d.image) setCaptchaSrc(d.image); })
-          .catch(err => console.error("[Captcha] Failed to load:", err));
-      }
-    }
 
     if (eventData?.type === 'REQUEST_MISSING_DETAILS' && eventData.missing_fields) {
       const init = {};
-      eventData.missing_fields.forEach(f => init[f] = "");
+      eventData.missing_fields.forEach(f => { init[f] = ""; });
       setMultiInputValues(init);
+    } else {
+      setMultiInputValues({});
     }
-  }, [eventData]);
 
-  // Update captcha image when backend sends a refreshed one
-  useEffect(() => {
     if (eventData?.type === 'REQUEST_CAPTCHA' && eventData.image) {
       setCaptchaSrc(eventData.image);
-      setRefreshing(false);
     }
-  }, [eventData?.image]);
+  }
+
+  useEffect(() => {
+    if (eventData?.type === 'REQUEST_CAPTCHA' && !eventData.image) {
+      fetch(`${import.meta.env.VITE_API_BASE}/automation/captcha-b64?t=${Date.now()}`)
+        .then(r => r.json())
+        .then(d => { if (d.image) setCaptchaSrc(d.image); })
+        .catch(err => console.error("[Captcha] Failed to load:", err));
+    }
+  }, [eventData]);
 
   if (!isOpen || !eventData) return null;
 

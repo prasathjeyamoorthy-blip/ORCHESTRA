@@ -17,10 +17,26 @@ from agent import agentic_rag, documents_node, generate_response_stream
 from guardrails import check_guardrail
 
 try:
-    from supabase_db import save_message, fetch_user_history
+    from supabase_db import (
+        save_message,
+        fetch_user_history,
+        delete_user_history,
+        delete_user_documents,
+        delete_application_payload,
+        save_user_document_meta,
+        fetch_user_documents,
+        save_application_payload,
+        get_latest_application_payload,
+        save_user_profile,
+        fetch_user_profile,
+    )
 except Exception as _e:
     print(f"[app] Note: supabase_db functions optional: {_e}")
-    save_message, fetch_user_history = None, None
+    save_message = fetch_user_history = delete_user_history = None
+    delete_user_documents = delete_application_payload = None
+    save_user_document_meta = fetch_user_documents = None
+    save_application_payload = get_latest_application_payload = None
+    save_user_profile = fetch_user_profile = None
 
 app = FastAPI(title="ORCHESTRA Main Server")
 
@@ -348,6 +364,7 @@ class ConnectionManager:
         self.latest_response: dict = None
         self._event_queue: deque = deque()
         self._main_loop = None
+        self.latest_captcha_b64: str = ""
 
     @property
     def active_connection(self) -> WebSocket | None:
@@ -377,6 +394,8 @@ class ConnectionManager:
             print(f"[WebSocket ERROR] send failed: {e}")
 
     async def send_event(self, event_data: dict):
+        if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):
+            self.latest_captcha_b64 = event_data["image"]
         if not self._connections:
             self._event_queue.append(event_data)
             return
@@ -384,6 +403,8 @@ class ConnectionManager:
         await self._flush_queue()
 
     def send_event_sync(self, event_data: dict, wait_timeout: float = 120.0):
+        if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):
+            self.latest_captcha_b64 = event_data["image"]
         self._event_queue.append(event_data)
         print(f"[WebSocket] Event queued: {event_data.get('type')}")
         deadline = time.time() + wait_timeout
@@ -447,147 +468,12 @@ def ws_status():
     return {"connected": manager.is_connected}
 
 
-@app.get("/automation/status")
-def get_automation_status():
-    """HTTP polling fallback for automation status — used when WebSocket fails."""
-    latest = manager.latest_response
-    return {
-        "connected": manager.is_connected,
-        "latest_event": latest
-    }
-
-
-@app.get("/automation/captcha-b64")
-def get_captcha_b64():
-    """Return captcha as base64 JSON — used by AutomationModal frontend."""
-    import base64
-    captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
-    if os.path.exists(captcha_path):
-        with open(captcha_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-        return {"image": f"data:image/png;base64,{b64}"}
-    return {"error": "Captcha not found", "image": ""}
-
-
-@app.get("/api/chat-history")
-def get_chat_history(phone_number: str = "", session_id: str = ""):
-    """Fetch chat history for a user from Supabase."""
-    try:
-        from supabase_db import fetch_user_history
-        history = fetch_user_history(phone_number, session_id=session_id or None)
-        return {"status": "success", "history": history}
-    except Exception as e:
-        return {"status": "error", "message": str(e), "history": []}
-
-
-@app.delete("/api/user-documents")
-def delete_user_documents(phone_number: str = ""):
-    """Delete all documents for a user from Supabase."""
-    if not phone_number:
-        return JSONResponse(status_code=400, content={"status": "error", "message": "phone_number is required"})
-    try:
-        from supabase_db import get_supabase_config, _get_headers
-        phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
-        url, key = get_supabase_config()
-        if url and key:
-            import requests as _req
-            endpoint = f"{url}/rest/v1/user_documents"
-            params = {"phone_number": f"eq.{phone_clean}"}
-            r = _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
-            if r.status_code not in (200, 204):
-                return JSONResponse(status_code=500, content={"status": "error", "message": f"DB error {r.status_code}"})
-        return {"status": "success"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-
-@app.delete("/user-profile")
-def delete_user_profile(phone_number: str = ""):
-    """
-    Clear user chat history and in-memory state only.
-    Per spec: keep user_profiles row intact — do NOT delete the user account.
-    Only clears application_payloads and in-memory caches.
-    """
-    if not phone_number:
-        return JSONResponse(status_code=400, content={"status": "error", "message": "phone_number is required"})
-    try:
-        from supabase_db import get_supabase_config, _get_headers
-        phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
-        url, key = get_supabase_config()
-        if url and key:
-            import requests as _req
-            # Only delete application_payloads — keep user_profiles row
-            endpoint = f"{url}/rest/v1/application_payloads"
-            params = {"phone_number": f"eq.{phone_clean}"}
-            _req.delete(endpoint, headers=_get_headers(key), params=params, timeout=5)
-
-        # Clear in-memory stores (documents registry and payload registry only)
-        from supabase_db import APPLICATION_PAYLOAD_REGISTRY, USER_DOCUMENT_REGISTRY
-        APPLICATION_PAYLOAD_REGISTRY.pop(phone_clean, None)
-        USER_DOCUMENT_REGISTRY.pop(phone_clean, None)
-
-        # Clear in-memory chat history in app.py USER_PROFILES (keep the profile entry)
-        if phone_clean in USER_PROFILES:
-            USER_PROFILES[phone_clean]["chat_history"] = []
-            USER_PROFILES[phone_clean]["stage"] = None
-            USER_PROFILES[phone_clean]["applicant_category"] = None
-
-        return {"status": "success"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-
-@app.delete("/api/chat-history")
-def delete_chat_history(phone_number: str = "", session_id: str = ""):
-    """Delete chat history for a user from Supabase and all in-memory caches."""
-    if not phone_number:
-        from fastapi.responses import JSONResponse as _J
-        return _J(status_code=400, content={"status": "error", "message": "phone_number is required"})
-
-    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
-
-    # 1. Delete from Supabase
-    try:
-        from supabase_db import delete_user_history
-        ok = delete_user_history(phone_clean, session_id=session_id or None)
-    except Exception as e:
-        from fastapi.responses import JSONResponse as _J
-        return _J(status_code=500, content={"status": "error", "message": str(e)})
-
-    if not ok:
-        from fastapi.responses import JSONResponse as _J
-        return _J(status_code=500, content={"status": "error", "message": "Database deletion failed"})
-
-    # 2. Clear in-memory chat history from app.py USER_PROFILES
-    if phone_clean in USER_PROFILES:
-        USER_PROFILES[phone_clean]["chat_history"] = []
-        USER_PROFILES[phone_clean]["stage"] = None
-        USER_PROFILES[phone_clean]["applicant_category"] = None
-
-    # 3. Clear all active sessions for this user
-    sessions_to_clear = [sid for sid, s in SESSIONS.items()
-                         if s.get("chat_history") and any(
-                             True for _ in [phone_clean]  # sessions don't track phone directly
-                         )]
-    # Clear all sessions' chat history (conservative — clears all in-memory state)
-    for sid in list(SESSIONS.keys()):
-        if SESSIONS[sid].get("chat_history"):
-            SESSIONS[sid]["chat_history"] = []
-
-    return {"status": "success", "message": f"Chat history cleared for user ****{phone_clean[-4:]}"}
-
-
 @app.post("/submit-application")
 async def submit_application(payload: dict):
     try:
         from supabase_db import save_application_payload, save_user_profile
-        # Use OTP-verified phone from payload root; fall back to applicant mobile_number
-        phone_num = (
-            payload.get("phone_number")
-            or payload.get("applicant_details", {}).get("mobile_number")
-            or payload.get("credentials", {}).get("username")
-        )
-        save_application_payload(payload, phone_number=phone_num or "")
+        save_application_payload(payload)
+        phone_num = payload.get("applicant_details", {}).get("mobile_number") or payload.get("credentials", {}).get("username")
         if phone_num:
             save_user_profile(phone_num, payload)
     except Exception as e:
@@ -642,39 +528,6 @@ class VerifyOtpRequest(BaseModel):
     verification_id: Optional[str] = ""
 
 
-@app.post("/api/user-documents")
-def save_user_document_endpoint(req: dict):
-    """Register a user's uploaded document (filename + Supabase URL + extracted data) in Supabase."""
-    try:
-        from supabase_db import save_user_document_meta
-        phone_number = req.get("phone_number", "")
-        doc_id       = req.get("doc_id", "")
-        filename     = req.get("filename", "")
-        supabase_url = req.get("supabase_url", "")
-        extracted    = req.get("extracted_data", [])
-
-        if not phone_number or not doc_id:
-            return {"status": "error", "message": "phone_number and doc_id are required"}
-
-        save_user_document_meta(phone_number, doc_id, filename, supabase_url, extracted)
-        return {"status": "success", "message": f"Document '{doc_id}' registered for {phone_number[-4:]}"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/api/user-documents")
-def get_user_documents_endpoint(phone_number: str = ""):
-    """Fetch all registered documents for a user from Supabase."""
-    try:
-        from supabase_db import fetch_user_documents
-        if not phone_number:
-            return {"status": "error", "message": "phone_number is required"}
-        docs = fetch_user_documents(phone_number)
-        return {"status": "success", "documents": docs}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
 @app.post("/api/send-otp")
 def send_otp_endpoint(req: SendOtpRequest):
     """
@@ -701,5 +554,155 @@ def verify_otp_endpoint(req: VerifyOtpRequest):
     except Exception as e:
         print(f"[OTP Endpoint Error] verify_otp: {e}")
         return {"success": False, "message": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHAT HISTORY ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/chat-history")
+def get_chat_history(phone_number: str = "", session_id: Optional[str] = None, limit: int = 50):
+    """Fetch chronological chat history for a phone number."""
+    if not phone_number:
+        return {"history": []}
+    if fetch_user_history:
+        try:
+            history = fetch_user_history(phone_number, limit=limit, session_id=session_id)
+            if history:
+                return {"history": history}
+        except Exception as e:
+            print(f"[app] fetch_user_history error: {e}")
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+    profile = USER_PROFILES.get(phone_clean) or USER_PROFILES.get(phone_number, {})
+    return {"history": profile.get("chat_history", [])}
+
+
+@app.delete("/api/chat-history")
+def delete_chat_history_endpoint(phone_number: str = "", session_id: Optional[str] = None):
+    """Delete chat history and optionally all user data for a phone number."""
+    if not phone_number:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "phone_number required"})
+
+    phone_clean = phone_number.replace("+", "").replace(" ", "").strip()[-10:]
+
+    # 1. Delete from Supabase / in-memory DB
+    if delete_user_history:
+        try:
+            delete_user_history(phone_number, session_id=session_id)
+        except Exception as e:
+            print(f"[app] delete_user_history error: {e}")
+
+    # 2. If no session_id is specified (full "Clear My Data"), clear docs & payloads
+    if not session_id:
+        if delete_user_documents:
+            try:
+                delete_user_documents(phone_number)
+            except Exception as e:
+                print(f"[app] delete_user_documents error: {e}")
+
+        if delete_application_payload:
+            try:
+                delete_application_payload(phone_number)
+            except Exception as e:
+                print(f"[app] delete_application_payload error: {e}")
+
+        USER_PROFILES.pop(phone_clean, None)
+        USER_PROFILES.pop(phone_number, None)
+
+    # 3. Clean up matching in-memory sessions
+    sessions_to_remove = [
+        sid for sid, sdata in list(SESSIONS.items())
+        if (session_id and sid == session_id) or (not session_id and sdata.get("phone_number") in (phone_number, phone_clean))
+    ]
+    for sid in sessions_to_remove:
+        SESSIONS.pop(sid, None)
+
+    return {"status": "success", "message": "Chat history deleted successfully"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# USER DOCUMENTS REGISTRY ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+class UserDocMetaRequest(BaseModel):
+    phone_number: str
+    doc_id: str
+    filename: str
+    supabase_url: str
+    extracted_data: Optional[list] = []
+
+
+@app.post("/api/user-documents")
+def save_user_document_meta_endpoint(req: UserDocMetaRequest):
+    """Save or update document metadata in Supabase registry."""
+    if save_user_document_meta:
+        try:
+            save_user_document_meta(
+                req.phone_number,
+                req.doc_id,
+                req.filename,
+                req.supabase_url,
+                req.extracted_data
+            )
+            return {"status": "success", "message": "Document registered successfully"}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+    return {"status": "success", "message": "Saved"}
+
+
+@app.get("/api/user-documents")
+def get_user_documents_endpoint(phone_number: str = ""):
+    """Fetch all registered document records for a phone number."""
+    if not phone_number:
+        return {"status": "success", "documents": {}}
+    if fetch_user_documents:
+        try:
+            docs = fetch_user_documents(phone_number)
+            return {"status": "success", "documents": docs}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+    return {"status": "success", "documents": {}}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTOMATION CAPTCHA & DECLARATION ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+@app.get("/automation/captcha-b64")
+def get_captcha_b64():
+    """Return latest captcha screenshot as base64."""
+    import base64
+    captcha_path = os.path.join(playwright_dir, "backend_captcha.png")
+    if os.path.exists(captcha_path):
+        try:
+            with open(captcha_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("utf-8")
+            return {"image": f"data:image/png;base64,{data}"}
+        except Exception as e:
+            print(f"[app] Failed to read captcha image: {e}")
+
+    if getattr(manager, "latest_captcha_b64", ""):
+        return {"image": manager.latest_captcha_b64}
+
+    return JSONResponse(status_code=404, content={"error": "Captcha not available"})
+
+
+@app.get("/download-declaration")
+def download_declaration():
+    """Download self declaration PDF form."""
+    from fastapi.responses import FileResponse
+    declaration_path = os.path.join(playwright_dir, "Self_Declaration_Form_To_Sign.pdf")
+    if os.path.exists(declaration_path):
+        return FileResponse(
+            declaration_path,
+            media_type="application/pdf",
+            filename="Self_Declaration_Form.pdf"
+        )
+    return JSONResponse(status_code=404, content={"error": "Declaration form not found"})
+
+
+@app.post("/clear-cache")
+def clear_cache_endpoint():
+    """Clear server cache."""
+    return {"status": "success", "message": "Cache cleared"}
+
 
 

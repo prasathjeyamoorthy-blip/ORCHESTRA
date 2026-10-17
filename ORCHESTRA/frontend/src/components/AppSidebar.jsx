@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Menu, LayoutDashboard, BookOpen,
-  FileCheck, Phone, User2, ChevronUp, X,
-  Plus, MessageSquare, Trash2, ShieldCheck,
+  FileCheck, Phone, ShieldCheck, Zap,
+  Plus, MessageSquare, Trash2, X,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -24,10 +24,8 @@ const actBg  = "rgba(255,255,255,0.12)";
 
 function NavContent({
   open, activePage, onNavigate, onClose, onToggle,
-  userMenu, setUserMenu, userMenuRef,
   chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onClearData,
-  onShowClearConfirm
+  onOpenOtpModal, userPhone, onApplyNow, onClearData
 }) {
   const row = {
     display: "flex", alignItems: "center",
@@ -152,6 +150,53 @@ function NavContent({
 
       {/* Footer */}
       <div style={{ padding: "0.5rem 0.375rem", display: "flex", flexDirection: "column", gap: "0.125rem" }}>
+
+        {/* Apply Now button */}
+        {onApplyNow && (
+          <button
+            onClick={() => { onApplyNow(); onClose?.(); }}
+            title={!open ? "Apply Now" : undefined}
+            style={{
+              ...row,
+              justifyContent: open ? "flex-start" : "center",
+              padding: open ? "0.65rem 0.625rem" : "0.65rem",
+              gap: "0.75rem",
+              fontSize: "0.9375rem",
+              fontWeight: 700,
+              color: "#fff",
+              background: "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)",
+              borderRadius: "0.375rem",
+              marginBottom: "0.25rem",
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+            onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+          >
+            <Zap size={18} style={{ flexShrink: 0, color: "#fff" }} />
+            {open && <span style={{ whiteSpace: "nowrap" }}>Apply Now</span>}
+          </button>
+        )}
+
+        {/* Clear My Data button */}
+        {onClearData && (
+          <button
+            onClick={() => { onClearData(); onClose?.(); }}
+            title={!open ? "Clear My Data" : undefined}
+            style={{
+              ...row,
+              justifyContent: open ? "flex-start" : "center",
+              padding: open ? "0.65rem 0.625rem" : "0.65rem",
+              gap: "0.75rem",
+              fontSize: "0.9375rem",
+              color: "#f87171",
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.1)"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            <Trash2 size={18} style={{ flexShrink: 0, color: "#f87171" }} />
+            {open && <span style={{ whiteSpace: "nowrap" }}>Clear My Data</span>}
+          </button>
+        )}
+
         {onOpenOtpModal && (
           <button
             onClick={() => { onOpenOtpModal(); onClose?.(); }}
@@ -165,59 +210,18 @@ function NavContent({
           </button>
         )}
 
-        <div ref={userMenuRef} style={{ position: "relative" }}>
-          <button onClick={() => setUserMenu(o => !o)} title={!open ? "User" : undefined}
-            style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", background: userMenu ? actBg : "transparent", color: userMenu ? colAct : col }}
-            onMouseEnter={e => { if (!userMenu) e.currentTarget.style.background = hover; }}
-            onMouseLeave={e => { if (!userMenu) e.currentTarget.style.background = "transparent"; }}>
-            <User2 size={20} style={{ flexShrink: 0 }} />
-            {open && <>
-              <span style={{ flex: 1, textAlign: "left", whiteSpace: "nowrap" }}>User</span>
-              <ChevronUp size={13} style={{ transform: userMenu ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s" }} />
-            </>}
-          </button>
-          {userMenu && (
-            <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, width: open ? "100%" : "9rem", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: `1px solid ${border}`, borderRadius: "0.5rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)", overflow: "hidden", zIndex: 20 }}>
-              {["Account", "Back Up", "Sign out"].map(label => (
-                <button key={label} onClick={() => setUserMenu(false)}
-                  style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start" }}
-                  onMouseEnter={e => e.currentTarget.style.background = hover}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  {label}
-                </button>
-              ))}              <button
-                onClick={() => { setUserMenu(false); onShowClearConfirm(); }}
-                style={{ ...row, borderRadius: 0, padding: "0.5rem 0.875rem", fontSize: "0.8125rem", justifyContent: "flex-start", color: "#f87171" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.12)"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                🗑 Clear My Data
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* ── Clear My Data confirmation modal moved to AppSidebar level ── */}
+      </div>
     </>
   );
 }
 
-export function AppSidebar({
+  export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
   chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onClearData
+  onOpenOtpModal, userPhone, onApplyNow, onClearData
 }) {
-  const [open, setOpen]             = useState(false);
-  const [userMenu, setUserMenu]     = useState(false);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [clearing, setClearing]     = useState(false);
-  const userMenuRef                 = useRef(null);
-
-  useEffect(() => {
-    const h = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenu(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+  const [open, setOpen] = useState(false);
 
   // Close drawer on resize to desktop
   useEffect(() => {
@@ -227,10 +231,9 @@ export function AppSidebar({
   }, [onDrawerClose]);
 
   const navProps = {
-    open, activePage, onNavigate, userMenu, setUserMenu, userMenuRef,
+    open, activePage, onNavigate,
     chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-    onOpenOtpModal, userPhone, onClearData,
-    onShowClearConfirm: () => setShowClearConfirm(true)
+    onOpenOtpModal, userPhone, onApplyNow, onClearData
   };
 
   return (
@@ -250,67 +253,6 @@ export function AppSidebar({
       <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: "16rem", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", zIndex: 201, transform: drawerOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden" }}>
         <NavContent {...navProps} open={true} onClose={onDrawerClose} onToggle={null} />
       </div>
-
-      {/* ── Clear My Data confirmation modal — rendered at root level so overflow:hidden doesn't clip it ── */}
-      {showClearConfirm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#141414", border: "1px solid rgba(239,68,68,0.4)", borderRadius: "1rem", padding: "2rem", maxWidth: "22rem", width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
-            <div style={{ fontSize: "2rem", textAlign: "center", marginBottom: "0.75rem" }}>🗑️</div>
-            <h3 style={{ color: "#fff", margin: "0 0 0.5rem", textAlign: "center", fontSize: "1.1rem" }}>Clear All My Data?</h3>
-            <p style={{ color: "#a0a0a0", fontSize: "0.85rem", textAlign: "center", margin: "0 0 1.5rem", lineHeight: 1.5 }}>
-              This will permanently delete your chat history, uploaded documents and saved profile. This cannot be undone.
-            </p>
-            <div style={{ display: "flex", gap: "0.75rem" }}>
-              <button onClick={() => setShowClearConfirm(false)} disabled={clearing}
-                style={{ flex: 1, padding: "0.65rem", borderRadius: "0.5rem", background: "#2a2a2a", border: "1px solid #3a3a3a", color: "#a0a0a0", cursor: "pointer", fontSize: "0.875rem", fontWeight: 600 }}>
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  if (!userPhone) {
-                    setShowClearConfirm(false);
-                    alert("Please sign in first before clearing data.");
-                    return;
-                  }
-                  setClearing(true);
-                  try {
-                    const base = import.meta.env.VITE_API_BASE;
-                    const phone = encodeURIComponent(userPhone);
-
-                    const [r1, r2, r3] = await Promise.all([
-                      fetch(`${base}/api/chat-history?phone_number=${phone}`, { method: "DELETE" }),
-                      fetch(`${base}/api/user-documents?phone_number=${phone}`, { method: "DELETE" }),
-                      fetch(`${base}/user-profile?phone_number=${phone}`, { method: "DELETE" }),
-                    ]);
-
-                    const allOk = [r1, r2, r3].every(r => r.ok);
-                    if (!allOk) {
-                      const bodies = await Promise.all([r1, r2, r3].map(r => r.json().catch(() => ({}))));
-                      const errMsg = bodies.map(b => b.message).filter(Boolean).join("; ") || "Server error";
-                      alert(`Failed to clear data: ${errMsg}. Please try again.`);
-                      setClearing(false);
-                      return;
-                    }
-
-                    // Only clear local state AFTER server confirms success
-                    sessionStorage.removeItem("user_phone");
-                    localStorage.removeItem("tnega_chat_sessions");
-                    setShowClearConfirm(false);
-                    setClearing(false);
-                    onClearData?.();
-                  } catch (e) {
-                    alert(`Network error: ${e.message}. Please check your connection and try again.`);
-                    setClearing(false);
-                  }
-                }}
-                disabled={clearing}
-                style={{ flex: 1, padding: "0.65rem", borderRadius: "0.5rem", background: clearing ? "#7f1d1d" : "#ef4444", border: "none", color: "#fff", cursor: clearing ? "not-allowed" : "pointer", fontSize: "0.875rem", fontWeight: 700 }}>
-                {clearing ? "Clearing…" : "Yes, Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
