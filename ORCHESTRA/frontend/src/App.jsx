@@ -20,12 +20,7 @@ import { GooeyText } from "./components/ui/gooey-text-morphing";
 import { sendMessage, sendMessageStream } from "./api/chatApi";
 import "./index.css";
 
-const TYPING_WORDS = [
-  "Residence Certificate Portal",
-  "e-Sevai Digital Desk",
-  "இருப்பிடச் சான்றிதழ் இணையச் சேவை",
-  "Automated Citizen Verification",
-];
+const TYPING_WORDS = ["TNeGA AI Assistant", "e-Sevai Automation"];
 
 function LandingOverlay({ onStart }) {
   const [wordIdx, setWordIdx] = useState(0);
@@ -36,11 +31,11 @@ function LandingOverlay({ onStart }) {
     const word = TYPING_WORDS[wordIdx];
     let timeout;
     if (!deleting && charIdx < word.length) {
-      timeout = setTimeout(() => setCharIdx(i => i + 1), 70);
+      timeout = setTimeout(() => setCharIdx(i => i + 1), 80);
     } else if (!deleting && charIdx === word.length) {
-      timeout = setTimeout(() => setDeleting(true), 1800);
+      timeout = setTimeout(() => setDeleting(true), 1600);
     } else if (deleting && charIdx > 0) {
-      timeout = setTimeout(() => setCharIdx(i => i - 1), 40);
+      timeout = setTimeout(() => setCharIdx(i => i - 1), 45);
     } else if (deleting && charIdx === 0) {
       timeout = setTimeout(() => {
         setDeleting(false);
@@ -56,161 +51,48 @@ function LandingOverlay({ onStart }) {
     <div style={{
       position: "fixed", inset: 0, zIndex: 10,
       display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", gap: "2rem",
-      padding: "1.5rem",
-      pointerEvents: "auto",
+      alignItems: "center", justifyContent: "center", gap: "1.75rem",
     }}>
-      {/* Tamil Nadu Govt Seal & Civic Header Badge */}
-      <div style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.75rem",
-        padding: "0.5rem 1.15rem",
-        borderRadius: "9999px",
-        background: "rgba(255,255,255,0.08)",
-        backdropFilter: "blur(16px)",
-        border: "1px solid rgba(255,255,255,0.18)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-      }}>
+      <div style={{ textAlign: "center" }}>
         <div style={{
-          width: "1.75rem",
-          height: "1.75rem",
-          borderRadius: "0.375rem",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-          <img
-            src="/tnega-logo.png"
-            alt="Tamil Nadu Government Seal"
-            style={{ width: "100%", height: "100%", objectFit: "contain" }}
-            onError={(e) => { e.currentTarget.style.display = "none"; }}
-          />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
-          <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#ffffff", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            தமிழ்நாடு அரசு • Government of Tamil Nadu
-          </span>
-          <span style={{ fontSize: "0.625rem", color: "rgba(255,255,255,0.6)", fontWeight: 500 }}>
-            Tamil Nadu e-Governance Agency (TNeGA) • Revenue Department
-          </span>
-        </div>
-      </div>
-
-      {/* Main Title & Typewriter */}
-      <div style={{ textAlign: "center", maxWidth: "48rem" }}>
-        <h1 style={{
-          fontSize: "clamp(2rem, 5vw, 3.75rem)",
+          fontSize: "clamp(2rem, 4.5vw, 3.5rem)",
           fontWeight: 800,
           color: "#fff",
           fontFamily: "'Plus Jakarta Sans', sans-serif",
           letterSpacing: "-0.03em",
-          lineHeight: 1.15,
-          marginBottom: "1rem",
-          textShadow: "0 4px 32px rgba(0,0,0,0.6)",
+          lineHeight: 1.2,
+          marginBottom: "0.5rem",
+          textShadow: "0 2px 24px rgba(0,0,0,0.4)",
         }}>
           {displayed}
           <span style={{
             display: "inline-block",
-            width: "3px", height: "0.95em",
-            background: "#38bdf8",
-            marginLeft: "6px",
+            width: "3px", height: "1em",
+            background: "#ffffff",
+            marginLeft: "4px",
             verticalAlign: "middle",
             borderRadius: "2px",
             animation: "blink-cursor 0.75s step-end infinite",
           }} />
-        </h1>
-        <p style={{
-          fontSize: "clamp(0.9rem, 1.8vw, 1.125rem)",
-          color: "rgba(255,255,255,0.7)",
-          fontWeight: 400,
-          lineHeight: 1.6,
-          maxWidth: "38rem",
-          margin: "0 auto",
-          textShadow: "0 2px 12px rgba(0,0,0,0.5)",
-        }}>
-          Official digital citizen assistance for applying, validating, and obtaining your
-          official <strong>Residence Certificate (இருப்பிடச் சான்றிதழ்)</strong> through automated e-Sevai processing.
-        </p>
-      </div>
-
-      {/* Trust Feature Badges */}
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        gap: "0.75rem",
-        maxWidth: "42rem",
-      }}>
-        <div style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.4rem",
-          padding: "0.35rem 0.85rem",
-          borderRadius: "9999px",
-          background: "rgba(0,0,0,0.4)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          fontSize: "0.78125rem",
-          color: "rgba(255,255,255,0.85)",
-          fontWeight: 500,
-        }}>
-          <span style={{ color: "#34d399" }}>✓</span> Instant OCR Document Extraction
         </div>
         <div style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.4rem",
-          padding: "0.35rem 0.85rem",
-          borderRadius: "9999px",
-          background: "rgba(0,0,0,0.4)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          fontSize: "0.78125rem",
-          color: "rgba(255,255,255,0.85)",
+          fontSize: "clamp(0.8rem, 1.5vw, 1rem)",
+          color: "rgba(255,255,255,0.45)",
           fontWeight: 500,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
         }}>
-          <span style={{ color: "#38bdf8" }}>🔒</span> Zero-Knowledge Client Encryption
-        </div>
-        <div style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.4rem",
-          padding: "0.35rem 0.85rem",
-          borderRadius: "9999px",
-          background: "rgba(0,0,0,0.4)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          fontSize: "0.78125rem",
-          color: "rgba(255,255,255,0.85)",
-          fontWeight: 500,
-        }}>
-          <span style={{ color: "#fbbf24" }}>🏛️</span> Revenue Department Standards
+          Powered by ORCHESTRA
         </div>
       </div>
-
-      {/* Button using HoverButton */}
-      <HoverButton onClick={onStart}>
-        Enter Citizen Portal →
-      </HoverButton>
+      <HoverButton onClick={onStart}>Get Started</HoverButton>
     </div>
   );
 }
 
 const DEFAULT_WELCOME_MSG = {
   sender: "agent",
-  text: `### Vanakkam! Welcome to the Official TNeGA e-Sevai Digital Desk
-
-I am your citizen assistance guide for obtaining a **Residence Certificate (இருப்பிடச் சான்றிதழ்)** issued by the **Revenue & Disaster Management Department, Government of Tamil Nadu**.
-
-**How I can assist you today:**
-- 📋 **Check Required Documents** (Aadhaar, Ration Card, Address Proof, Photo)
-- 📝 **Verify Eligibility & Application Requirements**
-- ⚡ **Auto-Extract & Validate Documents** with Instant OCR
-- 🚀 **Step-by-Step Guidance** through the e-Sevai Portal submission
-
-*Select a quick action below or type your query to begin.*`,
+  text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
 };
 
 export default function App() {
@@ -729,10 +611,10 @@ Just type your question in plain language and I will assist you right away.`,
         {!showLanding && (<>
         <div className="mobile-topbar">
           <div className="mobile-topbar-left">
-            <div className="sidebar-logo-icon" style={{ width: '1.875rem', height: '1.875rem', borderRadius: '0.4rem', overflow: 'hidden', background: 'rgba(255,255,255,0.08)', padding: '0.15rem' }}>
-              <img src="/tnega-logo.png" alt="TNeGA Seal" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            <div className="sidebar-logo-icon" style={{width:'1.75rem',height:'1.75rem',borderRadius:'0.375rem'}}>
+              <LuBot size={15} color="#fff" />
             </div>
-            <span className="mobile-topbar-title" style={{ fontSize: '0.9375rem', fontWeight: 700 }}>TNeGA e-Sevai</span>
+            <span className="mobile-topbar-title">TNeGA</span>
           </div>
           <div className="mobile-topbar-right">
             <button className="hamburger-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
@@ -757,38 +639,15 @@ Just type your question in plain language and I will assist you right away.`,
         <div className="chat-scroll">
           <div className="chat-inner">
 
-            {/* Official Civic Service Header */}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.6rem", marginTop: "1.75rem", marginBottom: "1.25rem", textAlign: "center" }}>
-              <div style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                padding: "0.35rem 0.95rem",
-                borderRadius: "9999px",
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                backdropFilter: "blur(14px)",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                color: "#e2e8f0",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
-              }}>
-                <img src="/tnega-logo.png" alt="TNeGA Seal" style={{ width: "16px", height: "16px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <span>தமிழ்நாடு அரசு • Revenue & Disaster Management Dept</span>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", display: "inline-block" }} />
-              </div>
-
+            {/* Gooey morphing title */}
+            <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.5rem", marginTop: "2rem" }}>
               <GooeyText
-                texts={["e-Sevai Portal", "Residence Certificate", "இருப்பிடச் சான்றிதழ்", "Citizen Desk"]}
+                texts={["TNeGA", "ORCHESTRA"]}
                 morphTime={1.2}
                 cooldownTime={2.5}
                 className="gooey-wrap"
                 textClassName="gooey-title"
               />
-
-              <div style={{ fontSize: "0.8125rem", color: "rgba(255,255,255,0.5)", fontWeight: 500, letterSpacing: "0.02em" }}>
-                Official Automated Verification & Application Processing
-              </div>
             </div>
             {messages.map((msg, i) => (
               <ChatBubble key={i} sender={msg.sender} message={msg.text} />
