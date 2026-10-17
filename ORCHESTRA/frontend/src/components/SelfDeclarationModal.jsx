@@ -10,6 +10,16 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        alert("Only PDF documents are accepted for the Self-Declaration form.");
+        e.target.value = "";
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File size exceeds 5 MB. Please upload a PDF under 5 MB.");
+        e.target.value = "";
+        return;
+      }
       setUploadedFile(file);
     }
   };
@@ -71,7 +81,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
           <li>Download the form using the button below</li>
           <li>Print the form</li>
           <li>Sign it manually</li>
-          <li>Scan or photograph the signed form</li>
+          <li>Scan or save the signed form as a PDF document</li>
           <li>Upload the signed version below</li>
         </ol>
 
@@ -106,13 +116,13 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
                 <span className="btn-secondary">Choose File</span>
                 <input
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".pdf,application/pdf"
                   onChange={handleFileUpload}
                   style={{ display: "none" }}
                 />
               </label>
               <p style={{ fontSize: "0.75rem", color: "hsl(var(--muted-foreground))", marginTop: "0.75rem", marginBottom: 0 }}>
-                Supported: PDF, JPG, PNG (max 5MB)
+                Supported: PDF only (max 5MB)
               </p>
             </div>
           )}

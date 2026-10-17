@@ -1,31 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { LuTriangleAlert } from "react-icons/lu";
 
-export default function AutomationModal({ isOpen, eventData, onSubmit, onAction }) {
-  const [inputValue, setInputValue]           = useState("");
-  const [captchaSrc, setCaptchaSrc]           = useState("");
-  const [multiInputValues, setMultiInputValues] = useState({});
-  const [refreshing, setRefreshing]           = useState(false);
-  const [otpSending, setOtpSending]           = useState(false);
-  const [prevEventData, setPrevEventData]     = useState(null);
-
-  if (eventData !== prevEventData) {
-    setPrevEventData(eventData);
-    setInputValue("");
-    setRefreshing(false);
-
+function AutomationModalContent({ eventData, onSubmit, onAction }) {
+  const [inputValue, setInputValue] = useState("");
+  const [captchaSrc, setCaptchaSrc] = useState(eventData?.image || "");
+  const [multiInputValues, setMultiInputValues] = useState(() => {
     if (eventData?.type === 'REQUEST_MISSING_DETAILS' && eventData.missing_fields) {
       const init = {};
       eventData.missing_fields.forEach(f => { init[f] = ""; });
-      setMultiInputValues(init);
-    } else {
-      setMultiInputValues({});
+      return init;
     }
-
-    if (eventData?.type === 'REQUEST_CAPTCHA' && eventData.image) {
-      setCaptchaSrc(eventData.image);
-    }
-  }
+    return {};
+  });
+  const [refreshing, setRefreshing] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
 
   useEffect(() => {
     if (eventData?.type === 'REQUEST_CAPTCHA' && !eventData.image) {
@@ -34,9 +22,7 @@ export default function AutomationModal({ isOpen, eventData, onSubmit, onAction 
         .then(d => { if (d.image) setCaptchaSrc(d.image); })
         .catch(err => console.error("[Captcha] Failed to load:", err));
     }
-  }, [eventData]);
-
-  if (!isOpen || !eventData) return null;
+  }, [eventData?.type, eventData?.image]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -172,5 +158,18 @@ export default function AutomationModal({ isOpen, eventData, onSubmit, onAction 
         )}
       </div>
     </div>
+  );
+}
+
+export default function AutomationModal({ isOpen, eventData, onSubmit, onAction }) {
+  if (!isOpen || !eventData) return null;
+
+  return (
+    <AutomationModalContent
+      key={`${eventData.type}-${eventData.message || ''}`}
+      eventData={eventData}
+      onSubmit={onSubmit}
+      onAction={onAction}
+    />
   );
 }

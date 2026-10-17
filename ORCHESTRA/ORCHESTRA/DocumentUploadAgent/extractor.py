@@ -160,26 +160,40 @@ def run_vlm(image, text_prompt):
 # ------- Anti-hallucination sanitization & JSON helper -------
 
 def sanitize_extracted_data(data: dict) -> dict:
-    """Universal anti-hallucination post-processor and data sanitizer."""
+    """Universal strict anti-hallucination post-processor and data sanitizer."""
     if not isinstance(data, dict):
         return data
 
     cert_type = str(data.get("certificate_type", "")).strip()
 
     # Clean strings and strip empty/null phrases
-    _EMPTY_PHRASES = {"null", "none", "n/a", "na", "-", "--", "not available", "not found", "unknown", "nil"}
+    _EMPTY_PHRASES = {
+        "null", "none", "n/a", "na", "-", "--", "not available", "not found",
+        "unknown", "nil", "undefined", "n.a.", "not applicable", "pending"
+    }
     for k, v in list(data.items()):
         if isinstance(v, str):
             cleaned = v.strip()
             data[k] = "" if cleaned.lower() in _EMPTY_PHRASES else cleaned
 
-    # 1. Name Sanitization: remove honorifics / prefixes
+    # 1. Name Sanitization: remove honorifics / prefixes and detect dummy / hallucinated values
+    DUMMY_NAMES = {
+        "john doe", "jane doe", "sample name", "test name", "dummy name",
+        "test user", "applicant name", "full name", "name of applicant",
+        "first name", "last name", "citizen name", "candidate name",
+        "government of india", "unique identification authority", "uidai",
+        "transport department", "civil supplies", "government", "india",
+        "tamil nadu", "department", "certificate"
+    }
     name = data.get("name", "")
     if name and isinstance(name, str):
         name = re.sub(r"^(?:Mr\.|Mrs\.|Ms\.|Shri|Smt\.?|Thiru|Selvi|To)\s+", "", name, flags=re.IGNORECASE)
         name = re.sub(r"[\.,]+$", "", name).strip()
         name = re.sub(r"\s+", " ", name)
-        data["name"] = name
+        if name.lower() in DUMMY_NAMES or len(name) < 2 or bool(re.search(r"^\d+$", name)):
+            data["name"] = ""
+        else:
+            data["name"] = name
 
     # 2. Father's Name Sanitization
     father_name = data.get("father_name", "")
@@ -190,38 +204,120 @@ def sanitize_extracted_data(data: dict) -> dict:
         # Father's name cannot be identical to the applicant name
         if name and father_name.lower() == name.lower():
             father_name = ""
-        # Discard generic placeholder words
-        if father_name.lower() in {"father", "name", "father name", "husband", "son", "daughter"}:
+        # Discard generic placeholder words or dummy names
+        if father_name.lower() in DUMMY_NAMES or father_name.lower() in {"father", "name", "father name", "husband", "son", "daughter"}:
             father_name = ""
         data["father_name"] = father_name
 
-    # 3. Pincode Sanitization: extract exact 6-digit Indian postal code
+    # 3. Aadhaar Number Sanitization & Strict Pattern Validation
+    aadhaar_num = str(data.get("aadhaar_number", "")).strip()
+    if aadhaar_num:
+        m_adh = re.search(r"\b([X0-9]{4}\s*[X0-9]{4}\s*[0-9]{4})\b", aadhaar_num, re.IGNORECASE)
+        if m_adh:
+            clean_adh = re.sub(r"\s+", " ", m_adh.group(1)).upper()
+            digits_only = re.sub(r"[^0-9]", "", clean_adh)
+            DUMMY_AADHAAR = {
+                "123456789012", "012345678901", "000000000000", "111111111111",
+                "222222222222", "333333333333", "444444444444", "555555555555",
+                "666666666666", "777777777777", "888888888888", "999999999999",
+                "123412341234", "987654321098"
+            }
+            if digits_only in DUMMY_AADHAAR:
+                data["aadhaar_number"] = ""
+            else:
+                parts = clean_adh.split()
+                if len(parts) == 3:
+                    data["aadhaar_number"] = f"{parts[0]} {parts[1]} {parts[2]}"
+                elif len(digits_only) == 12:
+                    data["aadhaar_number"] = f"{digits_only[:4]} {digits_only[4:8]} {digits_only[8:]}"
+                else:
+                    data["aadhaar_number"] = clean_adh
+        else:
+            data["aadhaar_number"] = ""
+
+    # 4. PAN Number Sanitization
+    pan_num = str(data.get("pan_number", "")).strip().upper()
+    if pan_num:
+        m_pan = re.match(r"^[A-Z]{5}[0-9]{4}[A-Z]$", pan_num)
+        if m_pan and not pan_num.startswith("XXXXX") and pan_num != "ABCDE1234F":
+            data["pan_number"] = pan_num
+        else:
+            data["pan_number"] = ""
+
+    # 5. DL Number Sanitization
+    dl_num = str(data.get("dl_number", "")).strip()
+    if dl_num:
+        if len(dl_num) < 6 or dl_num.lower() in {"dl123456", "test", "dummy", "sample"}:
+            data["dl_number"] = ""
+        else:
+            data["dl_number"] = re.sub(r"\s+", " ", dl_num)
+
+    # 6. Pincode Sanitization: extract exact 6-digit Indian postal code & reject dummy codes
     pincode = str(data.get("pincode", "")).strip()
     if pincode:
         m_pin = re.search(r"\b([1-9][0-9]{5})\b", pincode)
-        data["pincode"] = m_pin.group(1) if m_pin else ""
+        if m_pin:
+            pin_val = m_pin.group(1)
+            if pin_val in {"111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "123456"}:
+                data["pincode"] = ""
+            else:
+                data["pincode"] = pin_val
+        else:
+            data["pincode"] = ""
 
-    # 4. DOB Normalization to DD/MM/YYYY
+    # 7. DOB Normalization to DD/MM/YYYY & Boundary Validation (1920 - 2026)
     dob = str(data.get("dob", "")).strip()
     if dob:
         m_dob1 = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", dob)
         m_dob2 = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", dob)
+        day, month, year = 0, 0, 0
         if m_dob1:
             d, m, y = m_dob1.groups()
-            data["dob"] = f"{int(d):02d}/{int(m):02d}/{y}"
+            day, month, year = int(d), int(m), int(y)
         elif m_dob2:
             y, m, d = m_dob2.groups()
-            data["dob"] = f"{int(d):02d}/{int(m):02d}/{y}"
+            day, month, year = int(d), int(m), int(y)
 
-    # 5. Anti-hallucination for Aadhaar / Driving License / PAN / Voter ID:
+        if 1 <= day <= 31 and 1 <= month <= 12 and 1920 <= year <= 2026:
+            data["dob"] = f"{day:02d}/{month:02d}/{year}"
+        else:
+            data["dob"] = ""
+
+    # 8. Phone Number Sanitization
+    phone = str(data.get("phone_number", "")).strip()
+    if phone:
+        digits = re.sub(r"[^0-9]", "", phone)
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        if len(digits) == 10 and digits[0] in "6789":
+            if digits in {"1234567890", "0000000000", "1111111111", "9999999999"}:
+                data["phone_number"] = ""
+            else:
+                data["phone_number"] = digits
+        else:
+            data["phone_number"] = ""
+
+    # 9. Gender Normalization
+    gender = str(data.get("gender", "")).strip().lower()
+    if gender in ["male", "m", "ஆண்"]:
+        data["gender"] = "Male"
+    elif gender in ["female", "f", "பெண்"]:
+        data["gender"] = "Female"
+    elif gender in ["transgender", "tg", "trans"]:
+        data["gender"] = "Transgender"
+    else:
+        if "gender" in data and data["gender"]:
+            data["gender"] = ""
+
+    # 10. Anti-hallucination for Aadhaar / DL / PAN / Voter ID / Address Proof:
     # These documents never specify religion or community
-    if any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter"]):
+    if any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter", "address proof"]):
         if "religion" in data:
             data["religion"] = ""
         if "community" in data:
             data["community"] = ""
 
-    # 6. Address hygiene: ensure father/applicant name or C/O are not echoed in door_no/street
+    # 11. Address hygiene: ensure father/applicant name or C/O are not echoed in door_no/street
     f_val = (data.get("father_name") or "").lower()
     n_val = (data.get("name") or "").lower()
     for addr_key in ["door_no", "street", "area", "city", "street_name", "building_no"]:
@@ -229,6 +325,12 @@ def sanitize_extracted_data(data: dict) -> dict:
         val_lower = val.lower()
         if (f_val and val_lower == f_val) or (n_val and val_lower == n_val) or any(bad in val_lower for bad in ["c/o", "s/o", "d/o", "w/o"]):
             data[addr_key] = ""
+
+    # 12. Door No length and plausibility
+    door = str(data.get("door_no", "")).strip()
+    if door:
+        if len(door) > 20 or any(bad in door.lower() for bad in ["father", "resident", "address", "india", "pincode", "district", "state"]):
+            data["door_no"] = ""
 
     return data
 
@@ -843,53 +945,57 @@ def extract_from_pdf(pdf_input) -> list:
             detail="Failed to read document content or invalid input source."
         )
 
-    # Check if input is a valid PDF magic header
-    if pdf_bytes.startswith(PDF_MAGIC):
-        # Fast path: Try extracting digital text directly using pypdf
-        try:
-            try:
-                import pypdf
-            except ImportError:
-                for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
-                    if p not in sys.path:
-                        sys.path.append(p)
-                import pypdf
+    # Strictly reject non-PDF documents to eliminate OCR/vision hallucinations
+    if not pdf_bytes.startswith(PDF_MAGIC):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF documents are accepted. Images (JPG, PNG) are not accepted to prevent extraction hallucination."
+        )
 
-            reader = pypdf.PdfReader(BytesIO(pdf_bytes))
-            extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-            if len(extracted_text.strip()) > 50:
-                print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")
-                raw_json = run_text_llm(extracted_text)
-                if not raw_json:
-                    raw_json = extract_deterministic_from_text(extracted_text)
-                if raw_json and raw_json.get("name"):
-                    print(f"[extractor] Successfully extracted {raw_json.get('certificate_type')} digitally: {raw_json.get('name')}")
-                    return [raw_json]
-        except Exception as te:
-            print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
+    # 1. Fast path: Extract digital vector text directly using pypdf
+    try:
+        try:
+            import pypdf
+        except ImportError:
+            for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
+                if p not in sys.path:
+                    sys.path.append(p)
+            import pypdf
 
-        try:
-            from pdf2image import convert_from_bytes
-            pages = convert_from_bytes(
-                pdf_bytes,
-                dpi=200,
-                poppler_path=config.POPPLER_PATH
-            )
-        except Exception as exc:
-            print(f"[extractor] pdf2image convert_from_bytes failed: {exc}")
-            raise HTTPException(
-                status_code=422,
-                detail=f"PDF conversion failed: {exc}"
-            )
-    else:
-        # Try opening as image directly from bytes
-        try:
-            pages = [Image.open(BytesIO(pdf_bytes)).convert("RGB")]
-        except Exception as ie:
-            raise HTTPException(
-                status_code=400,
-                detail=f"The uploaded file is not a valid PDF or recognized image: {ie}"
-            )
+        reader = pypdf.PdfReader(BytesIO(pdf_bytes))
+        extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        if len(extracted_text.strip()) > 50:
+            print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")
+            # Run deterministic regex extraction first (zero hallucination, exact match)
+            det = extract_deterministic_from_text(extracted_text)
+            if det and det.get("name") and (det.get("aadhaar_number") or det.get("dl_number") or det.get("pincode") or det.get("dob")):
+                print(f"[extractor] High-confidence deterministic extraction succeeded: {det.get('certificate_type')} -> {det.get('name')}")
+                return [det]
+
+            # LLM text completion fallback if deterministic missed critical fields
+            raw_json = run_text_llm(extracted_text)
+            if raw_json and raw_json.get("name"):
+                print(f"[extractor] Text LLM extracted {raw_json.get('certificate_type')}: {raw_json.get('name')}")
+                return [raw_json]
+            elif det:
+                return [det]
+    except Exception as te:
+        print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
+
+    # 2. Render PDF pages as high-resolution images for scanned documents
+    try:
+        from pdf2image import convert_from_bytes
+        pages = convert_from_bytes(
+            pdf_bytes,
+            dpi=200,
+            poppler_path=config.POPPLER_PATH
+        )
+    except Exception as exc:
+        print(f"[extractor] pdf2image convert_from_bytes failed: {exc}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"PDF conversion failed: {exc}"
+        )
 
     return _process_pages(pages)
 

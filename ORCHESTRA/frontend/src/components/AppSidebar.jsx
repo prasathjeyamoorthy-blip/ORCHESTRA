@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { title: "Contact",            icon: Phone,           page: "contact" },
 ];
 
-const ICON_W = "2.25rem";
+const ICON_W = "3.5rem";
 const FULL_W = "15.5rem";
 
 const bg     = "rgba(0,0,0,0.12)";

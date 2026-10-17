@@ -4,7 +4,7 @@ const faqsEn = [
   { q: "What documents are required?", a: "You need: (1) Aadhaar Card, (2) Ration Card, (3) Applicant Photograph, and (4) Driving License as address proof. All documents should be clear and legible." },
   { q: "How long does the process take?", a: "The automated application process typically takes 5–10 minutes once all documents are uploaded. Certificate issuance by the authority may take 3–7 working days." },
   { q: "What is a CAN Number?", a: "CAN (Citizen Account Number) is a unique identifier assigned to citizens on the TNeGA e-Sevai portal. It is optional but helps in faster processing." },
-  { q: "What format should my documents be in?", a: "Documents can be uploaded as PDF, JPG, or PNG files. Maximum file size is 5 MB per document. Ensure the document is clearly visible and not blurred." },
+  { q: "What format should my documents be in?", a: "Documents must be uploaded as PDF files. Only official PDF documents are accepted (maximum file size 5 MB) to ensure high clarity and prevent data extraction errors." },
   { q: "Is my data secure?", a: "Yes. All data is processed locally and submitted directly to the official TNeGA e-Sevai portal. No personal data is stored on our servers beyond the session." },
   { q: "What if the automation fails?", a: "If automation encounters an error, you will be notified in the chat. You can retry or visit the TNeGA e-Sevai portal directly at www.tnesevai.tn.gov.in." },
 ];
@@ -15,7 +15,7 @@ const faqsTa = [
   { q: "என்னென்ன ஆவணங்கள் தேவை?", a: "(1) ஆதார் அட்டை, (2) குடும்ப அட்டை, (3) விண்ணப்பதாரர் புகைப்படம், மற்றும் (4) ஓட்டுநர் உரிமம் ஆகியவை தேவை." },
   { q: "செயலாக்கத்திற்கு எவ்வளவு காலம் ஆகும்?", a: "ஆவணங்கள் பதிவேற்றப்பட்டதும் தானியங்கி முறை 5–10 நிமிடங்களில் முடிவடையும். சான்றிதழ் ஒப்புதல் பெற 3–7 வேலை நாட்கள் ஆகலாம்." },
   { q: "CAN எண் என்றால் என்ன?", a: "CAN (Citizen Account Number) என்பது குடிமக்களுக்கான தனித்துவமான கணக்கு எண் ஆகும்." },
-  { q: "ஆவணங்கள் எந்த வடிவத்தில் இருக்க வேண்டும்?", a: "PDF, JPG, அல்லது PNG வடிவில் பதிவேற்றலாம். அதிகபட்ச அளவு 5 MB ஆகும்." },
+  { q: "ஆவணங்கள் எந்த வடிவத்தில் இருக்க வேண்டும்?", a: "ஆவணங்கள் PDF வடிவில் மட்டுமே பதிவேற்றப்பட வேண்டும் (அதிகபட்ச அளவு 5 MB). பிழைகளைத் தவிர்க்க PDF கோப்புகள் மட்டுமே ஏற்றுக்கொள்ளப்படும்." },
   { q: "எனது தரவு பாதுகாப்பானதா?", a: "ஆம். அனைத்து தரவுகளும் பாதுகாப்பாக TNeGA இ-சேவை போர்ட்டலில் மட்டுமே சமர்ப்பிக்கப்படுகின்றன." },
   { q: "தானியங்கி முறையில் பிழை ஏற்பட்டால் என்ன செய்வது?", a: "பிழை ஏற்பட்டால் அரட்டையில் அறிவிக்கப்படும். www.tnesevai.tn.gov.in தளத்திலும் நேரடியாகச் செய்ய முடியும்." },
 ];

@@ -5,6 +5,11 @@ export default function DocumentUpload({ onFileSelect }) {
     const file = e.target.files[0];
     if (!file) return;
 
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      console.warn("❌ Only PDF documents are accepted to prevent extraction hallucination.");
+      return;
+    }
+
     // keep existing behavior
     onFileSelect(file);
 
@@ -26,12 +31,12 @@ export default function DocumentUpload({ onFileSelect }) {
   };
 
   return (
-    <label className="document-upload-icon" title="Upload document">
+    <label className="document-upload-icon" title="Upload PDF document">
       <MdOutlineDocumentScanner className="upload-icon" />
 
       <input
         type="file"
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept=".pdf,application/pdf"
         onChange={handleChange}
         hidden
       />

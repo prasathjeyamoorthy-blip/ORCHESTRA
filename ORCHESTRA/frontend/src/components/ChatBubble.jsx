@@ -40,6 +40,12 @@ export default function ChatBubble({ sender, message }) {
                 code:       ({ children }) => <code className="msg-code" style={{ background: "rgba(255,255,255,0.08)", padding: "0.15rem 0.4rem", borderRadius: "0.25rem", fontSize: "0.875em", color: "#f1f5f9" }}>{children}</code>,
                 blockquote: ({ children }) => <blockquote className="msg-blockquote" style={{ borderLeft: "3px solid #a855f7", margin: "0.75rem 0", paddingLeft: "0.875rem", fontStyle: "italic", color: "#cbd5e1" }}>{children}</blockquote>,
                 a:          ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600, wordBreak: "break-all" }}>{children}</a>,
+                table:      ({ children }) => <div style={{ overflowX: "auto", margin: "0.75rem 0 1rem", borderRadius: "0.5rem", border: "1px solid rgba(255,255,255,0.12)" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem", textAlign: "left" }}>{children}</table></div>,
+                thead:      ({ children }) => <thead style={{ background: "rgba(255,255,255,0.06)", borderBottom: "1px solid rgba(255,255,255,0.14)" }}>{children}</thead>,
+                tbody:      ({ children }) => <tbody>{children}</tbody>,
+                tr:         ({ children }) => <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{children}</tr>,
+                th:         ({ children }) => <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600, color: "#ffffff" }}>{children}</th>,
+                td:         ({ children }) => <td style={{ padding: "0.55rem 0.85rem", color: "#e2e8f0" }}>{children}</td>,
               }}
             >
               {message}

@@ -24,10 +24,10 @@ const STEPS = [
 ];
 
 const DOCUMENTS = [
-  { id: "aadharCard",     label: "Aadhar card",                               pdfOnly: true  },
-  { id: "rationCard",     label: "Ration card",                               pdfOnly: true  },
-  { id: "photo",          label: "Applicant Photograph",                      pdfOnly: false },
-  { id: "drivingLicense", label: "Address Proof (Driving License / Aadhaar)", pdfOnly: true  },
+  { id: "aadharCard",     label: "Aadhar card",                               pdfOnly: true },
+  { id: "rationCard",     label: "Ration card",                               pdfOnly: true },
+  { id: "photo",          label: "Applicant Photograph",                      pdfOnly: true },
+  { id: "drivingLicense", label: "Address Proof (Driving License / Aadhaar)", pdfOnly: true },
 ];
 
 const MONTH_NAMES = [
@@ -154,15 +154,16 @@ function DarkCalendarPopover({ value, onSelect, onClose }) {
       ref={popoverRef}
       style={{
         position: "absolute",
-        bottom: "calc(100% + 8px)",
+        top: "calc(100% + 8px)",
         left: 0,
         width: "285px",
+        maxWidth: "calc(100vw - 48px)",
         background: "rgba(18, 18, 22, 0.97)",
         backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
         border: "1px solid rgba(255, 255, 255, 0.14)",
         borderRadius: "0.875rem",
-        boxShadow: "0 -12px 36px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)",
+        boxShadow: "0 12px 36px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.08)",
         padding: "0.875rem",
         zIndex: 1000,
         animation: "fade-in 0.15s ease-out",
@@ -341,9 +342,10 @@ function FloatingInput({ label, name, type = "text", value, onChange, maxLength,
         maxLength={maxLength}
         style={{
           width: "100%", boxSizing: "border-box",
-          padding: "0.75rem 0.875rem",
+          padding: "0.5rem 0.875rem",
           paddingRight: (isPassword || isDate) ? "2.5rem" : "0.875rem",
-          paddingTop: active ? "1.1rem" : "0.75rem",
+          paddingTop: "1.15rem",
+          paddingBottom: "0.45rem",
           background: C.surface2,
           border: `1.5px solid ${(focused || showCalendar) ? "rgba(255,255,255,0.4)" : C.border}`,
           borderRadius: "0.625rem", color: C.text, fontSize: 14,
@@ -588,7 +590,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setAddressDetails(prev => ({ ...prev, to_date: `${dd}/${mm}/${yyyy}` }));
   }, []);
 
-  const handleCredChange = (e) => setCredentials({ ...credentials, [e.target.name]: e.target.value });
+  const handleCredChange = (e) => {
+    const val = e.target.name === "aadhar_number" ? e.target.value.replace(/\D/g, "").slice(0, 12) : e.target.value;
+    setCredentials(prev => ({ ...prev, [e.target.name]: val }));
+  };
   const handleAddrChange = (e) => setAddressDetails({ ...addressDetails, [e.target.name]: e.target.value });
 
   const handleRemoveFile = (id) => {
@@ -616,10 +621,15 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     const file = e.target.files[0];
     if (!file) return;
 
-    // PDF-only enforcement for document slots (not photo)
-    const docMeta = documents.find(d => d.id === id);
-    if (docMeta?.pdfOnly && !file.name.toLowerCase().endsWith(".pdf")) {
-      setUploadError("Please upload a PDF file. Images are not accepted for documents — download the official PDF from the government portal.");
+    // Strict PDF-only enforcement for all document slots to prevent extraction hallucination
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadError("Only PDF documents are accepted to ensure high quality and prevent extraction errors. Please upload an official PDF document.");
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("File size exceeds 5 MB. Please upload an official PDF under 5 MB.");
       e.target.value = "";
       return;
     }
@@ -1066,14 +1076,14 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>
                           <input
                             type="file"
-                            accept={doc.pdfOnly ? ".pdf" : ".jpg,.jpeg,.png"}
+                            accept=".pdf,application/pdf"
                             onChange={e => handleFileUpload(e, doc.id)}
                             disabled={isUploading[doc.id]}
                             hidden
                           />
                           <div className="upload-zone-icon"><MdOutlineCloudUpload size={22} /></div>
                           <p className="cl-upload-title">{isUploading[doc.id] ? "Uploading…" : `Upload ${doc.label}`}</p>
-                          <p className="cl-upload-sub">{doc.pdfOnly ? "PDF only · max 5 MB" : "JPG or PNG · max 5 MB"}</p>
+                          <p className="cl-upload-sub">Official PDF only · max 5 MB</p>
                           {uploadError && <div className="cl-error-inline"><LuTriangleAlert size={13} /> {uploadError}</div>}
                           <span className="upload-zone-btn">{isUploading[doc.id] ? "Uploading…" : "Browse Files"}</span>
                         </label>

@@ -809,28 +809,52 @@ class TNeSevaiBackendAgent:
                         self.log(f"WARNING: Invalid file source for '{doc_label}': {file_source}. Skipping...")
                         return
 
-                    # Optimize file size if exceeding portal limit (Photo <= 50KB)
+                    # Optimize file size if exceeding portal limit (Photo <= 50KB) or convert PDF photo to JPEG
                     try:
                         file_sz = os.path.getsize(target_path)
-                        if doc_label == "Photo" and file_sz > 48 * 1024:
-                            self.log(f"Photo size ({file_sz / 1024:.1f} KB) exceeds 50 KB portal limit. Auto-compressing...")
+                        is_pdf_photo = target_path.lower().endswith(".pdf") or (os.path.exists(target_path) and open(target_path, "rb").read(5).startswith(b"%PDF-"))
+                        if doc_label == "Photo" and (file_sz > 48 * 1024 or is_pdf_photo or not target_path.lower().endswith((".jpg", ".jpeg"))):
+                            self.log(f"Preparing photo ({file_sz / 1024:.1f} KB, is_pdf={is_pdf_photo}) for portal...")
                             from PIL import Image
                             import tempfile
-                            with Image.open(target_path) as im:
-                                im_rgb = im.convert("RGB")
-                                im_rgb.thumbnail((400, 500))
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tf_opt:
-                                    quality = 85
-                                    while quality >= 20:
-                                        tf_opt.seek(0)
-                                        tf_opt.truncate()
-                                        im_rgb.save(tf_opt, format="JPEG", quality=quality, optimize=True)
-                                        if tf_opt.tell() <= 48 * 1024:
-                                            break
-                                        quality -= 10
-                                    temp_path = tf_opt.name
-                                    target_path = temp_path
-                            self.log(f"✓ Photo compressed to {os.path.getsize(target_path) / 1024:.1f} KB")
+                            im = None
+                            if is_pdf_photo:
+                                try:
+                                    import pypdf
+                                    from io import BytesIO
+                                    with open(target_path, "rb") as pf:
+                                        reader = pypdf.PdfReader(BytesIO(pf.read()))
+                                        if reader.pages and len(reader.pages[0].images) > 0:
+                                            im = Image.open(BytesIO(reader.pages[0].images[0].data))
+                                except Exception:
+                                    pass
+                                if im is None:
+                                    try:
+                                        from pdf2image import convert_from_path
+                                        pages = convert_from_path(target_path, dpi=150, first_page=1, last_page=1)
+                                        if pages:
+                                            im = pages[0]
+                                    except Exception as ce:
+                                        self.log(f"Photo PDF render error: {ce}")
+                            else:
+                                im = Image.open(target_path)
+
+                            if im:
+                                with im:
+                                    im_rgb = im.convert("RGB")
+                                    im_rgb.thumbnail((400, 500))
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tf_opt:
+                                        quality = 85
+                                        while quality >= 20:
+                                            tf_opt.seek(0)
+                                            tf_opt.truncate()
+                                            im_rgb.save(tf_opt, format="JPEG", quality=quality, optimize=True)
+                                            if tf_opt.tell() <= 48 * 1024:
+                                                break
+                                            quality -= 10
+                                        temp_path = tf_opt.name
+                                        target_path = temp_path
+                                self.log(f"✓ Photo prepared as JPEG ({os.path.getsize(target_path) / 1024:.1f} KB)")
                     except Exception as sz_err:
                         self.log(f"Image compression note: {sz_err}")
 

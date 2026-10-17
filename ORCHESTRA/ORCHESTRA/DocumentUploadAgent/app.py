@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 import os
 import json
@@ -86,13 +86,27 @@ async def upload_encrypted_document(file: UploadFile = File(...), phone_number: 
 
 @app.post("/extract")
 async def extract_document(file: UploadFile = File(...)):
+    # 1. Strict PDF-only enforcement to prevent OCR/vision hallucinations
+    filename_lower = (file.filename or "").lower()
+    if not filename_lower.endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF documents are accepted. Please upload the official digital PDF document to prevent extraction hallucination."
+        )
+
     content_bytes = await file.read()
+    if not content_bytes.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is not a valid PDF document (missing %PDF- header)."
+        )
+
     supabase_url = ""
     if upload_to_supabase_storage:
-        c_type = file.content_type or "application/octet-stream"
+        c_type = "application/pdf"
         supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
 
-    print(f"\n📄 [UploadAgent] File received: {file.filename}")
+    print(f"\n📄 [UploadAgent] PDF received: {file.filename} ({len(content_bytes)} bytes)")
     print("🔍 Running extraction in-memory...\n")
 
     results = extract_from_pdf(content_bytes)
@@ -158,14 +172,25 @@ async def process_all_documents(
     # Helper to upload file directly to Supabase Storage
     def _save_if_exists(file_obj, key):
         if file_obj:
+            if key != "Photo" and not (file_obj.filename or "").lower().endswith(".pdf"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Only PDF documents are accepted for {key}. Please upload the official digital PDF."
+                )
             content_bytes = file_obj.file.read()
+            if key != "Photo" and not content_bytes.startswith(b"%PDF-"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Uploaded file for {key} is not a valid PDF document (missing %PDF- header)."
+                )
+
             file_bytes_map[key] = content_bytes
             s_url = ""
             
             # Upload to Supabase Storage bucket
             if upload_to_supabase_storage:
                 try:
-                    c_type = getattr(file_obj, "content_type", "application/octet-stream") or "application/octet-stream"
+                    c_type = "application/pdf" if content_bytes.startswith(b"%PDF-") else (getattr(file_obj, "content_type", "application/octet-stream") or "application/octet-stream")
                     s_url = upload_to_supabase_storage(content_bytes, file_obj.filename, content_type=c_type)
                     if s_url:
                         supabase_urls[key] = s_url

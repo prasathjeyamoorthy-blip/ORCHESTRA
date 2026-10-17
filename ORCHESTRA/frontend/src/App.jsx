@@ -117,7 +117,7 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   // ── Dark mode — always dark ───────────────────────────────────────────────
-  const [dark, setDark] = useState(true);
+  const [dark] = useState(true);
   
   useEffect(() => {
     if (dark) {
@@ -255,7 +255,7 @@ To apply for a Residence Certificate through the TNeGA e-Sevai portal, you must 
 
 ---
 
-> **Note:** All documents must be clear, legible scans or photos. PDFs and JPEG/PNG formats are accepted. Maximum file size per document is 2 MB.
+> **Note:** All documents must be clear, legible official digital documents. Only PDF format is accepted (max 5 MB per document) to avoid extraction errors and prevent vision hallucination.
 
 Once you have these ready, type **"submit documents"** and I will guide you through the upload process.`,
 
@@ -617,9 +617,6 @@ Just type your question in plain language and I will assist you right away.`,
             <span className="mobile-topbar-title">TNeGA</span>
           </div>
           <div className="mobile-topbar-right">
-            <button className="hamburger-btn theme-toggle" aria-label="Toggle theme" onClick={() => setDark(d => !d)}>
-              {dark ? <LuSun size={14} /> : <LuMoon size={14} />}
-            </button>
             <button className="hamburger-btn" aria-label="Menu" onClick={() => setDrawerOpen(true)}>
               <LuMenu size={16} />
             </button>

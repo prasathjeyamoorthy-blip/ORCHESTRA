@@ -13,11 +13,43 @@ def verify_human_photograph_local(image_source) -> bool:
     try:
         img = None
         if isinstance(image_source, bytes):
-            nparr = np.frombuffer(image_source, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if image_source.startswith(b"%PDF-"):
+                # Handle PDF photograph: extract first embedded image or render page 1
+                try:
+                    import pypdf
+                    from io import BytesIO
+                    reader = pypdf.PdfReader(BytesIO(image_source))
+                    if reader.pages and len(reader.pages[0].images) > 0:
+                        first_img = reader.pages[0].images[0]
+                        img_bytes = first_img.data
+                        nparr = np.frombuffer(img_bytes, np.uint8)
+                        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                except Exception as pe:
+                    print(f"[FaceValidator] pypdf embedded image notice: {pe}")
+
+                if img is None:
+                    try:
+                        from pdf2image import convert_from_bytes
+                        pages = convert_from_bytes(image_source, dpi=150, first_page=1, last_page=1)
+                        if pages:
+                            img = cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR)
+                    except Exception as pie:
+                        print(f"[FaceValidator] pdf2image conversion notice: {pie}")
+            else:
+                nparr = np.frombuffer(image_source, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         elif isinstance(image_source, str):
             if os.path.exists(image_source):
-                img = cv2.imread(image_source)
+                if image_source.lower().endswith(".pdf"):
+                    try:
+                        from pdf2image import convert_from_path
+                        pages = convert_from_path(image_source, dpi=150, first_page=1, last_page=1)
+                        if pages:
+                            img = cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR)
+                    except Exception as pie:
+                        print(f"[FaceValidator] pdf2image path conversion notice: {pie}")
+                else:
+                    img = cv2.imread(image_source)
         
         if img is None or img.size == 0:
             print("[FaceValidator] Failed to decode image from source.")
