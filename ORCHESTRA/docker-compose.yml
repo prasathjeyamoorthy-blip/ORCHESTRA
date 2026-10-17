@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   orchestra:
@@ -39,8 +37,8 @@ services:
 
   document-upload:
     build:
-      context: ./ORCHESTRA    
-      dockerfile: DocumentUploadAgent/Dockerfile
+      context: ./ORCHESTRA/DocumentUploadAgent
+      dockerfile: Dockerfile
     container_name: document-upload-agent
     restart: always
     ports:
