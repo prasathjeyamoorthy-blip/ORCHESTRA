@@ -496,8 +496,14 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   const [bulkResults, setBulkResults]     = useState(null);
   const [submitError, setSubmitError]     = useState(null);
   const [isExtracting, setIsExtracting]   = useState(false);
-  const [credentials, setCredentials]     = useState({ username: "", password: "", can_number: "", aadhar_number: "" });
-  const [addressDetails, setAddressDetails] = useState({ from_date: "", to_date: "" });
+  const [credentials, setCredentials]     = useState({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
+  const [addressDetails, setAddressDetails] = useState(() => {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const yyyy = today.getFullYear();
+    return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
+  });
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
   useEffect(() => {
@@ -612,9 +618,67 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSupabaseDocUrls({});
     setSavedProfileLoaded(false);
     setSavedProfile({});
-    setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
-    setAddressDetails({ from_date: "", to_date: "" });
+    setCredentials({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
+    setAddressDetails(() => {
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, "0");
+      const mm = String(today.getMonth() + 1).padStart(2, "0");
+      const yyyy = today.getFullYear();
+      return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
+    });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
+  };
+
+  // ── Dev quick-load: upload a pre-stored local file for a given doc slot ──
+  const DEV_DOCS = {
+    aadharCard:     { url: "/dev_docs/aadhar.jpeg",  name: "aadhar.jpeg",  mime: "image/jpeg" },
+    rationCard:     { url: "/dev_docs/ration.jpeg",  name: "ration.jpeg",  mime: "image/jpeg" },
+    drivingLicense: { url: "/dev_docs/drvlc.pdf",    name: "drvlc.pdf",    mime: "application/pdf" },
+    photo:          { url: "/dev_docs/photo.jpg",    name: "photo.jpg",    mime: "image/jpeg" },
+  };
+
+  const handleDevLoad = async (id) => {
+    if (!DEV_DOCS[id]) return;
+    const { url, name, mime } = DEV_DOCS[id];
+    setIsUploading(p => ({ ...p, [id]: true }));
+    setUploadError(null);
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const file = new File([blob], name, { type: mime });
+      const formData = new FormData();
+      formData.append("file", file);
+      const extUrl = id === "photo"
+        ? `${import.meta.env.VITE_DOC_API_BASE}/verify/photo`
+        : `${import.meta.env.VITE_DOC_API_BASE}/extract`;
+      const extRes = await fetch(extUrl, { method: "POST", body: formData });
+      if (!extRes.ok) throw new Error("Dev extract failed");
+      const data = await extRes.json();
+      if (id === "photo" && data.is_human_photo === false)
+        throw new Error("Dev photo failed face validation.");
+      if (id !== "photo" && data.extracted_data?.length > 0) {
+        setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
+        if (id === "aadharCard") {
+          const ex = data.extracted_data.find(r => r && typeof r === "object") || {};
+          setAddressDetails(prev => ({
+            ...prev,
+            village:     prev.village     || ex.area    || ex.taluk  || "",
+            building_no: prev.building_no || ex.door_no || "",
+            street_name: prev.street_name || ex.street  || ex.street_name || "",
+            pincode:     prev.pincode     || ex.pincode || "",
+          }));
+        }
+      }
+      setUploadedFiles(p => ({ ...p, [id]: name }));
+      setRawFiles(p => ({ ...p, [id]: file }));
+      if (data.supabase_url) setSupabaseDocUrls(p => ({ ...p, [id]: data.supabase_url }));
+      setCheckedItems(p => ({ ...p, [id]: true }));
+      setExpandedItem(null);
+    } catch (err) {
+      setUploadError(err.message || "Dev load failed.");
+    } finally {
+      setIsUploading(p => ({ ...p, [id]: false }));
+    }
   };
 
   const handleFileUpload = async (e, id) => {
@@ -1073,6 +1137,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                           ))}
                         </div>
                       ) : (
+                        <>
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>
                           <input
                             type="file"
@@ -1087,6 +1152,22 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                           {uploadError && <div className="cl-error-inline"><LuTriangleAlert size={13} /> {uploadError}</div>}
                           <span className="upload-zone-btn">{isUploading[doc.id] ? "Uploading…" : "Browse Files"}</span>
                         </label>
+                        {DEV_DOCS[doc.id] && (
+                          <button
+                            type="button"
+                            disabled={isUploading[doc.id]}
+                            onClick={() => handleDevLoad(doc.id)}
+                            style={{
+                              marginTop: "0.5rem", width: "100%",
+                              padding: "0.4rem", borderRadius: "0.5rem",
+                              background: "rgba(168,85,247,0.15)", border: "1px solid rgba(168,85,247,0.4)",
+                              color: "#c084fc", fontSize: "0.78rem", cursor: "pointer",
+                            }}
+                          >
+                            ⚡ Dev Load
+                          </button>
+                        )}
+                        </>
                       )}
                     </div>
                   )}

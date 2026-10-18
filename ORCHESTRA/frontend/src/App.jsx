@@ -513,6 +513,8 @@ Just type your question in plain language and I will assist you right away.`,
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
   const [showDocumentNumber, setShowDocumentNumber]   = useState(false);
+  const [paymentQr, setPaymentQr]                     = useState(null); // { qr_image, payment_url }
+  const [paymentSuccess, setPaymentSuccess]           = useState(null);
   const [automationStatus, setAutomationStatus]       = useState("");
 
   const openAutomationSocket = () => new Promise((resolve) => {
@@ -550,6 +552,8 @@ Just type your question in plain language and I will assist you right away.`,
         else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
         else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
         else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+        else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
+        else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); }
         else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
         else                                                   { setAutomationEvent(data); }
       };
@@ -699,6 +703,68 @@ Just type your question in plain language and I will assist you right away.`,
       <AutomationModal      isOpen={!!automationEvent}    eventData={automationEvent}  onSubmit={handleAutomationSubmit} onAction={handleAutomationAction} />
       <SelfDeclarationModal isOpen={showSelfDeclaration}  downloadPath={selfDeclarationPath} onSubmit={handleSelfDeclarationSubmit} onExit={handleSelfDeclarationExit} />
       <DocumentNumberModal  isOpen={showDocumentNumber}   onSubmit={handleDocumentNumberSubmit} />
+
+      {/* ── Payment QR Modal ── */}
+      {(paymentQr || paymentSuccess) && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.75)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#1a1a2e", borderRadius: "1rem", padding: "2rem",
+            maxWidth: "420px", width: "90%", textAlign: "center",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.6)", color: "#fff",
+          }}>
+            {paymentSuccess ? (
+              <>
+                <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>✅</div>
+                <h2 style={{ margin: "0 0 0.5rem" }}>Payment Successful!</h2>
+                {paymentSuccess.screenshot && (
+                  <img src={paymentSuccess.screenshot} alt="Payment confirmation"
+                    style={{ width: "100%", borderRadius: "0.5rem", marginBottom: "1rem" }} />
+                )}
+                <button onClick={() => setPaymentSuccess(null)} style={{
+                  padding: "0.6rem 1.5rem", borderRadius: "0.5rem",
+                  background: "#4ade80", border: "none", color: "#000",
+                  fontWeight: 700, cursor: "pointer",
+                }}>Close</button>
+              </>
+            ) : (
+              <>
+                <h2 style={{ margin: "0 0 0.25rem" }}>Scan to Pay</h2>
+                <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
+                  Open any UPI app and scan the QR code below to complete your ₹60 payment.
+                </p>
+                {paymentQr.qr_image ? (
+                  <img src={paymentQr.qr_image} alt="UPI QR Code"
+                    style={{ width: "260px", height: "260px", objectFit: "contain",
+                      borderRadius: "0.75rem", background: "#fff", padding: "0.5rem",
+                      marginBottom: "1.25rem" }} />
+                ) : (
+                  <div style={{ color: "#facc15", marginBottom: "1rem" }}>
+                    QR image not available — please check the browser window.
+                  </div>
+                )}
+                <p style={{ color: "#888", fontSize: "0.78rem", marginBottom: "1.25rem" }}>
+                  After scanning and completing the payment, click the button below.
+                </p>
+                <button
+                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); }}
+                  style={{
+                    width: "100%", padding: "0.75rem", borderRadius: "0.6rem",
+                    background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                    border: "none", color: "#fff", fontWeight: 700,
+                    fontSize: "1rem", cursor: "pointer",
+                  }}
+                >
+                  ✅ I have paid
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Clear My Data Confirmation Modal ── */}
       {showClearModal && (

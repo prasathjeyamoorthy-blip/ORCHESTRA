@@ -360,6 +360,14 @@ class TNeSevaiBackendAgent:
                 context = browser.new_context(accept_downloads=True)
                 page = context.new_page()
 
+                # Apply stealth patches — hides Playwright automation signals from bot-detection
+                try:
+                    from playwright_stealth import stealth_sync
+                    stealth_sync(page)
+                    self.log("Stealth applied to browser page.")
+                except Exception as se:
+                    self.log(f"Stealth not applied: {se}")
+
                 # --- Login ---
                 self._goto_with_retry(page, self.PORTAL_URL)
                 page.get_by_role("link", name="English Version").click()
@@ -1209,14 +1217,118 @@ class TNeSevaiBackendAgent:
 
                 self.log("SUCCESS! User redirected to payment gateway. Keeping session alive for user to complete payment...")
 
-                # Keep browser session open for up to 15 minutes (90 x 10s) so session cookies stay valid
-                for _ in range(90):
-                    time.sleep(10)
+                # ── BillDesk: Click UPI → Show QR → capture QR → send to frontend ──
+                try:
+                    # Wait for BillDesk payment methods page to fully load
                     try:
-                        if page_form.is_closed() or not browser.is_connected():
-                            break
+                        page_form.wait_for_load_state("networkidle", timeout=15000)
                     except Exception:
-                        break
+                        time.sleep(4)
+                    self.log(f"BillDesk loaded. URL: {page_form.url}")
+
+                    # BillDesk renders inside iframe[name="response-frame"]
+                    import base64 as _b64
+                    frame = None
+                    try:
+                        page_form.wait_for_selector('iframe[name="response-frame"]', timeout=15000)
+                        frame = page_form.locator('iframe[name="response-frame"]').content_frame
+                        self.log("Found response-frame iframe.")
+                    except Exception as fe:
+                        self.log(f"response-frame not found: {fe} — falling back to main page")
+
+                    ctx = frame if frame else page_form
+                    self.log(f"Using context: {'iframe' if frame else 'main page'}")
+
+                    # Step 1: Click the UPI row (exact from Playwright recording)
+                    self.log("Clicking UPI payment option...")
+                    try:
+                        ctx.get_by_role("button", name="upi").click()
+                        self.log("Clicked UPI.")
+                    except Exception as ue:
+                        self.log(f"UPI click failed: {ue}")
+
+                    # Wait for Show QR button to appear after UPI section expands
+                    self.log("Waiting for Show QR button to appear...")
+                    try:
+                        ctx.get_by_role("button", name="Show QR").wait_for(state="visible", timeout=10000)
+                        self.log("Show QR button is visible.")
+                    except Exception as we:
+                        self.log(f"Show QR not visible: {we}")
+
+                    # Step 2: Click Show QR (exact from Playwright recording)
+                    self.log("Clicking Show QR...")
+                    try:
+                        ctx.get_by_role("button", name="Show QR").click()
+                        self.log("Clicked Show QR.")
+                    except Exception as qe:
+                        self.log(f"Show QR click failed: {qe}")
+
+                    # Wait for QR image to appear
+                    time.sleep(3)
+
+                    # Step 3: Screenshot locator("img").nth(1) — exact from Playwright recording
+                    self.log("Capturing QR image...")
+                    qr_b64 = None
+                    try:
+                        qr_el = ctx.locator("img").nth(1)
+                        qr_el.wait_for(state="visible", timeout=8000)
+                        qr_bytes = qr_el.screenshot()
+                        qr_b64 = _b64.b64encode(qr_bytes).decode()
+                        self.log("QR captured via locator('img').nth(1)")
+                    except Exception as qr_e:
+                        self.log(f"QR element capture failed: {qr_e} — falling back to full page screenshot")
+                        try:
+                            qr_bytes = page_form.screenshot(full_page=False)
+                            qr_b64 = _b64.b64encode(qr_bytes).decode()
+                            self.log("Full page screenshot captured as QR fallback.")
+                        except Exception as ss_e:
+                            self.log(f"Full page screenshot also failed: {ss_e}")
+
+                    # Step 4: Send QR to frontend via WebSocket
+                    if self.ws_manager and qr_b64:
+                        self.ws_manager.send_event_sync({
+                            "type": "PAYMENT_QR",
+                            "payment_url": page_form.url,
+                            "qr_image": f"data:image/png;base64,{qr_b64}",
+                        })
+                        self.log("Payment QR sent to frontend.")
+
+                except Exception as qr_e:
+                    self.log(f"UPI/QR flow error: {qr_e}")
+
+                # Step 5: Wait for user to click "I have paid" from the frontend
+                # Frontend sends USER_ANSWER with data="paid" via WebSocket
+                self.log("Waiting for user to confirm payment via frontend...")
+                paid_timeout = 600  # 10 minutes
+                paid_interval = 2
+                elapsed = 0
+                while elapsed < paid_timeout:
+                    time.sleep(paid_interval)
+                    elapsed += paid_interval
+                    if self.ws_manager and getattr(self.ws_manager, "latest_response", None):
+                        resp = self.ws_manager.latest_response
+                        if isinstance(resp, dict) and resp.get("type") == "USER_ANSWER" and str(resp.get("data", "")).lower() in ("paid", "i have paid", "done"):
+                            self.log("User confirmed payment via frontend.")
+                            self.ws_manager.latest_response = None
+                            break
+                else:
+                    self.log("Payment confirmation timeout — proceeding anyway.")
+
+                # Step 6: Take screenshot of current page and send to frontend
+                self.log("Taking confirmation screenshot...")
+                try:
+                    import base64 as _b64
+                    conf_bytes = page_form.screenshot(full_page=True)
+                    conf_b64 = _b64.b64encode(conf_bytes).decode()
+                    if self.ws_manager:
+                        self.ws_manager.send_event_sync({
+                            "type": "PAYMENT_SUCCESS",
+                            "screenshot": f"data:image/png;base64,{conf_b64}",
+                            "url": page_form.url,
+                        })
+                    self.log("Confirmation screenshot sent to frontend.")
+                except Exception as ss_e:
+                    self.log(f"Confirmation screenshot failed: {ss_e}")
 
         except Exception as e:
             self.log(f"CRITICAL ERROR: {str(e)}")

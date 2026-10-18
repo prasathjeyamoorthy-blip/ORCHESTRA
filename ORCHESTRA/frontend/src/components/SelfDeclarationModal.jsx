@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LuFilePen, LuDownload } from "react-icons/lu";
 
 export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, onExit }) {
   const [uploadedFile, setUploadedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Reset state every time the modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setUploadedFile(null);
+      setIsUploading(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
