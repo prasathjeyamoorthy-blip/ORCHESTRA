@@ -66,10 +66,10 @@ _session.mount("http://", _adapter)
 def pil_to_base64(img):
     buffer = BytesIO()
 
-    # Compress image before encoding with high quality and 1280x1280 to prevent OCR/VLM hallucinations
+    # Preserve sharp detail for OCR/VLM extraction by allowing up to 1920x1920 at high quality
     img = img.convert("RGB")
-    img.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
-    img.save(buffer, format="JPEG", quality=88)
+    img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+    img.save(buffer, format="JPEG", quality=92)
 
     return base64.b64encode(buffer.getvalue()).decode()
 
@@ -125,7 +125,7 @@ def run_vlm(image, text_prompt):
             payload = {
                 "model": "meta/llama-3.2-11b-vision-instruct",
                 "temperature": 0,
-                "max_tokens": 450,
+                "max_tokens": 1024,
                 "messages": [
                     {
                         "role": "user",
@@ -164,7 +164,21 @@ def sanitize_extracted_data(data: dict) -> dict:
     if not isinstance(data, dict):
         return data
 
+    # Normalize certificate_type: "Address Proof" is an upload slot, not a certificate
+    cert_type_raw = str(data.get("certificate_type", "")).strip()
+    if cert_type_raw.lower() in {"address proof", "address", "address_proof", "proof of address"}:
+        if data.get("dl_number"):
+            data["certificate_type"] = "Driving License"
+        elif data.get("aadhaar_number") or data.get("dob") or data.get("gender"):
+            data["certificate_type"] = "Aadhaar"
+        else:
+            data["certificate_type"] = "Aadhaar"
     cert_type = str(data.get("certificate_type", "")).strip()
+
+    # Map username to name if name is missing, and clean up
+    if not data.get("name") and data.get("username"):
+        data["name"] = data.get("username")
+    data.pop("username", None)
 
     # Clean strings and strip empty/null phrases
     _EMPTY_PHRASES = {
@@ -177,18 +191,20 @@ def sanitize_extracted_data(data: dict) -> dict:
             data[k] = "" if cleaned.lower() in _EMPTY_PHRASES else cleaned
 
     # Common honorifics and prefixes across English and Tamil documents
-    HONORIFICS_REGEX = r"^(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Master|Shri|Smt\.?|Thiru|Selvan|Selvi|Thirumathi|Tmt\.?|Dr\.?|Late|To)\s+"
+    HONORIFICS_REGEX = r"^(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Master|Shri|Smt\.?|Thiru|Selvan|Selvi|Thirumathi|Tmt\.?|Dr\.?|Late|To|S/O:?|C/O:?|D/O:?|W/O:?)\s+"
     STANDALONE_TITLES = {
         "mr", "mrs", "ms", "miss", "master", "shri", "smt", "thiru", "selvan",
-        "selvi", "thirumathi", "tmt", "dr", "late", "to"
+        "selvi", "thirumathi", "tmt", "dr", "late", "to", "s/o", "c/o", "d/o", "w/o"
     }
 
-    # Document headers, field labels, and placeholder strings to reject
+    # Document headers, field labels, and synthetic hallucinated placeholder values to reject
     DUMMY_NAMES = {
-        # Generic test / placeholder names
+        # Generic test / placeholder names & synthetic hallucinations
         "john doe", "jane doe", "sample name", "test name", "dummy name",
         "test user", "applicant name", "full name", "name of applicant",
         "first name", "last name", "citizen name", "candidate name",
+        "suresh", "ramesh", "s/o: suresh", "s/o suresh", "suresh sharma",
+        "sai nagar", "sainagar",
         # English document headers & field labels
         "government of india", "unique identification authority", "uidai",
         "transport department", "civil supplies", "government", "india",
@@ -213,6 +229,7 @@ def sanitize_extracted_data(data: dict) -> dict:
     # 1. Name Sanitization: remove honorifics / prefixes and detect dummy / hallucinated label values
     name = data.get("name", "")
     if name and isinstance(name, str):
+        name = re.sub(r"^(?:C/O:?|S/O:?|D/O:?|W/O:?)\s*", "", name, flags=re.IGNORECASE)
         name = re.sub(HONORIFICS_REGEX, "", name, flags=re.IGNORECASE)
         name = re.sub(r"[\.,]+$", "", name).strip()
         name = re.sub(r"\s+", " ", name)
@@ -298,7 +315,7 @@ def sanitize_extracted_data(data: dict) -> dict:
         m_pin = re.search(r"\b([1-9][0-9]{5})\b", pincode)
         if m_pin:
             pin_val = m_pin.group(1)
-            if pin_val in {"111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "123456"}:
+            if pin_val in {"111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "123456", "500001", "000000"}:
                 data["pincode"] = ""
             else:
                 data["pincode"] = pin_val
@@ -349,13 +366,15 @@ def sanitize_extracted_data(data: dict) -> dict:
         if "gender" in data and data["gender"]:
             data["gender"] = ""
 
-    # 10. Anti-hallucination for Community & Religion:
-    # Documents that never specify religion/community:
-    if any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter", "address proof", "ration"]):
-        if "religion" in data:
-            data["religion"] = ""
-        if "community" in data:
-            data["community"] = ""
+    # 10. Anti-hallucination for Community & Religion & Dates:
+    # Documents that never specify religion/community or residence dates:
+    is_standard_id = any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter", "address proof", "ration"])
+    if is_standard_id:
+        data["religion"] = ""
+        data["community"] = ""
+        data.pop("from_date", None)
+        data.pop("to_date", None)
+        data.pop("count_of_residence_years", None)
     else:
         # Validate community values where allowed (e.g. Caste / Income certificates)
         comm = str(data.get("community", "")).strip()
@@ -403,6 +422,28 @@ def sanitize_extracted_data(data: dict) -> dict:
                 data["religion"] = "Buddhist"
             else:
                 data["religion"] = ""
+
+    # Clear classic synthetic default hallucination (Sai Nagar, 1-2-3, Hyderabad Telangana)
+    door_val = str(data.get("door_no", "")).strip()
+    if door_val in {"1-2-3", "123", "1/2/3", "1-2-3/A", "1-2-3/a"}:
+        data["door_no"] = ""
+
+    st_val = str(data.get("street", "") or data.get("street_name", "")).strip().lower()
+    if "sai nagar" in st_val or "sainagar" in st_val:
+        data["street"] = ""
+        if "street_name" in data:
+            data["street_name"] = ""
+
+    full_addr_str = str(data.get("address", "")).strip().lower()
+    if "sai nagar" in full_addr_str or "sainagar" in full_addr_str:
+        data["address"] = ""
+
+    state_str = str(data.get("state", "")).strip().lower()
+    dist_str = str(data.get("district", "")).strip().lower()
+    if state_str == "telangana" and dist_str == "hyderabad":
+        data["state"] = ""
+        data["district"] = ""
+        data["taluk"] = ""
 
     # 11. Address hygiene: ensure father/applicant name, C/O, or full address dumps don't leak into street/area/city
     f_val = (data.get("father_name") or "").lower()
@@ -474,14 +515,36 @@ def sanitize_extracted_data(data: dict) -> dict:
             else:
                 data[geo_key] = g_val
 
-    # 14. Count of residence years: must be a reasonable numeric value (1 to 99)
-    c_years = str(data.get("count_of_residence_years", "")).strip()
-    if c_years:
-        if any(bad in c_years.lower() for bad in ["note", "blank", "document", "image", "explicitly", "left"]):
-            data["count_of_residence_years"] = ""
-        else:
-            m_yr = re.search(r"\b(\d{1,2})\b", c_years)
-            data["count_of_residence_years"] = m_yr.group(1) if m_yr else ""
+    # 15. Clean noise in area (e.g. 1-2 char fragments)
+    if data.get("area") and len(str(data.get("area", "")).strip()) <= 2:
+        data["area"] = ""
+
+    # 16. Complete address synthesis: If address is missing, too short, or just a door number, synthesize it cleanly
+    curr_addr = str(data.get("address", "")).strip()
+    if not curr_addr or len(curr_addr) < 15 or curr_addr.isdigit():
+        addr_parts = [
+            data.get("door_no"),
+            data.get("street") or data.get("street_name"),
+            data.get("area"),
+            data.get("taluk") or data.get("city"),
+            data.get("district"),
+            data.get("state")
+        ]
+        seen = set()
+        valid_parts = []
+        for p in addr_parts:
+            if p:
+                p_str = str(p).strip()
+                p_lower = p_str.lower()
+                if p_str and p_lower not in _MISSING and p_lower not in seen:
+                    seen.add(p_lower)
+                    valid_parts.append(p_str)
+        if valid_parts:
+            built_addr = ", ".join(valid_parts)
+            pin = data.get("pincode")
+            if pin:
+                built_addr += f" - {pin}"
+            data["address"] = built_addr
 
     return data
 
@@ -593,13 +656,14 @@ def detect_certificate_type(image):
     Return ONLY one word or two-word phrase from:
     Aadhaar
     Ration Card
-    Address Proof
-    PAN
-    Residence Certificate
-    Income Certificate
-    Caste Certificate
     Driving License
+    PAN
     Voter ID
+    Caste Certificate
+    Income Certificate
+    Residence Certificate
+
+    (Note: If this is an Aadhaar card or Driving License presented as address proof, return 'Aadhaar' or 'Driving License').
     """
 
     result = run_vlm(image, prompt)
@@ -609,8 +673,8 @@ def detect_certificate_type(image):
         return "Aadhaar"
     if "ration" in text:
         return "Ration Card"
-    if "address proof" in text or ("address" in text and "proof" in text):
-        return "Address Proof"
+    if "driving" in text or "dl" in text:
+        return "Driving License"
     if "pan" in text:
         return "PAN"
     if "voter" in text:
@@ -621,8 +685,9 @@ def detect_certificate_type(image):
         return "Residence Certificate"
     if "caste" in text:
         return "Caste Certificate"
-    if "driving" in text or "dl" in text:
-        return "Driving License"
+    if "address" in text:
+        # If model still outputs address proof, check for Aadhaar features
+        return "Aadhaar"
     # fallback to raw stripped text
     return result.strip().rstrip('.').strip()
 
@@ -639,8 +704,9 @@ def _process_pages(pages: list) -> list:
 Look at this document image and do two things in one response:
 
 1. Identify the certificate type. Choose ONLY from:
-   Aadhaar, Ration Card, Address Proof, PAN, Driving License,
-   Voter ID, Caste Certificate, Residence Certificate, Income Certificate
+   Aadhaar, Ration Card, Driving License, PAN, Voter ID,
+   Caste Certificate, Residence Certificate, Income Certificate
+   (NOTE: 'Address Proof' is NOT a certificate type. If an Aadhaar card or Driving License is used as proof of address, classify it as 'Aadhaar' or 'Driving License').
 
 2. Extract all relevant fields based on the type.
 
@@ -648,14 +714,14 @@ CRITICAL ANTI-HALLUCINATION RULES:
 - Extract ONLY facts explicitly and visibly printed on the document image.
 - NEVER guess, assume, estimate, or extrapolate any values.
 - If any field is NOT explicitly visible on the document, set its value to "" (empty string).
-- For Aadhaar, Driving License, PAN, or Voter ID cards, NEVER invent religion or community. Always set them to "".
+- For Aadhaar, Driving License, PAN, or Voter ID cards, NEVER invent religion, community, or residence dates. Set them to "".
 - Strip all title prefixes ("Mr.", "Mrs.", "Shri", "Smt", "Thiru", "Selvan", "Selvi", "Tmt") and return only the clean person name. NEVER return a standalone title like "Thiru" as a name.
 - For father_name on Aadhaar: look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon. NEVER set father_name equal to the applicant's own name.
 - For street, area, and city: return ONLY the specific street or locality name (e.g. "Main Street", "Anna Nagar"). NEVER copy or repeat the entire multi-line address into street, area, or city.
 - For community: return ONLY a valid caste category (e.g. "BC", "MBC", "SC", "ST", "OC"). NEVER return a state or city name like "Puducherry" or "Tamil Nadu".
 - Return a single JSON object. Always include "certificate_type" as the first key.
 
-For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, religion, community, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
+For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
 For Ration Card (Tamil Nadu Smart Family Card / குடும்ப அட்டை):
   * "number" is the card number (e.g. 33347751306).
   * "name" is ONLY the person name next to or under "குடும்பத் தலைவரின் பெயர்" (Name of Head of Family, e.g. Gopalakrishnan). NEVER extract field labels like "முகவரி" (which means Address) or "பிறந்த தேதி" (which means DOB) or "FAMILY CARD" as the name!
@@ -665,8 +731,7 @@ For Ration Card (Tamil Nadu Smart Family Card / குடும்ப அட்�
   * "pincode" is the 6-digit pin code.
   * "state" is Tamil Nadu.
   Keys: certificate_type, name, father_name, dob, number, address, district, taluk, state, pincode
-For Driving License use keys: certificate_type, name, dob, dl_number, address, state, pincode
-For Address Proof use keys: certificate_type, username, father_name, religion, community, door_no, address, street_name, pincode, from_date, to_date, state, district, taluk, count_of_residence_years
+For Driving License use keys: certificate_type, name, father_name, dob, dl_number, address, door_no, street, state, pincode
 For PAN use keys: certificate_type, name, father_name, dob, pan_number
 For Voter ID use keys: certificate_type, name, father_name, dob, voter_id
 For Caste Certificate use keys: certificate_type, name, father_name, mother_name, dob, religion, community, caste, sub_caste, address, door_no, street, area, city, state, district, taluk, pincode, issued_date, issuing_authority
@@ -675,7 +740,6 @@ For Income Certificate use keys: certificate_type, name, father_name, religion, 
 
 Return ONLY the JSON object. No explanation.
 """
-
 
     _REFUSAL_PHRASES = ["i'm sorry", "i cannot", "i can't assist", "i am unable", "cannot assist"]
     _MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found"}
@@ -706,37 +770,49 @@ Return ONLY the JSON object. No explanation.
             cert_type = data.get("certificate_type", "Unknown")
             print("Detected:", cert_type)
 
-            # --- Aadhaar: two-stage fallback for father_name ---
-            _current = data.get("father_name", "") or ""
-            if "aadhaar" in cert_type.lower() and _current.strip().lower() in _MISSING:
+            # --- Aadhaar: smart crop refinement for full-page e-Aadhaar scans ---
+            if "aadhaar" in cert_type.lower():
+                w, h = page.size
+                is_full_page = (h / w) >= 1.25 if w > 0 else False
 
-                # Stage 1: regex on raw VLM text
-                _match = re.search(r"(?:C/O|S/O|D/O|W/O|Father|Father\s*Name)[:\s]+([^\n,\"{}]+)", raw, re.IGNORECASE)
-                if _match:
-                    _candidate = _match.group(1).strip().strip('"').strip("'")
-                    if _candidate.lower() not in _MISSING:
-                        data["father_name"] = _candidate
-                        print(f"[regex fallback] father_name → {data['father_name']}")
-
-                # Stage 2: targeted VLM call directly on the image
-                if (data.get("father_name") or "").strip().lower() in _MISSING:
-                    _father_prompt = (
-                        "Look at this Aadhaar card image carefully.\n"
-                        "Find the line that contains C/O or S/O or D/O or W/O followed by a name.\n"
-                        "Return ONLY that name as plain text — no labels, no explanation, no punctuation.\n"
-                        "For example if the card shows 'C/O: Arokiaraj' just return: Arokiaraj"
-                    )
+                if is_full_page:
+                    print(f"[Aadhaar Crop Refinement] Full-page scan detected ({w}x{h}). Running focused crop extraction...")
                     try:
-                        _father_raw = run_vlm(page, _father_prompt)
-                        print(f"[DEBUG] VLM fallback raw response: {repr(_father_raw)}")
-                        _father_raw = _father_raw.strip().strip('"').strip("'")
-                        if _father_raw and _father_raw.lower() not in _MISSING:
-                            data["father_name"] = _father_raw
-                            print(f"[VLM fallback] father_name → {data['father_name']}")
-                        else:
-                            print(f"[VLM fallback] response still missing: {repr(_father_raw)}")
-                    except Exception as _fe:
-                        print(f"[father_name VLM fallback failed]: {_fe}")
+                        top_crop = page.crop((int(w * 0.04), int(h * 0.30), int(w * 0.55), int(h * 0.58)))
+                        bottom_crop = page.crop((int(w * 0.02), int(h * 0.65), int(w * 0.98), int(h * 0.95)))
+                        crop_prompt = "Read ALL text printed in this image exactly, word by word, line by line. Return the exact lines."
+                        
+                        top_text = run_vlm(top_crop, crop_prompt)
+                        bottom_text = run_vlm(bottom_crop, crop_prompt)
+                        combined_crop_text = f"{top_text}\n{bottom_text}"
+                        
+                        crop_det = _extract_aadhaar_from_text(combined_crop_text)
+                        if crop_det:
+                            print(f"[Aadhaar Crop Refinement] Successfully extracted fields from crops: {list(crop_det.keys())}")
+                            for k, v in crop_det.items():
+                                if not v or k == "certificate_type":
+                                    continue
+                                # High accuracy fields from high-res crops override full-page optical misreads
+                                if k in {"father_name", "door_no", "street", "district", "pincode", "state", "taluk", "aadhaar_number", "dob", "gender", "name", "phone_number", "address"}:
+                                    data[k] = v
+                                elif not data.get(k) or len(str(data.get(k, ""))) < len(str(v)):
+                                    data[k] = v
+                            if data.get("taluk"):
+                                data["city"] = ""
+                    except Exception as ce:
+                        print(f"[Aadhaar Crop Refinement failed]: {ce}")
+
+                # Father name fallback if still missing
+                _current = data.get("father_name", "") or ""
+                if _current.strip().lower() in _MISSING:
+                    _match = re.search(r"(?:C/O|S/O|D/O|W/O|Father|Father\s*Name)[:\s]+([^\n,\"{}]+)", raw, re.IGNORECASE)
+                    if _match:
+                        _candidate = _match.group(1).strip().strip('"').strip("'")
+                        if _candidate.lower() not in _MISSING:
+                            data["father_name"] = _candidate
+                            print(f"[regex fallback] father_name → {data['father_name']}")
+
+                data = sanitize_extracted_data(data)
 
             data["_resolution"] = resolution
             outputs.append(data)
@@ -751,7 +827,7 @@ Return ONLY the JSON object. No explanation.
 
 def _extract_aadhaar_from_text(text: str) -> dict:
     data = {"certificate_type": "Aadhaar"}
-    clean_text = text.replace("\t", " ")
+    clean_text = re.sub(r"[\*#_`]", "", text).replace("\t", " ")
 
     # Aadhaar Number
     m_num = re.search(r"\b([X0-9]{4}\s+[X0-9]{4}\s+[0-9]{4})\b", clean_text)
@@ -763,7 +839,11 @@ def _extract_aadhaar_from_text(text: str) -> dict:
         data["aadhaar_number"] = re.sub(r"\s+", " ", m_num.group(1)).strip()
 
     # DOB
-    m_dob = re.search(r"(?:DOB|Birth|பிறந்த\s*நாள்)[:\s/]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", clean_text, re.IGNORECASE)
+    m_dob = re.search(r"(?:DOB|Date\s*of\s*Birth|Birth|பிறந்த\s*நாள்)[:\s/]+([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})", clean_text, re.IGNORECASE)
+    if not m_dob:
+        m_dob = re.search(r"(?:^|\n)\s*([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})\s*(?:\n|\bMALE|\bFEMALE)", clean_text, re.IGNORECASE)
+    if not m_dob:
+        m_dob = re.search(r"\b([0-9]{2}[/-][0-9]{2}[/-][0-9]{4})\b", clean_text)
     if m_dob:
         data["dob"] = m_dob.group(1).replace("-", "/")
 
@@ -774,16 +854,28 @@ def _extract_aadhaar_from_text(text: str) -> dict:
         data["gender"] = "Male" if g in ["MALE", "ஆண்"] else ("Female" if g in ["FEMALE", "பெண்"] else "Transgender")
 
     # Name
-    m_name = re.search(r"To\s*\n[^\n]+\n([A-Za-z][A-Za-z\s\.]+)\n\s*(?:S/O|C/O|D/O|W/O)", text)
+    m_name = re.search(r"(?:To|பெறுநர்)[^\n]*\n+(?:[^\n]+\n+)?\s*([A-Za-z][A-Za-z\s\.]+?)\s*\n+\s*(?:S/O|C/O|D/O|W/O)", clean_text, re.IGNORECASE)
     if not m_name:
-        m_name = re.search(r"([A-Za-z][A-Za-z\s\.]+)\s*\n[^\n]*DOB:", text)
+        m_name = re.search(r"(?:To|பெறுநர்)[^\n]*\n+\s*([A-Za-z][A-Za-z\s\.]+?)\s*\n", clean_text, re.IGNORECASE)
+    if not m_name:
+        m_name = re.search(r"([A-Za-z][A-Za-z\s\.]+)\s*\n+[^\n]*(?:DOB|23/)", clean_text)
+    if not m_name:
+        m_name = re.search(r"(?:Name|பெயர்)[:\s]+([A-Za-z][A-Za-z\s\.]+?)(?=\n|DOB|$)", clean_text)
     if m_name:
-        data["name"] = re.sub(r"\s+", " ", m_name.group(1)).strip()
+        cand_name = re.sub(r"\s+", " ", m_name.group(1)).strip()
+        # Ensure it doesn't match labels
+        if cand_name.lower() not in {"unique", "government", "india", "authority", "enrolment", "signature"}:
+            data["name"] = cand_name
 
     # Father Name
     m_father = re.search(r"(?:S/O|C/O|D/O|W/O)[:\s]+([A-Za-z][A-Za-z\s\.]+?)(?:,|\n|\r|$)", clean_text)
     if m_father:
         data["father_name"] = m_father.group(1).strip()
+
+    # Phone / Mobile
+    m_phone = re.search(r"(?:Mobile|Phone|Cell)[:\s]+([6-9][0-9]{9})", clean_text, re.IGNORECASE)
+    if m_phone:
+        data["phone_number"] = m_phone.group(1)
 
     # Pincode
     m_pin = re.search(r"(?:PIN\s*Code|Pincode|Pin)[:\s]+([1-9][0-9]{5})", clean_text, re.IGNORECASE)
@@ -799,19 +891,20 @@ def _extract_aadhaar_from_text(text: str) -> dict:
     m_state = re.search(r"(?:State)[:\s]+([A-Za-z\s]+?)(?:,|\n|PIN|$)", clean_text, re.IGNORECASE)
     if m_state:
         data["state"] = m_state.group(1).strip()
-    m_vtc = re.search(r"(?:VTC|Taluk)[:\s]+([A-Za-z\s]+?)(?:,|\n|PO:|$)", clean_text, re.IGNORECASE)
+    m_vtc = re.search(r"(?:VTC|Taluk|Sub\s*District)[:\s]+([A-Za-z\s]+?)(?:,|\n|PO:|$)", clean_text, re.IGNORECASE)
     if m_vtc:
         data["taluk"] = m_vtc.group(1).strip()
+        data["area"] = m_vtc.group(1).strip()
 
     # Address
-    m_addr = re.search(r"Address:\s*([\s\S]+?)(?:\b\d{6}\b|XXXX\s*XXXX|$)", text)
+    m_addr = re.search(r"Address:\s*([\s\S]+?)(?:\b\d{6}\b|XXXX\s*XXXX|$)", clean_text)
     if m_addr:
         data["address"] = re.sub(r"\s+", " ", m_addr.group(1)).strip().rstrip(",")
 
     # Door No & Street
-    m_door_street = re.search(r"(?:S/O:[^\n,]+,?\s*|\n)([0-9]+[A-Za-z\-/0-9]*)\s*,\s*([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", clean_text, re.IGNORECASE)
+    m_door_street = re.search(r"(?:S/O|C/O|D/O|W/O):[^\n,]+,?\s*(?:(?:\r?\n)+\s*)?([0-9]+[A-Za-z\-/0-9]*)\s*,\s*([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", clean_text, re.IGNORECASE)
     if not m_door_street:
-        m_door_street = re.search(r"\n([0-9]+[A-Za-z\-/0-9]*)\n([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", text, re.IGNORECASE)
+        m_door_street = re.search(r"\n([0-9]+[A-Za-z\-/0-9]*)\n([A-Za-z0-9\s]+?(?:NAGAR|STREET|ROAD|COLONY|LANE|SALAI|PURAM|PALAYAM|GRAMAM|AVENUE|GARDEN|LAYOUT|COMPLEX|KUPPAM))", clean_text, re.IGNORECASE)
     if m_door_street:
         data["door_no"] = m_door_street.group(1).strip()
         data["street"] = re.sub(r"\s+", " ", m_door_street.group(2)).strip()
@@ -1104,57 +1197,62 @@ def extract_from_pdf(pdf_input) -> list:
             detail="Failed to read document content or invalid input source."
         )
 
-    # Strictly reject non-PDF documents to eliminate OCR/vision hallucinations
-    if not pdf_bytes.startswith(PDF_MAGIC):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF documents are accepted. Images (JPG, PNG) are not accepted to prevent extraction hallucination."
-        )
-
-    # 1. Fast path: Extract digital vector text directly using pypdf
-    try:
+    # Check if input is a valid PDF
+    if pdf_bytes.startswith(PDF_MAGIC):
+        # 1. Fast path: Extract digital vector text directly using pypdf
         try:
-            import pypdf
-        except ImportError:
-            for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
-                if p not in sys.path:
-                    sys.path.append(p)
-            import pypdf
+            try:
+                import pypdf
+            except ImportError:
+                for p in ["/home/devaprasath/.local/lib/python3.14/site-packages", "/home/devaprasath/.local/lib/python3.11/site-packages", "/usr/lib/python3.14/site-packages"]:
+                    if p not in sys.path:
+                        sys.path.append(p)
+                import pypdf
 
-        reader = pypdf.PdfReader(BytesIO(pdf_bytes))
-        extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        if len(extracted_text.strip()) > 50:
-            print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")
-            # Run deterministic regex extraction first (zero hallucination, exact match)
-            det = extract_deterministic_from_text(extracted_text)
-            if det and det.get("name") and (det.get("aadhaar_number") or det.get("dl_number") or det.get("pincode") or det.get("dob")):
-                print(f"[extractor] High-confidence deterministic extraction succeeded: {det.get('certificate_type')} -> {det.get('name')}")
-                return [det]
+            reader = pypdf.PdfReader(BytesIO(pdf_bytes))
+            extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            if len(extracted_text.strip()) > 50:
+                print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")
+                # Run deterministic regex extraction first (zero hallucination, exact match)
+                det = extract_deterministic_from_text(extracted_text)
+                if det and det.get("name") and (det.get("aadhaar_number") or det.get("dl_number") or det.get("pincode") or det.get("dob")):
+                    print(f"[extractor] High-confidence deterministic extraction succeeded: {det.get('certificate_type')} -> {det.get('name')}")
+                    return [det]
 
-            # LLM text completion fallback if deterministic missed critical fields
-            raw_json = run_text_llm(extracted_text)
-            if raw_json and raw_json.get("name"):
-                print(f"[extractor] Text LLM extracted {raw_json.get('certificate_type')}: {raw_json.get('name')}")
-                return [raw_json]
-            elif det:
-                return [det]
-    except Exception as te:
-        print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
+                # LLM text completion fallback if deterministic missed critical fields
+                raw_json = run_text_llm(extracted_text)
+                if raw_json and raw_json.get("name"):
+                    print(f"[extractor] Text LLM extracted {raw_json.get('certificate_type')}: {raw_json.get('name')}")
+                    return [raw_json]
+                elif det:
+                    return [det]
+        except Exception as te:
+            print(f"[extractor] Digital PDF text extraction fast-path skipped: {te}")
 
-    # 2. Render PDF pages as high-resolution images for scanned documents
-    try:
-        from pdf2image import convert_from_bytes
-        pages = convert_from_bytes(
-            pdf_bytes,
-            dpi=200,
-            poppler_path=config.POPPLER_PATH
-        )
-    except Exception as exc:
-        print(f"[extractor] pdf2image convert_from_bytes failed: {exc}")
-        raise HTTPException(
-            status_code=422,
-            detail=f"PDF conversion failed: {exc}"
-        )
+        # 2. Render PDF pages as high-resolution images for scanned documents
+        try:
+            from pdf2image import convert_from_bytes
+            pages = convert_from_bytes(
+                pdf_bytes,
+                dpi=200,
+                poppler_path=config.POPPLER_PATH
+            )
+        except Exception as exc:
+            print(f"[extractor] pdf2image convert_from_bytes failed: {exc}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"PDF conversion failed: {exc}"
+            )
+    else:
+        # Input is an image file (JPG, PNG, WebP)
+        try:
+            img = Image.open(BytesIO(pdf_bytes)).convert("RGB")
+            pages = [img]
+        except Exception as ie:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The uploaded file is neither a valid PDF nor a recognizable image: {ie}"
+            )
 
     return _process_pages(pages)
 

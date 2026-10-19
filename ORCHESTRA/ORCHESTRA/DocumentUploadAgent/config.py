@@ -36,7 +36,7 @@ Note: for "father_name", the card has a line like "C/O: Arokiaraj" or "S/O: Arok
 """
 
 
-PAN_PROMPT = """
+PAN_PROMPT = r"""
 Extract ONLY the following fields from this PAN card.
 father_name = value captured by the pattern C/O:\s*([^\n,]+)
 Return strict JSON:
@@ -70,60 +70,41 @@ Output JSON only.
 """
 
 ADDRESS_PROOF_PROMPT = """
-Extract ONLY the following fields from this Address Proof document.
+Extract ONLY the following fields from this address document (Aadhaar or Driving License).
 Return strict JSON:
 
 {
-    "certificate_type": "Address Proof",
-    "username": "",
+    "certificate_type": "Aadhaar",
+    "name": "",
     "father_name": "",
-    "religion": "",
-    "community": "",
+    "dob": "",
     "door_no": "",
     "address": "",
-    "street_name": "",
+    "street": "",
     "pincode": "",
-    "from_date": "",
-    "to_date": "",
     "state": "",
     "district": "",
-    "taluk": "",
-    "count_of_residence_years": ""
+    "taluk": ""
 }
 Output JSON only.
 """
 
 VOTER_ID_PROMPT = """
-You are given an image of a Tamil ration card.
-
-Task:
-Extract the Mother's Name and the Ration Card Number.
-
-Instructions:
-
-1. Focus on the left section of the ration card.
-2. The Mother's Name appears in the first line.
-3. Extract the Tamil text of the Mother's Name exactly as it appears.
-4. Do not translate or modify the Tamil text.
-
-Ration Card Number:
-5. Identify the ration card number on the card.
-6. Extract the number exactly as written.
-
-Output Rules:
-
-* Return JSON only.
-* Do not include explanations.
-* Preserve the original Tamil characters.
-
-Return strict JSON: 
+Extract ONLY the following fields from this Voter ID / Election Card.
+Return strict JSON:
 
 {
-"certificate_type": "Ration Card",
-"mother_name": "",
-"number": ""
+    "certificate_type": "Voter ID",
+    "name": "",
+    "father_name": "",
+    "dob": "",
+    "gender": "",
+    "voter_id": "",
+    "address": "",
+    "state": "",
+    "pincode": ""
 }
-
+Output JSON only.
 """
 
 
@@ -150,20 +131,20 @@ RESIDENCE_PROMPT = """
 Extract ONLY the following fields from this Residence Certificate.
 Return strict JSON: 
 {
- "certificate_type": "Residence Certificate",
-    "name":"",
+    "certificate_type": "Residence Certificate",
+    "name": "",
     "father_name": "",
     "religion": "",
     "community": "",
-    "gender":"",
-    "pincode": "",
-    "taluk": "",
-}   "street": "",
+    "gender": "",
+    "door_no": "",
+    "address": "",
+    "street": "",
     "area": "",
     "city": "",
     "state": "",
-    "pincode": ""
-    "taluk": "",
+    "pincode": "",
+    "taluk": ""
 }
 OUTPUT JSON ONLY
 """

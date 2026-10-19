@@ -24,7 +24,7 @@ def find_certificate(results: list, cert_type: str) -> Optional[dict]:
     # map certificate types to a list of acceptable alternate labels
     aliases = {
         "ration card": ["voter id", "ration", "ration card", "family card"],
-        "address proof": ["residence certificate", "income certificate"],
+        "address proof": ["driving license", "driving", "aadhaar", "voter id", "ration card", "residence certificate", "address proof"],
         "caste certificate": ["income certificate", "residence certificate", "community certificate"],
     }
 

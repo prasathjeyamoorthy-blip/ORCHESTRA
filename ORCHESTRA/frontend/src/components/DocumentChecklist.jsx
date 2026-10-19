@@ -24,10 +24,10 @@ const STEPS = [
 ];
 
 const DOCUMENTS = [
-  { id: "aadharCard",     label: "Aadhar card",                               pdfOnly: true },
-  { id: "rationCard",     label: "Ration card",                               pdfOnly: true },
-  { id: "photo",          label: "Applicant Photograph",                      pdfOnly: true },
-  { id: "drivingLicense", label: "Address Proof (Driving License / Aadhaar)", pdfOnly: true },
+  { id: "aadharCard",     label: "Aadhar card",                               pdfOnly: false },
+  { id: "rationCard",     label: "Ration card",                               pdfOnly: false },
+  { id: "photo",          label: "Applicant Photograph",                      pdfOnly: false },
+  { id: "drivingLicense", label: "Address Proof (Driving License / Aadhaar)", pdfOnly: false },
 ];
 
 const MONTH_NAMES = [
@@ -658,7 +658,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         throw new Error("Dev photo failed face validation.");
       if (id !== "photo" && data.extracted_data?.length > 0) {
         setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
-        if (id === "aadharCard") {
+        if (id === "aadharCard" || id === "drivingLicense" || id === "addressProof") {
           const ex = data.extracted_data.find(r => r && typeof r === "object") || {};
           setAddressDetails(prev => ({
             ...prev,
@@ -685,15 +685,27 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     const file = e.target.files[0];
     if (!file) return;
 
-    // Strict PDF-only enforcement for all document slots to prevent extraction hallucination
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setUploadError("Only PDF documents are accepted to ensure high quality and prevent extraction errors. Please upload an official PDF document.");
-      e.target.value = "";
-      return;
+    const isPhoto = id === "photo";
+    const fileExt = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+    const allowedPhotoExts = [".jpg", ".jpeg", ".png", ".webp"];
+    const allowedDocExts = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
+
+    if (isPhoto) {
+      if (!allowedPhotoExts.includes(fileExt)) {
+        setUploadError("Please upload a JPG or PNG photograph for face verification.");
+        e.target.value = "";
+        return;
+      }
+    } else {
+      if (!allowedDocExts.includes(fileExt)) {
+        setUploadError("Please upload an official PDF or high-quality image (JPG, PNG).");
+        e.target.value = "";
+        return;
+      }
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setUploadError("File size exceeds 5 MB. Please upload an official PDF under 5 MB.");
+      setUploadError("File size exceeds 5 MB. Please upload a file under 5 MB.");
       e.target.value = "";
       return;
     }
@@ -711,8 +723,19 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         const data = await res.json();
         if (id === "photo" && data.is_human_photo === false)
           throw new Error("Invalid Photograph. Please ensure the image clearly shows a human person.");
-        if (id !== "photo" && data.extracted_data?.length > 0)
+        if (id !== "photo" && data.extracted_data?.length > 0) {
           setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
+          if (id === "aadharCard" || id === "drivingLicense" || id === "addressProof") {
+            const ex = data.extracted_data.find(r => r && typeof r === "object") || {};
+            setAddressDetails(prev => ({
+              ...prev,
+              village:     prev.village     || ex.area    || ex.taluk  || "",
+              building_no: prev.building_no || ex.door_no || "",
+              street_name: prev.street_name || ex.street  || ex.street_name || "",
+              pincode:     prev.pincode     || ex.pincode || "",
+            }));
+          }
+        }
 
         // ── Zero-Knowledge Client-Side Document Encryption ────────────────────
         let encryptedUrl = "";
@@ -1125,7 +1148,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                               <h5 className="cl-extracted-title">{extract.certificate_type} Details</h5>
                               <ul className="cl-extracted-list">
                                 {Object.entries(extract.extracted_fields || extract)
-                                  .filter(([k, v]) => !k.startsWith("_") && k !== "certificate_type" && v !== null && v !== undefined)
+                                  .filter(([k, v]) => !k.startsWith("_") && k !== "certificate_type" && v !== null && v !== undefined && String(v).trim() !== "")
                                   .map(([k, v]) => (
                                     <li key={k}>
                                       <strong>{k.replace(/_/g, " ").toUpperCase()}:</strong>{" "}
@@ -1141,14 +1164,14 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>
                           <input
                             type="file"
-                            accept=".pdf,application/pdf"
+                            accept={doc.id === "photo" ? "image/jpeg,image/png,image/jpg" : ".pdf,application/pdf,image/jpeg,image/png,image/jpg"}
                             onChange={e => handleFileUpload(e, doc.id)}
                             disabled={isUploading[doc.id]}
                             hidden
                           />
                           <div className="upload-zone-icon"><MdOutlineCloudUpload size={22} /></div>
                           <p className="cl-upload-title">{isUploading[doc.id] ? "Uploading…" : `Upload ${doc.label}`}</p>
-                          <p className="cl-upload-sub">Official PDF only · max 5 MB</p>
+                          <p className="cl-upload-sub">{doc.id === "photo" ? "JPG or PNG · max 5 MB" : "Official PDF or image · max 5 MB"}</p>
                           {uploadError && <div className="cl-error-inline"><LuTriangleAlert size={13} /> {uploadError}</div>}
                           <span className="upload-zone-btn">{isUploading[doc.id] ? "Uploading…" : "Browse Files"}</span>
                         </label>
