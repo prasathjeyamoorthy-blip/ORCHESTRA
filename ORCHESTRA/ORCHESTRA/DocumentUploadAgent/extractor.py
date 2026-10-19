@@ -473,7 +473,7 @@ def sanitize_extracted_data(data: dict) -> dict:
             data[addr_key] = ""
             continue
 
-        # Strip leading father/applicant name prefix if present (e.g. "Gopalakrishnan, 55, Main St")
+        # Strip leading father/applicant name prefix if present (e.g. "FatherName, 55, Main St")
         if f_val and val_lower.startswith(f_val):
             val = re.sub(rf"^{re.escape(f_val)}[\s,:\-]+", "", val, flags=re.IGNORECASE).strip()
             data[addr_key] = val
@@ -516,6 +516,15 @@ def sanitize_extracted_data(data: dict) -> dict:
                 data[geo_key] = ""
             else:
                 data[geo_key] = g_val
+
+    # 14. Count of residence years: must be a reasonable numeric value (1 to 99)
+    c_years = str(data.get("count_of_residence_years", "")).strip()
+    if c_years:
+        if any(bad in c_years.lower() for bad in ["note", "blank", "document", "image", "explicitly", "left"]):
+            data["count_of_residence_years"] = ""
+        else:
+            m_yr = re.search(r"\b(\d{1,2})\b", c_years)
+            data["count_of_residence_years"] = m_yr.group(1) if m_yr else ""
 
     # 15. Clean noise in area (e.g. 1-2 char fragments)
     if data.get("area") and len(str(data.get("area", "")).strip()) <= 2:
@@ -725,8 +734,8 @@ CRITICAL ANTI-HALLUCINATION RULES:
 
 For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
 For Ration Card (Tamil Nadu Smart Family Card / குடும்ப அட்டை):
-  * "number" is the card number (e.g. 33347751306).
-  * "name" is ONLY the person name next to or under "குடும்பத் தலைவரின் பெயர்" (Name of Head of Family, e.g. Gopalakrishnan). NEVER extract field labels like "முகவரி" (which means Address) or "பிறந்த தேதி" (which means DOB) or "FAMILY CARD" as the name!
+  * "number" is the card number printed on the card.
+  * "name" is ONLY the person name next to or under "குடும்பத் தலைவரின் பெயர்" (Name of Head of Family). NEVER extract field labels like "முகவரி" (which means Address) or "பிறந்த தேதி" (which means DOB) or "FAMILY CARD" as the name!
   * "father_name" is the name under "தந்தை / கணவர் பெயர்" if printed.
   * "dob" is the date under "பிறந்த தேதி" (DD/MM/YYYY).
   * "address" is the text under "முகவரி".

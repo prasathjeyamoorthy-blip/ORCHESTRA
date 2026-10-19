@@ -496,13 +496,13 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   const [bulkResults, setBulkResults]     = useState(null);
   const [submitError, setSubmitError]     = useState(null);
   const [isExtracting, setIsExtracting]   = useState(false);
-  const [credentials, setCredentials]     = useState({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
+  const [credentials, setCredentials]     = useState({ username: "", password: "", can_number: "", aadhar_number: "" });
   const [addressDetails, setAddressDetails] = useState(() => {
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, "0");
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const yyyy = today.getFullYear();
-    return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
+    return { from_date: "", to_date: `${dd}/${mm}/${yyyy}` };
   });
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
@@ -618,13 +618,13 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSupabaseDocUrls({});
     setSavedProfileLoaded(false);
     setSavedProfile({});
-    setCredentials({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
+    setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
     setAddressDetails(() => {
       const today = new Date();
       const dd = String(today.getDate()).padStart(2, "0");
       const mm = String(today.getMonth() + 1).padStart(2, "0");
       const yyyy = today.getFullYear();
-      return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
+      return { from_date: "", to_date: `${dd}/${mm}/${yyyy}` };
     });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
   };
@@ -667,6 +667,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             street_name: prev.street_name || ex.street  || ex.street_name || "",
             pincode:     prev.pincode     || ex.pincode || "",
           }));
+          if (ex.aadhaar_number) {
+            const cleanAadhaar = String(ex.aadhaar_number).replace(/\D/g, "");
+            setCredentials(prev => ({ ...prev, aadhar_number: prev.aadhar_number || cleanAadhaar }));
+          }
         }
       }
       setUploadedFiles(p => ({ ...p, [id]: name }));
@@ -734,6 +738,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
               street_name: prev.street_name || ex.street  || ex.street_name || "",
               pincode:     prev.pincode     || ex.pincode || "",
             }));
+            if (ex.aadhaar_number) {
+              const cleanAadhaar = String(ex.aadhaar_number).replace(/\D/g, "");
+              setCredentials(prev => ({ ...prev, aadhar_number: prev.aadhar_number || cleanAadhaar }));
+            }
           }
         }
 
@@ -886,7 +894,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         if (!s) return true;
         if (appN && s === String(appN).trim().toLowerCase()) return true;
         if (appF && s === String(appF).trim().toLowerCase()) return true;
-        if (s.includes("c/o") || s.includes("s/o") || s.includes("d/o") || s.includes("w/o") || s.includes("ashish")) return true;
+        if (s.includes("c/o") || s.includes("s/o") || s.includes("d/o") || s.includes("w/o")) return true;
         return false;
       };
 

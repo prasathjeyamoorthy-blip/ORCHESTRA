@@ -683,7 +683,7 @@ class TNeSevaiBackendAgent:
                     f_n = (self.applicant.get("father_name") or "").strip().lower()
                     if app_n and v_s == app_n: return False
                     if f_n and v_s == f_n: return False
-                    if any(bad in v_s for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]): return False
+                    if any(bad in v_s for bad in ["c/o", "s/o", "d/o", "w/o"]): return False
                     return True
 
                 bldg_val = self.address.get("building_no") or self.address.get("door_no")

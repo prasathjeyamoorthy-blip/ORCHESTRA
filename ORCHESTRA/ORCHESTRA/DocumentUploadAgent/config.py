@@ -11,7 +11,7 @@ AADHAAR_PROMPT = """
 Extract the following fields from this Aadhaar card and return them as a JSON object only.
 Do not include any explanation or steps — return only the JSON.
 
-Note: for "father_name", the card has a line like "C/O: Arokiaraj" or "S/O: Arokiaraj" in the address block — extract only the name after the colon, not the prefix.
+Note: for "father_name", the card has a line like "C/O: <Name>" or "S/O: <Name>" in the address block — extract only the name after the colon, not the prefix.
 
 {
  "certificate_type": "Aadhaar",

@@ -198,7 +198,7 @@ def process_documents(
             r_lower = str(raw).strip().lower()
             if (name and r_lower == str(name).strip().lower()) or (father_name and r_lower == str(father_name).strip().lower()):
                 return ""
-            if any(bad in r_lower for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]):
+            if any(bad in r_lower for bad in ["c/o", "s/o", "d/o", "w/o"]):
                 return ""
             return raw
 
@@ -214,15 +214,15 @@ def process_documents(
                 if parts:
                     if not door_val:
                         p0 = parts[0]
-                        if not any(bad in p0.lower() for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]):
+                        if not any(bad in p0.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
                             door_val = p0
                     if len(parts) > 1 and not street_val:
                         p1 = parts[1]
-                        if not any(bad in p1.lower() for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]):
+                        if not any(bad in p1.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
                             street_val = p1
                     if len(parts) > 2 and not area_val:
                         p2 = parts[2]
-                        if not any(bad in p2.lower() for bad in ["c/o", "s/o", "d/o", "w/o", "ashish"]):
+                        if not any(bad in p2.lower() for bad in ["c/o", "s/o", "d/o", "w/o"]):
                             area_val = p2
 
         ration_num = (
