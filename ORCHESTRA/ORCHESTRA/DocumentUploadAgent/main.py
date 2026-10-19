@@ -236,7 +236,7 @@ def process_documents(
             "username": name,
             "aadhaar_number": get_aadhaar_field("aadhaar_number"),
             "dl_number": get_address_field("dl_number"),
-            "dob": get_field_priority("dob"),
+            "dob": get_aadhaar_field("dob") or get_address_field("dob") or get_field_priority("dob"),
             "father_name": father_name,
             "gender": get_field_priority("gender"),
             "religion": get_field_priority("religion"),

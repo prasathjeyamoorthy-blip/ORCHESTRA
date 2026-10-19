@@ -468,6 +468,7 @@ Just type your question in plain language and I will assist you right away.`,
   const handleChecklistExit = () => {
     sendWS({ type: "USER_CLOSE" });
     setShowChecklist(false);
+    setAutomationStatus("");
   };
 
   // ── Apply Now — open checklist directly ──────────────────────────────────
@@ -518,6 +519,10 @@ Just type your question in plain language and I will assist you right away.`,
   const [automationStatus, setAutomationStatus]       = useState("");
 
   const openAutomationSocket = () => new Promise((resolve) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      resolve();
+      return;
+    }
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
       wsRef.current.onclose = null;
       wsRef.current.onerror = null;
@@ -526,7 +531,8 @@ Just type your question in plain language and I will assist you right away.`,
     }
     let resolved = false;
     const connect = () => {
-      const socket = new WebSocket(`${import.meta.env.VITE_WS_BASE}/ws/automation`);
+      const wsBase = (import.meta.env.VITE_WS_BASE || "ws://localhost:8001").replace(/\/$/, "");
+      const socket = new WebSocket(`${wsBase}/ws/automation`);
       let ping;
       socket.onopen = () => {
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
@@ -554,7 +560,20 @@ Just type your question in plain language and I will assist you right away.`,
         else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
         else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
         else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); }
-        else if (data.type === "AUTOMATION_ERROR")            { setAutomationEvent(null); alert(`Automation error: ${data.message}`); }
+        else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
+        else if (data.type === "CLEANER_ERROR")               {
+          window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+          setAutomationEvent(null);
+        }
+        else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
+          window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "✓ Saved application deleted successfully!" }));
+          setAutomationEvent(null);
+        }
+        else if (data.type === "AUTOMATION_ERROR")            {
+          window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+          setAutomationEvent(null);
+          alert(`Automation error: ${data.message}`);
+        }
         else                                                   { setAutomationEvent(data); }
       };
       socket.onclose = () => { clearInterval(ping); setTimeout(() => wsRef.current === socket && connect(), 1000); };

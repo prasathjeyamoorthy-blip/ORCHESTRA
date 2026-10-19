@@ -30,5 +30,8 @@ last_payload.json
 backend_captcha.png
 after_payment_click.png
 before_payment_click.png
+after_delete.png
+before_delete.png
+captcha_delete_snapshot.png
 .DS_Store
 .vscode/

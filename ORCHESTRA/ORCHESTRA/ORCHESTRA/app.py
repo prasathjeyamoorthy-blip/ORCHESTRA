@@ -450,10 +450,41 @@ def run_playwright_agent(payload: dict):
     original_cwd = os.getcwd()
     try:
         os.chdir(playwright_dir)
-        from rescert import TNeSevaiBackendAgent
+        import importlib
+        try:
+            import rescert
+            importlib.reload(rescert)
+            from rescert import TNeSevaiBackendAgent
+        except Exception:
+            from rescert import TNeSevaiBackendAgent
         TNeSevaiBackendAgent(payload, ws_manager=manager).run()
     except Exception as e:
         print(f"[ERROR] Playwright agent crashed: {e}")
+        import traceback; traceback.print_exc()
+        try:
+            manager.send_event_sync({"type": "AUTOMATION_ERROR", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        os.chdir(original_cwd)
+
+
+def run_delete_saved_app_agent(payload: dict):
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(playwright_dir)
+        import importlib
+        try:
+            import delete_saved_app
+            importlib.reload(delete_saved_app)
+            from delete_saved_app import TNeSevaiSavedAppCleaner
+        except Exception:
+            from delete_saved_app import TNeSevaiSavedAppCleaner
+        creds = payload.get("credentials") or {}
+        cleaner = TNeSevaiSavedAppCleaner(credentials=creds, ws_manager=manager)
+        cleaner.run()
+    except Exception as e:
+        print(f"[ERROR] Delete saved application cleaner crashed: {e}")
         import traceback; traceback.print_exc()
         try:
             manager.send_event_sync({"type": "AUTOMATION_ERROR", "message": str(e)})
@@ -480,6 +511,29 @@ async def submit_application(payload: dict):
         print(f"[WARNING] Could not save payload to database: {e}")
     _threading.Thread(target=run_playwright_agent, args=(payload,), daemon=True).start()
     return {"status": "success", "message": "Playwright task started"}
+
+
+@app.post("/delete-saved-application")
+async def delete_saved_application(payload: dict = None):
+    """Developer endpoint: Run headless automation to delete pending Saved Applications on portal."""
+    payload = payload or {}
+    creds = payload.get("credentials")
+    if not creds:
+        try:
+            from supabase_db import get_latest_application_payload
+            latest = get_latest_application_payload() or {}
+            creds = latest.get("credentials")
+        except Exception:
+            creds = None
+    if not creds:
+        creds = {
+            "username": os.getenv("CITIZEN_USERNAME") or os.getenv("CITIZEN_PORTAL_USER", ""),
+            "password": os.getenv("CITIZEN_PASSWORD") or os.getenv("CITIZEN_PORTAL_PASS", "")
+        }
+
+    cleaner_payload = {"credentials": creds}
+    _threading.Thread(target=run_delete_saved_app_agent, args=(cleaner_payload,), daemon=True).start()
+    return {"status": "success", "message": "Headless cleaner task started"}
 
 
 @app.get("/latest-payload")

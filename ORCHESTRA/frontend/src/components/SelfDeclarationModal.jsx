@@ -43,8 +43,9 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
     try {
       const formData = new FormData();
       formData.append("file", uploadedFile);
+      const docApiBase = (import.meta.env.VITE_DOC_API_BASE || "http://localhost:8000").replace(/\/$/, "");
 
-      const response = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/upload-signed-declaration`, {
+      const response = await fetch(`${docApiBase}/upload-signed-declaration`, {
         method: "POST",
         body: formData
       });
@@ -54,7 +55,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
       }
 
       const data = await response.json();
-      onSubmit(data.file_path);
+      onSubmit(data.file_path || "autosign");
     } catch (_error) {
       alert("Failed to upload signed declaration. Please try again.");
       setIsUploading(false);
@@ -65,7 +66,8 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
     if (downloadPath && (downloadPath.startsWith("http://") || downloadPath.startsWith("https://"))) {
       window.open(downloadPath, '_blank');
     } else {
-      window.open(`${import.meta.env.VITE_DOC_API_BASE}/download-declaration`, '_blank');
+      const docApiBase = (import.meta.env.VITE_DOC_API_BASE || "http://localhost:8000").replace(/\/$/, "");
+      window.open(`${docApiBase}/download-declaration`, '_blank');
     }
   };
 
@@ -136,11 +138,35 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
           )}
         </div>
 
-        <div style={{ display: "flex", gap: "0.75rem" }}>
-          <button onClick={onExit} disabled={isUploading} className="btn-secondary" style={{ flex: 1 }}>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button onClick={onExit} disabled={isUploading} className="btn-secondary" style={{ flex: 1, minWidth: "80px" }}>
             Exit
           </button>
-          <button onClick={handleSubmit} disabled={!uploadedFile || isUploading} className="btn-primary" style={{ flex: 2 }}>
+          <button
+            type="button"
+            onClick={() => onSubmit("autosign")}
+            disabled={isUploading}
+            style={{
+              flex: 1.5,
+              minWidth: "160px",
+              background: "linear-gradient(135deg, #a855f7, #6366f1)",
+              color: "#fff",
+              border: "none",
+              borderRadius: "0.5rem",
+              padding: "0.6rem 0.85rem",
+              fontWeight: 600,
+              fontSize: "0.82rem",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.35rem"
+            }}
+            title="Digitally sign and auto-upload the declaration on portal"
+          >
+            ⚡ Auto-Sign &amp; Continue
+          </button>
+          <button onClick={handleSubmit} disabled={!uploadedFile || isUploading} className="btn-primary" style={{ flex: 1.5, minWidth: "150px" }}>
             {isUploading ? "Uploading..." : "Submit Signed Form"}
           </button>
         </div>

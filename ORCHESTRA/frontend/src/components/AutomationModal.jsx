@@ -16,8 +16,12 @@ function AutomationModalContent({ eventData, onSubmit, onAction }) {
   const [otpSending, setOtpSending] = useState(false);
 
   useEffect(() => {
-    if (eventData?.type === 'REQUEST_CAPTCHA' && !eventData.image) {
-      fetch(`${import.meta.env.VITE_API_BASE}/automation/captcha-b64?t=${Date.now()}`)
+    if (eventData?.image) {
+      setCaptchaSrc(eventData.image);
+      setRefreshing(false);
+    } else if (eventData?.type === 'REQUEST_CAPTCHA') {
+      const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+      fetch(`${apiBase}/automation/captcha-b64?t=${Date.now()}`)
         .then(r => r.json())
         .then(d => { if (d.image) setCaptchaSrc(d.image); })
         .catch(err => console.error("[Captcha] Failed to load:", err));

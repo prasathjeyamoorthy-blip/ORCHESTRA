@@ -207,6 +207,13 @@ async def process_all_documents(
                         detail=f"Uploaded file for {key} is neither a valid PDF nor a recognizable image."
                     )
 
+            uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+            os.makedirs(uploads_dir, exist_ok=True)
+            safe_fname = os.path.basename(file_obj.filename or f"{key}{ext}")
+            local_save_path = os.path.join(uploads_dir, safe_fname)
+            with open(local_save_path, "wb") as lf:
+                lf.write(content_bytes)
+
             file_bytes_map[key] = content_bytes
             s_url = ""
             
@@ -221,9 +228,25 @@ async def process_all_documents(
                 except Exception as se:
                     print(f"⚠️ Supabase Storage upload error for {key}: {se}")
 
-            # Set saved_paths to Supabase URL (or fallback filename)
-            saved_paths[key] = s_url or file_obj.filename
-            print(f"✓ Document {key} Supabase URL: {saved_paths[key]}")
+            # Set saved_paths to Supabase URL (or fallback local path)
+            final_path = s_url or local_save_path
+            saved_paths[key] = final_path
+            if s_url:
+                supabase_urls[key] = s_url
+
+            # Also populate camelCase / lowercase alias keys for frontend compatibility
+            alias_map = {
+                "Photo": ["photo", "photo_path"],
+                "Driving License": ["drivingLicense", "driving", "address_proof", "address_proof_path"],
+                "Ration Card": ["rationCard", "ration"],
+                "Aadhaar": ["aadharCard", "aadhaar", "aadhar"]
+            }
+            for alias in alias_map.get(key, []):
+                saved_paths[alias] = final_path
+                if s_url:
+                    supabase_urls[alias] = s_url
+
+            print(f"✓ Document {key} path resolved: {final_path}")
     
     _save_if_exists(aadhaar, "Aadhaar")
     _save_if_exists(ration, "Ration Card")

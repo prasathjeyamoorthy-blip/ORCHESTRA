@@ -496,24 +496,89 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   const [bulkResults, setBulkResults]     = useState(null);
   const [submitError, setSubmitError]     = useState(null);
   const [isExtracting, setIsExtracting]   = useState(false);
-  const [credentials, setCredentials]     = useState({ username: "", password: "", can_number: "", aadhar_number: "" });
+  const [isDeletingSavedApp, setIsDeletingSavedApp] = useState(false);
+  const [deleteSavedAppMsg, setDeleteSavedAppMsg]   = useState("");
+  const [credentials, setCredentials]     = useState({
+    username: "lohithg",
+    password: "Lohith@2007",
+    can_number: "13318016498757",
+    aadhar_number: "607126530111",
+  });
   const [addressDetails, setAddressDetails] = useState(() => {
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, "0");
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const yyyy = today.getFullYear();
-    return { from_date: "", to_date: `${dd}/${mm}/${yyyy}` };
+    return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
   });
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
+  // ── Cleaner WebSocket event listener ──────────────────────────────────────────
+  useEffect(() => {
+    const onStatus = (e) => setDeleteSavedAppMsg(e.detail);
+    const onDone = (e) => {
+      setDeleteSavedAppMsg(e.detail || "✓ Saved application deleted successfully!");
+      setIsDeletingSavedApp(false);
+      setTimeout(() => setDeleteSavedAppMsg(""), 7000);
+    };
+    const onError = (e) => {
+      setDeleteSavedAppMsg(`❌ ${e.detail || "Failed to delete saved application"}`);
+      setIsDeletingSavedApp(false);
+      setTimeout(() => setDeleteSavedAppMsg(""), 8000);
+    };
+    window.addEventListener("cleaner_status", onStatus);
+    window.addEventListener("cleaner_done", onDone);
+    window.addEventListener("cleaner_error", onError);
+    return () => {
+      window.removeEventListener("cleaner_status", onStatus);
+      window.removeEventListener("cleaner_done", onDone);
+      window.removeEventListener("cleaner_error", onError);
+    };
+  }, []);
+
+  // ── Live Automation step progression tracking ──────────────────────────────────
   useEffect(() => {
     if (!automationStatus) return;
     const s = automationStatus.toLowerCase();
+
+    // Ignore cleaner or developer tooling messages completely
+    if (s.includes("cleaner") || s.includes("deleted") || s.includes("saved application")) {
+      return;
+    }
+
+    const isStage1 =
+      s.includes("otp verified") ||
+      s.includes("loading the form") ||
+      s.includes("filling in your application") ||
+      s.includes("saving your address") ||
+      s.includes("submitting the application") ||
+      s.includes("starting document uploads") ||
+      s.includes("uploading your") ||
+      s.includes("all documents uploaded") ||
+      s.includes("payment page reached");
+
+    const isStage2 =
+      s.includes("saving your address") ||
+      s.includes("submitting the application") ||
+      s.includes("starting document uploads") ||
+      s.includes("uploading your") ||
+      s.includes("all documents uploaded") ||
+      s.includes("payment page reached");
+
+    const isStage3 =
+      s.includes("all documents uploaded") ||
+      s.includes("going to payment") ||
+      s.includes("payment page reached");
+
+    const isStage4 =
+      s.includes("payment page reached") ||
+      (s.includes("done!") && s.includes("payment"));
+
     setCompletedSteps(prev => ({
-      loggedIn:     prev.loggedIn     || s.includes("otp verified") || s.includes("loading the form") || s.includes("filling in") || s.includes("saving your address") || s.includes("uploading") || s.includes("all documents") || s.includes("payment") || s.includes("done"),
-      formFilled:   prev.formFilled   || s.includes("saving your address") || s.includes("submitting the application") || s.includes("uploading") || s.includes("all documents") || s.includes("payment") || s.includes("done"),
-      docsUploaded: prev.docsUploaded || s.includes("all documents uploaded") || s.includes("going to payment") || s.includes("payment") || s.includes("done"),
-      submitted:    prev.submitted    || s.includes("done!") || s.includes("payment page reached"),
+      loggedIn:     prev.loggedIn     || isStage1,
+      formFilled:   prev.formFilled   || isStage2,
+      docsUploaded: prev.docsUploaded || isStage3,
+      submitted:    prev.submitted    || isStage4,
     }));
   }, [automationStatus]);
 
@@ -618,15 +683,50 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSupabaseDocUrls({});
     setSavedProfileLoaded(false);
     setSavedProfile({});
-    setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
+    setCredentials({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
     setAddressDetails(() => {
       const today = new Date();
       const dd = String(today.getDate()).padStart(2, "0");
       const mm = String(today.getMonth() + 1).padStart(2, "0");
       const yyyy = today.getFullYear();
-      return { from_date: "", to_date: `${dd}/${mm}/${yyyy}` };
+      return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
     });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
+  };
+
+  // ── Dev headless action: Delete Saved Application on portal ──────────────────
+  const handleDeleteSavedApp = async () => {
+    const un = (credentials?.username || "lohithg").trim() || "lohithg";
+    const pw = (credentials?.password || "Lohith@2007").trim() || "Lohith@2007";
+    const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+
+    setIsDeletingSavedApp(true);
+    setDeleteSavedAppMsg("🚀 Launching headless browser on portal…");
+
+    try {
+      if (onOpenSocket) {
+        await onOpenSocket().catch(err => console.warn("[WebSocket] onOpenSocket warning:", err));
+      }
+
+      const res = await fetch(`${apiBase}/delete-saved-application`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credentials: { username: un, password: pw }
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+
+      setDeleteSavedAppMsg("Cleaner running in headless mode. Enter captcha in modal if requested.");
+    } catch (e) {
+      console.error("[Cleaner Error]", e);
+      setDeleteSavedAppMsg(`Failed to start cleaner: ${e.message || "Unknown error"}`);
+      setIsDeletingSavedApp(false);
+      setTimeout(() => setDeleteSavedAppMsg(""), 6000);
+    }
   };
 
   // ── Dev quick-load: upload a pre-stored local file for a given doc slot ──
@@ -859,6 +959,9 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   };
 
   const handleProceedClick = async () => {
+    // Reset all step progress for fresh run
+    setCompletedSteps({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
+    if (onResetAutomationStatus) onResetAutomationStatus();
     setSubmitError(null);
     setIsExtracting(true);
     const extractForm = new FormData();
@@ -951,20 +1054,34 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           perm_pincode: c.pincode || savedAddress.perm_pincode || ""
         },
         documents: {
-          photo_path: supUrls.Photo || supUrls.photo || orchPaths.Photo || orchPaths.photo || "",
+          photo_path:
+            supUrls.Photo || supUrls.photo || supUrls.photo_path ||
+            orchPaths.Photo || orchPaths.photo || orchPaths.photo_path || "",
           self_decl_path: "",
-          aadhaar_path: supUrls.Aadhaar || supUrls.aadhaar || orchPaths.Aadhaar || orchPaths.aadhaar || "",
-          address_proof_path: supUrls["Driving License"] || supUrls["Ration Card"] || supUrls.driving || supUrls.ration || orchPaths["Driving License"] || orchPaths["Ration Card"] || orchPaths.driving || orchPaths.ration || "",
-          address_doc_no: c.dl_number || savedApplicant.address_doc_no || ""
+          aadhaar_path:
+            supUrls.Aadhaar || supUrls.aadhaar || supUrls.aadharCard ||
+            orchPaths.Aadhaar || orchPaths.aadhaar || orchPaths.aadharCard || "",
+          address_proof_path:
+            supUrls["Driving License"] || supUrls.drivingLicense || supUrls.driving ||
+            supUrls["Ration Card"] || supUrls.rationCard || supUrls.ration ||
+            supUrls.Aadhaar || supUrls.aadharCard || supUrls.aadhaar ||
+            orchPaths["Driving License"] || orchPaths.drivingLicense || orchPaths.driving ||
+            orchPaths["Ration Card"] || orchPaths.rationCard || orchPaths.ration ||
+            orchPaths.Aadhaar || orchPaths.aadharCard || orchPaths.aadhaar || "",
+          address_doc_no:
+            c.dl_number || c.driving_license_number || c.driving_licence_number ||
+            c.license_number || c.ration_card_number || c.smart_card_no ||
+            c.aadhaar_number || c.aadhar_number || savedApplicant.address_doc_no || "TN31 20250006924"
         },
       };
 
-      if (onOpenSocket) await onOpenSocket();
-      for (let i = 0; i < 10; i++) {
-        try { const s = await fetch(`${import.meta.env.VITE_API_BASE}/ws/status`); const d = await s.json(); if (d.connected) break; } catch (_) {}
-        await new Promise(r => setTimeout(r, 500));
+      const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+      if (onOpenSocket) await onOpenSocket().catch(err => console.warn(err));
+      for (let i = 0; i < 6; i++) {
+        try { const s = await fetch(`${apiBase}/ws/status`); const d = await s.json(); if (d.connected) break; } catch (_) {}
+        await new Promise(r => setTimeout(r, 300));
       }
-      const submitRes = await fetch(`${import.meta.env.VITE_API_BASE}/submit-application`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const submitRes = await fetch(`${apiBase}/submit-application`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!submitRes.ok) throw new Error(`Automation server error (HTTP ${submitRes.status}).`);
     } catch (e) {
       setSubmitError(e.message || "An unexpected error occurred.");
@@ -974,8 +1091,20 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
 
   // ── Success / automation live screen ────────────────────────────────────────
   if (bulkResults) {
-    const isDone  = automationStatus && (automationStatus.includes("Done!") || automationStatus.includes("Payment page") || automationStatus.includes("went wrong"));
-    const isError = automationStatus && automationStatus.includes("went wrong");
+    const isDone = automationStatus && (
+      (automationStatus.toLowerCase().includes("done!") && automationStatus.toLowerCase().includes("payment")) ||
+      automationStatus.toLowerCase().includes("payment page reached") ||
+      automationStatus.toLowerCase().includes("went wrong")
+    );
+    const isError = automationStatus && automationStatus.toLowerCase().includes("went wrong");
+
+    const handleLiveClose = () => {
+      setBulkResults(null);
+      setCompletedSteps({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
+      if (onResetAutomationStatus) onResetAutomationStatus();
+      if (onExit) onExit();
+    };
+
     return (
       <div className="cl-card fade-up">
         <div className="cl-live-header">
@@ -1020,7 +1149,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
               Retry
             </button>
           )}
-          <button className="btn-secondary" onClick={onExit}>Close</button>
+          <button className="btn-secondary" onClick={handleLiveClose}>Close</button>
         </div>
       </div>
     );
@@ -1041,7 +1170,50 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
 
   return (
     <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", overflow: "visible" }}>
-      <h3 className="cl-title" style={{ marginBottom: "1.5rem", color: "#fff" }}>TNeSevai Application Details</h3>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1.25rem" }}>
+        <h3 className="cl-title" style={{ margin: 0, color: "#fff" }}>TNeSevai Application Details</h3>
+        <button
+          type="button"
+          disabled={isDeletingSavedApp}
+          onClick={handleDeleteSavedApp}
+          style={{
+            background: "rgba(239, 68, 68, 0.12)",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            color: "#fca5a5",
+            borderRadius: "9999px",
+            padding: "0.35rem 0.85rem",
+            fontSize: "0.78rem",
+            fontWeight: 600,
+            cursor: isDeletingSavedApp ? "not-allowed" : "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            transition: "all 0.2s",
+          }}
+          title="Developer feature: Log into portal in headless mode and delete pending Saved Application"
+        >
+          {isDeletingSavedApp ? <LuLoader size={13} style={{ animation: "spin 1s linear infinite" }} /> : <MdDeleteOutline size={14} />}
+          <span>{isDeletingSavedApp ? "Deleting on Portal…" : "⚡ Delete Saved Application (Dev)"}</span>
+        </button>
+      </div>
+
+      {deleteSavedAppMsg && (
+        <div style={{
+          background: "rgba(168, 85, 247, 0.12)",
+          border: "1px solid rgba(168, 85, 247, 0.35)",
+          borderRadius: "0.75rem",
+          padding: "0.6rem 0.9rem",
+          marginBottom: "1rem",
+          color: "#c084fc",
+          fontSize: "0.82rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem"
+        }}>
+          {isDeletingSavedApp && <LuLoader size={14} style={{ animation: "spin 1s linear infinite" }} />}
+          <span>{deleteSavedAppMsg}</span>
+        </div>
+      )}
 
       {savedProfileLoaded && (
         <div style={{
@@ -1091,6 +1263,38 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             <FloatingInput label="Password"          name="password"      type="password" value={credentials.password} onChange={handleCredChange} />
             <FloatingInput label="CAN Number"        name="can_number"    value={credentials.can_number}    onChange={handleCredChange} />
             <FloatingInput label="Aadhar Number *"   name="aadhar_number" value={credentials.aadhar_number} onChange={handleCredChange} maxLength={12} />
+          </div>
+
+          <div style={{
+            marginTop: "1rem", paddingTop: "0.75rem",
+            borderTop: "1px dashed rgba(255,255,255,0.08)",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem"
+          }}>
+            <span style={{ fontSize: "0.75rem", color: "#a855f7", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.35rem" }}>
+              ⚡ Developer Tool
+            </span>
+            <button
+              type="button"
+              disabled={isDeletingSavedApp}
+              onClick={handleDeleteSavedApp}
+              style={{
+                background: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.4)",
+                color: "#fca5a5",
+                borderRadius: "0.5rem",
+                padding: "0.35rem 0.75rem",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                cursor: isDeletingSavedApp ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.35rem"
+              }}
+              title="Delete draft Saved Application on portal"
+            >
+              {isDeletingSavedApp ? <LuLoader size={12} style={{ animation: "spin 1s linear infinite" }} /> : <MdDeleteOutline size={13} />}
+              <span>{isDeletingSavedApp ? "Deleting on Portal…" : "Delete Saved App on Portal"}</span>
+            </button>
           </div>
         </div>
       )}
