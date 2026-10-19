@@ -406,13 +406,20 @@ class ConnectionManager:
         if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):
             self.latest_captcha_b64 = event_data["image"]
         self._event_queue.append(event_data)
-        print(f"[WebSocket] Event queued: {event_data.get('type')}")
-        deadline = time.time() + wait_timeout
-        while not self._connections:
-            if time.time() > deadline:
-                print(f"[WebSocket ERROR] No client after {wait_timeout}s")
-                return
-            time.sleep(1)
+        print(f"[WebSocket] Event queued: {event_data.get('type')}", flush=True)
+
+        is_interactive = event_data.get("type") in ("REQUEST_CAPTCHA", "REQUEST_OTP", "REQUEST_SIGNED_DECLARATION")
+        if is_interactive:
+            deadline = time.time() + wait_timeout
+            while not self._connections:
+                if time.time() > deadline:
+                    print(f"[WebSocket ERROR] No client after {wait_timeout}s", flush=True)
+                    return
+                time.sleep(1)
+        elif not self._connections:
+            # Non-interactive status updates shouldn't block the thread if client isn't connected yet
+            return
+
         loop = self._main_loop
         if loop is None or not loop.is_running():
             return
@@ -420,7 +427,7 @@ class ConnectionManager:
         try:
             future.result(timeout=10)
         except Exception as e:
-            print(f"[WebSocket ERROR] {e}")
+            print(f"[WebSocket ERROR] {e}", flush=True)
 
     async def _flush_queue(self):
         while self._event_queue:

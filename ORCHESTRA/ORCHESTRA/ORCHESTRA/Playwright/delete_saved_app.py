@@ -33,7 +33,7 @@ class TNeSevaiSavedAppCleaner:
 
     def log(self, message: str, is_ui: bool = True):
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] [CLEANER] {message}")
+        print(f"[{timestamp}] [CLEANER] {message}", flush=True)
         if self.ws_manager and is_ui:
             try:
                 self.ws_manager.send_event_sync({
@@ -128,7 +128,11 @@ class TNeSevaiSavedAppCleaner:
         self.log("🚀 Starting headless browser to clear saved applications...")
 
         with sync_playwright() as playwright:
-            launch_kwargs = {"headless": True, "slow_mo": 0}
+            launch_kwargs = {
+                "headless": True,
+                "slow_mo": 0,
+                "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+            }
             for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
                 if os.path.exists(chrome_path):
                     launch_kwargs["executable_path"] = chrome_path
