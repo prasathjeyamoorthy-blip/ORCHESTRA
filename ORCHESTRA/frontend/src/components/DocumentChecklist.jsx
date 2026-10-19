@@ -708,6 +708,15 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         await onOpenSocket().catch(err => console.warn("[WebSocket] onOpenSocket warning:", err));
       }
 
+      for (let i = 0; i < 8; i++) {
+        try {
+          const s = await fetch(`${apiBase}/ws/status`);
+          const d = await s.json();
+          if (d.connected) break;
+        } catch (_) {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+
       const res = await fetch(`${apiBase}/delete-saved-application`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1076,12 +1085,33 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       };
 
       const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
-      if (onOpenSocket) await onOpenSocket().catch(err => console.warn(err));
-      for (let i = 0; i < 6; i++) {
-        try { const s = await fetch(`${apiBase}/ws/status`); const d = await s.json(); if (d.connected) break; } catch (_) {}
-        await new Promise(r => setTimeout(r, 300));
+      if (onOpenSocket) {
+        await onOpenSocket().catch(err => console.warn("[WebSocket] onOpenSocket warning:", err));
       }
-      const submitRes = await fetch(`${apiBase}/submit-application`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+
+      // Verify WebSocket connectivity to backend (up to ~5 seconds)
+      let wsReady = false;
+      for (let i = 0; i < 12; i++) {
+        try {
+          const s = await fetch(`${apiBase}/ws/status`);
+          const d = await s.json();
+          if (d.connected) {
+            wsReady = true;
+            break;
+          }
+        } catch (_) {}
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      if (!wsReady) {
+        throw new Error("Unable to establish live connection to the automation server. Please reload the page or check your connection and try again.");
+      }
+
+      const submitRes = await fetch(`${apiBase}/submit-application`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
       if (!submitRes.ok) throw new Error(`Automation server error (HTTP ${submitRes.status}).`);
     } catch (e) {
       setSubmitError(e.message || "An unexpected error occurred.");

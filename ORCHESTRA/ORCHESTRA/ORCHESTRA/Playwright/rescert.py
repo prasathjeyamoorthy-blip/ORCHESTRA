@@ -415,7 +415,7 @@ class TNeSevaiBackendAgent:
 
             with sync_playwright() as playwright:
                 self.log("Launching Browser...")
-                is_headless = os.getenv("HEADLESS", "").lower() in ("true", "1")
+                is_headless = os.getenv("HEADLESS", "true").lower() in ("true", "1") or not bool(os.getenv("DISPLAY"))
                 launch_kwargs = {
                     "headless": is_headless,
                     "slow_mo": 200 if not is_headless else 0,

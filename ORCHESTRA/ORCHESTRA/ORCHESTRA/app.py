@@ -439,6 +439,12 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+@app.on_event("startup")
+async def on_startup():
+    manager._main_loop = _asyncio.get_running_loop()
+    print("[Server Startup] Event loop registered in ConnectionManager.", flush=True)
+
+
 @app.websocket("/ws/automation")
 async def websocket_automation(websocket: WebSocket):
     await manager.connect(websocket)
@@ -450,6 +456,10 @@ async def websocket_automation(websocket: WebSocket):
             print(f"[WebSocket] Received: {data}")
             manager.latest_response = data
     except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[WebSocket ERROR] Client connection error: {e}", flush=True)
+    finally:
         manager.disconnect(websocket)
 
 

@@ -518,70 +518,122 @@ Just type your question in plain language and I will assist you right away.`,
   const [paymentSuccess, setPaymentSuccess]           = useState(null);
   const [automationStatus, setAutomationStatus]       = useState("");
 
-  const openAutomationSocket = () => new Promise((resolve) => {
+  const getWsBase = () => {
+    let wsBase = import.meta.env.VITE_WS_BASE;
+    if (!wsBase) {
+      const apiBase = import.meta.env.VITE_API_BASE;
+      if (apiBase) {
+        wsBase = apiBase.replace(/^http/, "ws");
+      } else {
+        const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+        wsBase = `${isHttps ? "wss" : "ws"}://${typeof window !== "undefined" ? window.location.host : "localhost:8001"}`;
+      }
+    }
+    return wsBase.replace(/\/$/, "");
+  };
+
+  const openAutomationSocket = () => new Promise((resolve, reject) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       resolve();
       return;
     }
-    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-      wsRef.current.onclose = null;
-      wsRef.current.onerror = null;
-      wsRef.current.onmessage = null;
-      wsRef.current.close();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      const start = Date.now();
+      const check = setInterval(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          clearInterval(check);
+          resolve();
+        } else if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || Date.now() - start > 8000) {
+          clearInterval(check);
+          if (wsRef.current?.readyState === WebSocket.OPEN) resolve();
+          else reject(new Error("WebSocket connection timeout"));
+        }
+      }, 150);
+      return;
     }
-    let resolved = false;
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      try {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+      } catch (_) {}
+    }
+    let settled = false;
     const connect = () => {
-      const wsBase = (import.meta.env.VITE_WS_BASE || "ws://localhost:8001").replace(/\/$/, "");
+      const wsBase = getWsBase();
       const socket = new WebSocket(`${wsBase}/ws/automation`);
       let ping;
       socket.onopen = () => {
+        console.log("[WebSocket] Automation socket connected to:", wsBase);
         ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
-        if (!resolved) { resolved = true; resolve(); }
+        if (!settled) { settled = true; resolve(); }
       };
       socket.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
-        else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
-        else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-        else if (data.type === "OPEN_PAYMENT_URL")            {
-          if (data.url) {
-            window.open(data.url, "_blank");
-            setMessages(prev => [
-              ...prev,
-              {
-                sender: "agent",
-                text: `💳 **Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n👉 [**Proceed to Payment Gateway**](${data.url})`
-              }
-            ]);
+        try {
+          const data = JSON.parse(e.data);
+          if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+          else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+          else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+          else if (data.type === "OPEN_PAYMENT_URL")            {
+            if (data.url) {
+              window.open(data.url, "_blank");
+              setMessages(prev => [
+                ...prev,
+                {
+                  sender: "agent",
+                  text: `💳 **Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n👉 [**Proceed to Payment Gateway**](${data.url})`
+                }
+              ]);
+            }
           }
+          else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+          else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+          else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+          else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
+          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); }
+          else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
+          else if (data.type === "CLEANER_ERROR")               {
+            window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+            setAutomationEvent(null);
+          }
+          else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
+            window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "✓ Saved application deleted successfully!" }));
+            setAutomationEvent(null);
+          }
+          else if (data.type === "AUTOMATION_ERROR")            {
+            window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+            setAutomationEvent(null);
+            alert(`Automation error: ${data.message}`);
+          }
+          else                                                   { setAutomationEvent(data); }
+        } catch (err) {
+          console.error("[WebSocket] Parse error:", err);
         }
-        else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
-        else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
-        else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
-        else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
-        else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); }
-        else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
-        else if (data.type === "CLEANER_ERROR")               {
-          window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
-          setAutomationEvent(null);
-        }
-        else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
-          window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "✓ Saved application deleted successfully!" }));
-          setAutomationEvent(null);
-        }
-        else if (data.type === "AUTOMATION_ERROR")            {
-          window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
-          setAutomationEvent(null);
-          alert(`Automation error: ${data.message}`);
-        }
-        else                                                   { setAutomationEvent(data); }
       };
-      socket.onclose = () => { clearInterval(ping); setTimeout(() => wsRef.current === socket && connect(), 1000); };
-      socket.onerror = () => { clearInterval(ping); if (!resolved) { resolved = true; resolve(); } };
+      socket.onclose = () => {
+        clearInterval(ping);
+        setTimeout(() => {
+          if (wsRef.current === socket) {
+            connect();
+          }
+        }, 2000);
+      };
+      socket.onerror = (err) => {
+        clearInterval(ping);
+        console.error("[WebSocket] Socket error:", err);
+        if (!settled) { settled = true; reject(new Error("WebSocket connection failed")); }
+      };
       wsRef.current = socket;
     };
     connect();
   });
+
+  // Proactively connect automation WebSocket when checklist is opened
+  useEffect(() => {
+    if (showChecklist) {
+      openAutomationSocket().catch(err => console.warn("[WebSocket] Checklist open auto-connect:", err));
+    }
+  }, [showChecklist]);
 
   const sendWS = (payload) => {
     const ws = wsRef.current;
