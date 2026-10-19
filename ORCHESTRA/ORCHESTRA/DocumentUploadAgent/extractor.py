@@ -159,6 +159,8 @@ def run_vlm(image, text_prompt):
 
 # ------- Anti-hallucination sanitization & JSON helper -------
 
+_MISSING = {"", "not available", "n/a", "na", "none", "null", "-", "not found", "not specified"}
+
 def sanitize_extracted_data(data: dict) -> dict:
     """Universal strict anti-hallucination post-processor and data sanitizer."""
     if not isinstance(data, dict):
