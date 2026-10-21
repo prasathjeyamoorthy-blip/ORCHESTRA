@@ -9,9 +9,10 @@ export default function PaymentModal({ isOpen, paymentUrl, onClose }) {
       <div 
         className="modal-card" 
         style={{ 
-          maxWidth: "950px", 
+          maxWidth: "min(950px, 96vw)", 
           width: "95%", 
           height: "85vh", 
+          maxHeight: "92vh",
           display: "flex", 
           flexDirection: "column", 
           padding: 0, 
@@ -28,7 +29,9 @@ export default function PaymentModal({ isOpen, paymentUrl, onClose }) {
           borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between"
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "0.75rem"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <div className="modal-icon" style={{ background: "rgba(59, 130, 246, 0.12)", color: "#3b82f6" }}>

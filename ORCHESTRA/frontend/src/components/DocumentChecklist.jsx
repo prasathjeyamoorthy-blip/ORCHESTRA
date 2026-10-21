@@ -36,6 +36,14 @@ const MONTH_NAMES = [
 ];
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
+function getTodayFormatted() {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 function DarkCalendarPopover({ value, onSelect, onClose }) {
   const popoverRef = useRef(null);
 
@@ -311,35 +319,51 @@ function DarkCalendarPopover({ value, onSelect, onClose }) {
 }
 
 // ── Floating label input ──────────────────────────────────────────────────────
-function FloatingInput({ label, name, type = "text", value, onChange, maxLength, isDate = false }) {
+function FloatingInput({ label, name, type = "text", value, onChange, maxLength, isDate = false, autoComplete = "on" }) {
   const [focused, setFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [isAutofilled, setIsAutofilled] = useState(false);
 
   const isPassword = type === "password";
   const inputType = isPassword ? (showPassword ? "text" : "password") : type;
-  const active = focused || !!value || showCalendar;
+  const active = focused || !!value || showCalendar || isAutofilled;
+
+  const handleAnimationStart = (e) => {
+    if (e.animationName === "onAutoFillStart") {
+      setIsAutofilled(true);
+      if (e.target.value && e.target.value !== value) {
+        onChange?.({ target: { name, value: e.target.value } });
+      }
+    } else if (e.animationName === "onAutoFillCancel") {
+      setIsAutofilled(false);
+    }
+  };
 
   const handleCalendarClick = () => {
     setShowCalendar(prev => !prev);
   };
 
   return (
-    <div style={{ position: "relative", flex: 1, minWidth: 160, marginBottom: "0.25rem" }}>
-      <label style={{
-        position: "absolute", left: 12, top: "50%",
-        transform: active ? "translateY(-130%) scale(0.78)" : "translateY(-50%)",
-        fontSize: active ? 11 : 14, color: C.text2,
-        background: active ? C.surface2 : "transparent",
-        padding: active ? "0 4px" : 0,
-        pointerEvents: "none", transition: "all 0.18s ease",
-        transformOrigin: "left center", whiteSpace: "nowrap",
-        zIndex: 1,
-      }}>{label}</label>
+    <div style={{ position: "relative", flex: "1 1 200px", minWidth: "140px", marginBottom: "0.25rem", boxSizing: "border-box" }}>
       <input
-        type={inputType} name={name} value={value} onChange={onChange}
-        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        type={inputType}
+        name={name}
+        id={`fi_${name}`}
+        placeholder=" "
+        value={value ?? ""}
+        onChange={onChange}
+        onInput={onChange}
+        onAnimationStart={handleAnimationStart}
+        onFocus={() => setFocused(true)}
+        onBlur={(e) => {
+          setFocused(false);
+          if (e.target.value && e.target.value !== value) {
+            onChange?.({ target: { name, value: e.target.value } });
+          }
+        }}
         maxLength={maxLength}
+        autoComplete={autoComplete}
         style={{
           width: "100%", boxSizing: "border-box",
           padding: "0.5rem 0.875rem",
@@ -347,13 +371,26 @@ function FloatingInput({ label, name, type = "text", value, onChange, maxLength,
           paddingTop: "1.15rem",
           paddingBottom: "0.45rem",
           background: C.surface2,
-          border: `1.5px solid ${(focused || showCalendar) ? "rgba(255,255,255,0.4)" : C.border}`,
+          border: `1.5px solid ${(focused || showCalendar || isAutofilled) ? "rgba(255,255,255,0.4)" : C.border}`,
           borderRadius: "0.625rem", color: C.text, fontSize: 14,
           outline: "none", fontFamily: "inherit",
-          boxShadow: (focused || showCalendar) ? "0 0 0 3px rgba(255,255,255,0.06)" : "none",
+          boxShadow: (focused || showCalendar || isAutofilled) ? "0 0 0 3px rgba(255,255,255,0.06)" : "none",
           transition: "border-color 0.18s, box-shadow 0.18s",
         }}
       />
+      <label
+        htmlFor={`fi_${name}`}
+        style={{
+          position: "absolute", left: 12, top: "50%",
+          transform: active ? "translateY(-130%) scale(0.78)" : "translateY(-50%)",
+          fontSize: active ? 11 : 14, color: C.text2,
+          background: active ? C.surface2 : "transparent",
+          padding: active ? "0 4px" : 0,
+          pointerEvents: "none", transition: "all 0.18s ease",
+          transformOrigin: "left center", whiteSpace: "nowrap",
+          zIndex: 1,
+        }}
+      >{label}</label>
       {isPassword && (
         <button
           type="button"
@@ -425,6 +462,10 @@ function StepBar({ current, total, steps }) {
               fontSize: 11, fontWeight: 600,
               color: i <= current ? C.text : C.text3,
               marginTop: 6, transition: "color 0.25s",
+              textAlign: "center",
+              lineHeight: 1.25,
+              wordBreak: "break-word",
+              padding: "0 2px"
             }}>{s.title}</div>
           </div>
         ))}
@@ -451,15 +492,27 @@ function NavButtons({ step, totalSteps, onBack, onNext, onSubmit, onExit, canNex
     border: "none", fontFamily: "inherit", transition: "all 0.15s",
   };
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.5rem", paddingTop: "1.25rem", borderTop: `1px solid ${C.border}` }}>
+    <div style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: "1.5rem",
+      paddingTop: "1.25rem",
+      borderTop: `1px solid ${C.border}`,
+      width: "100%",
+      boxSizing: "border-box",
+      flexWrap: "wrap",
+      gap: "0.75rem"
+    }}>
       <button onClick={onBack} disabled={step === 0} style={{
         ...btnBase,
         background: "#1c1c1c", color: step === 0 ? C.text3 : C.text,
         border: "1px solid #2a2a2a", opacity: step === 0 ? 0.4 : 1,
+        cursor: step === 0 ? "not-allowed" : "pointer",
       }}>
         <LuChevronLeft size={15} /> Back
       </button>
-      <div style={{ display: "flex", gap: "0.625rem" }}>
+      <div style={{ display: "flex", gap: "0.625rem", alignItems: "center" }}>
         <button onClick={onExit} style={{
           ...btnBase,
           background: "#1c1c1c", color: C.text2,
@@ -473,7 +526,7 @@ function NavButtons({ step, totalSteps, onBack, onNext, onSubmit, onExit, canNex
           color: disabled ? C.text3 : "#000",
           opacity: disabled ? 0.5 : 1,
         }}>
-          {isExtracting ? <><LuLoader size={14} style={{ animation: "spin 1s linear infinite" }} /> Extracting…</>
+          {isExtracting ? <><LuLoader size={14} style={{ animation: "spin 1s linear infinite" }} /> Validating documents…</>
             : isSubmitting ? <><LuLoader size={14} style={{ animation: "spin 1s linear infinite" }} /> Processing…</>
             : isLast ? <><LuCheck size={14} /> Proceed to Automation</>
             : <>Next <LuChevronRight size={15} /></>}
@@ -498,16 +551,22 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   const [isExtracting, setIsExtracting]   = useState(false);
   const [isDeletingSavedApp, setIsDeletingSavedApp] = useState(false);
   const [deleteSavedAppMsg, setDeleteSavedAppMsg]   = useState("");
-  const [credentials, setCredentials]     = useState({
-    username: "",
-    password: "",
-    can_number: "",
-    aadhar_number: "",
+  const [credentials, setCredentials]     = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("tnega_draft_credentials");
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return {
+      username: "",
+      password: "",
+      can_number: "",
+      aadhar_number: "",
+    };
   });
-  const [addressDetails, setAddressDetails] = useState({
+  const [addressDetails, setAddressDetails] = useState(() => ({
     from_date: "",
-    to_date: "",
-  });
+    to_date: getTodayFormatted(),
+  }));
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
   // ── Cleaner WebSocket event listener ──────────────────────────────────────────
@@ -602,19 +661,44 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           setSavedProfile(profileData);
 
           // 1. Restore credentials & address details
-          const credsObj = profileData.credentials || profileData.applicant_details || {};
+          const credsObj = profileData.credentials || {};
+          const appObj   = profileData.applicant_details || {};
+          const t1Obj    = profileData.tab1_credentials || {};
           const addrObj  = profileData.address_details || {};
 
-          setCredentials(prev => ({
-            username:      credsObj.username      || prev.username,
-            password:      credsObj.password      || prev.password,
-            can_number:    credsObj.can_number    || credsObj.can || prev.can_number,
-            aadhar_number: credsObj.aadhar_number || credsObj.aadhaar_number || prev.aadhar_number,
-          }));
+          // Find extracted aadhaar and can from documents (e.g. from Aadhaar card OCR)
+          let docAadhaar = "";
+          let docCan = "";
+          Object.values(docsMap).forEach(doc => {
+            if (Array.isArray(doc?.extracted_data)) {
+              doc.extracted_data.forEach(item => {
+                const a = item?.aadhaar_number || item?.aadhar_number;
+                if (a && !docAadhaar) docAadhaar = String(a).replace(/\D/g, "").slice(0, 12);
+                const c = item?.can_number || item?.can;
+                if (c && !docCan) docCan = String(c).trim();
+              });
+            }
+          });
+
+          const restoredUsername = credsObj.username || t1Obj.username || profileData.username || "";
+          const restoredPassword = credsObj.password || t1Obj.password || profileData.password || "";
+          const restoredCan      = credsObj.can_number || credsObj.can || appObj.can_number || appObj.can || t1Obj.can_number || t1Obj.can || profileData.can_number || profileData.can || docCan || "";
+          const restoredAadhar   = credsObj.aadhar_number || credsObj.aadhaar_number || appObj.aadhar_number || appObj.aadhaar_number || t1Obj.aadhar_number || t1Obj.aadhaar_number || profileData.aadhar_number || profileData.aadhaar_number || docAadhaar || "";
+
+          setCredentials(prev => {
+            const next = {
+              username:      restoredUsername || prev.username,
+              password:      restoredPassword || prev.password,
+              can_number:    restoredCan      || prev.can_number,
+              aadhar_number: restoredAadhar   || prev.aadhar_number,
+            };
+            try { sessionStorage.setItem("tnega_draft_credentials", JSON.stringify(next)); } catch (_) {}
+            return next;
+          });
 
           setAddressDetails(prev => ({
             from_date: addrObj.from_date || prev.from_date,
-            to_date:   prev.to_date, // always keep today's date, never restore old to_date
+            to_date:   prev.to_date || getTodayFormatted(), // always keep today's date, never restore old to_date
           }));
 
           // 2. Restore document checklist items & Supabase URLs
@@ -651,7 +735,11 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
 
   const handleCredChange = (e) => {
     const val = e.target.name === "aadhar_number" ? e.target.value.replace(/\D/g, "").slice(0, 12) : e.target.value;
-    setCredentials(prev => ({ ...prev, [e.target.name]: val }));
+    setCredentials(prev => {
+      const next = { ...prev, [e.target.name]: val };
+      try { sessionStorage.setItem("tnega_draft_credentials", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
   };
   const handleAddrChange = (e) => setAddressDetails({ ...addressDetails, [e.target.name]: e.target.value });
 
@@ -672,7 +760,8 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSavedProfileLoaded(false);
     setSavedProfile({});
     setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
-    setAddressDetails({ from_date: "", to_date: "" });
+    try { sessionStorage.removeItem("tnega_draft_credentials"); } catch (_) {}
+    setAddressDetails({ from_date: "", to_date: getTodayFormatted() });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
   };
 
@@ -769,7 +858,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           throw new Error("Invalid Photograph. Please ensure the image clearly shows a human person.");
         if (id !== "photo" && data.extracted_data?.length > 0) {
           setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
-          if (id === "aadharCard" || id === "drivingLicense" || id === "addressProof") {
+          if (id === "aadharCard" || id === "drivingLicense" || id === "addressProof" || id === "rationCard") {
             const ex = data.extracted_data.find(r => r && typeof r === "object") || {};
             setAddressDetails(prev => ({
               ...prev,
@@ -778,9 +867,22 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
               street_name: prev.street_name || ex.street  || ex.street_name || "",
               pincode:     prev.pincode     || ex.pincode || "",
             }));
-            if (ex.aadhaar_number) {
-              const cleanAadhaar = String(ex.aadhaar_number).replace(/\D/g, "");
-              setCredentials(prev => ({ ...prev, aadhar_number: prev.aadhar_number || cleanAadhaar }));
+            const detectedAadhaar = ex.aadhaar_number || ex.aadhar_number;
+            if (detectedAadhaar) {
+              const cleanAadhaar = String(detectedAadhaar).replace(/\D/g, "").slice(0, 12);
+              setCredentials(prev => {
+                const next = { ...prev, aadhar_number: prev.aadhar_number || cleanAadhaar };
+                try { sessionStorage.setItem("tnega_draft_credentials", JSON.stringify(next)); } catch (_) {}
+                return next;
+              });
+            }
+            const detectedCan = ex.can_number || ex.can;
+            if (detectedCan) {
+              setCredentials(prev => {
+                const next = { ...prev, can_number: prev.can_number || String(detectedCan).trim() };
+                try { sessionStorage.setItem("tnega_draft_credentials", JSON.stringify(next)); } catch (_) {}
+                return next;
+              });
             }
           }
         }
@@ -930,7 +1032,20 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
 
       setBulkResults(bulkData.result || { combined: savedApplicant, confidence_score: 100 });
       const c = { ...savedApplicant, ...(bulkData.result?.combined || {}) };
-      const aadharNum = (credentials.aadhar_number || c.aadhaar_number || c.aadhar_number || "").replace(/\s/g, "");
+      const aadharNum = (credentials.aadhar_number || c.aadhaar_number || c.aadhar_number || "").replace(/\s/g, "").slice(0, 12);
+      const canNum    = (credentials.can_number || c.can_number || c.can || "").trim();
+
+      if (aadharNum || canNum) {
+        setCredentials(prev => {
+          const next = {
+            ...prev,
+            aadhar_number: prev.aadhar_number || aadharNum,
+            can_number: prev.can_number || canNum,
+          };
+          try { sessionStorage.setItem("tnega_draft_credentials", JSON.stringify(next)); } catch (_) {}
+          return next;
+        });
+      }
       const isBadAddrVal = (val, appN, appF) => {
         if (!val) return true;
         const s = String(val).trim().toLowerCase();
@@ -985,7 +1100,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           street_name: finalSt,
           pincode: c.pincode || savedAddress.pincode || "",
           from_date: addressDetails.from_date || savedAddress.from_date || "",
-          to_date: addressDetails.to_date || savedAddress.to_date || "",
+          to_date: addressDetails.to_date || savedAddress.to_date || getTodayFormatted(),
           perm_state: c.state || savedAddress.perm_state || "Tamil Nadu",
           perm_district: c.district || savedAddress.perm_district || "",
           perm_village: c.taluk || c.district || savedAddress.perm_village || "",
@@ -1067,7 +1182,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     };
 
     return (
-      <div className="cl-card fade-up">
+      <div className="cl-card fade-up" style={{ maxHeight: "none", marginBottom: "2rem" }}>
         <div className="cl-live-header">
           <div className={`cl-live-icon ${isDone ? (isError ? "error" : "done") : "running"}`} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             {isDone ? (isError ? <LuTriangleAlert size={16} /> : <LuCheck size={16} />) : <span className="cl-spin-ring" />}
@@ -1132,7 +1247,16 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   };
 
   return (
-    <div className="cl-card fade-up" style={{ background: "#141414", border: "1px solid #2a2a2a", overflow: "visible" }}>
+    <div className="cl-card fade-up" style={{
+      background: "#141414",
+      border: "1px solid #2a2a2a",
+      borderRadius: "1.25rem",
+      padding: "1.5rem",
+      maxHeight: "none",
+      overflow: "visible",
+      marginBottom: "2.5rem",
+      boxSizing: "border-box"
+    }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1.25rem" }}>
         <h3 className="cl-title" style={{ margin: 0, color: "#fff" }}>TNeSevai Application Details</h3>
         <button
@@ -1222,10 +1346,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         <div style={sectionStyle}>
           <div style={sectionLabel}>Portal Credentials</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-            <FloatingInput label="TNeSevai Username" name="username"      value={credentials.username}      onChange={handleCredChange} />
-            <FloatingInput label="Password"          name="password"      type="password" value={credentials.password} onChange={handleCredChange} />
-            <FloatingInput label="CAN Number"        name="can_number"    value={credentials.can_number}    onChange={handleCredChange} />
-            <FloatingInput label="Aadhar Number *"   name="aadhar_number" value={credentials.aadhar_number} onChange={handleCredChange} maxLength={12} />
+            <FloatingInput label="TNeSevai Username" name="username"      value={credentials.username}      onChange={handleCredChange} autoComplete="username" />
+            <FloatingInput label="Password"          name="password"      type="password" value={credentials.password} onChange={handleCredChange} autoComplete="current-password" />
+            <FloatingInput label="CAN Number"        name="can_number"    value={credentials.can_number}    onChange={handleCredChange} autoComplete="off" />
+            <FloatingInput label="Aadhar Number *"   name="aadhar_number" value={credentials.aadhar_number} onChange={handleCredChange} maxLength={12} autoComplete="off" />
           </div>
 
           <div style={{
@@ -1277,7 +1401,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       {step === 2 && (
         <div>
           <p className="cl-sub" style={{ marginBottom: "0.875rem" }}>
-            Ensure all required documents are ready for extraction &amp; upload:
+            Ensure all required documents are ready for upload:
           </p>
           <div className="cl-doc-list">
             {documents.map(doc => {
@@ -1318,21 +1442,6 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                               <button className="cl-remove-btn" onClick={() => handleRemoveFile(doc.id)}><MdDeleteOutline size={17} /></button>
                             </div>
                           </div>
-                          {extractedData[doc.id]?.map((extract, idx) => (
-                            <div key={idx} className="cl-extracted">
-                              <h5 className="cl-extracted-title">{extract.certificate_type} Details</h5>
-                              <ul className="cl-extracted-list">
-                                {Object.entries(extract.extracted_fields || extract)
-                                  .filter(([k, v]) => !k.startsWith("_") && k !== "certificate_type" && v !== null && v !== undefined && String(v).trim() !== "")
-                                  .map(([k, v]) => (
-                                    <li key={k}>
-                                      <strong>{k.replace(/_/g, " ").toUpperCase()}:</strong>{" "}
-                                      {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                                    </li>
-                                  ))}
-                              </ul>
-                            </div>
-                          ))}
                         </div>
                       ) : (
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>

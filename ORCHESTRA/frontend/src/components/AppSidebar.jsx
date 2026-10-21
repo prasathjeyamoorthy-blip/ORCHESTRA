@@ -1,19 +1,18 @@
 import { useState, useEffect } from "react";
 import {
   Menu, LayoutDashboard, BookOpen,
-  FileCheck, Phone, ShieldCheck, Zap,
+  Phone, ShieldCheck, FileBadge,
   Plus, MessageSquare, Trash2, X,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { title: "Home",               icon: LayoutDashboard, page: "home" },
-  { title: "FAQ",                icon: BookOpen,        page: "faq" },
-  { title: "Application Status", icon: FileCheck,       page: "status" },
-  { title: "Contact",            icon: Phone,           page: "contact" },
+  { title: "Home",    icon: LayoutDashboard, page: "home" },
+  { title: "FAQ",     icon: BookOpen,        page: "faq" },
+  { title: "Contact", icon: Phone,           page: "contact" },
 ];
 
 const ICON_W = "3.5rem";
-const FULL_W = "15.5rem";
+const FULL_W = "16.75rem";
 
 const bg     = "rgba(0,0,0,0.12)";
 const border = "rgba(255,255,255,0.08)";
@@ -25,7 +24,8 @@ const actBg  = "rgba(255,255,255,0.12)";
 function NavContent({
   open, activePage, onNavigate, onClose, onToggle,
   chatSessions = [], currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onApplyNow, onClearData
+  onOpenOtpModal, userPhone, onApplyNow, onClearData,
+  hasCompletedProcess
 }) {
   const row = {
     display: "flex", alignItems: "center",
@@ -34,6 +34,7 @@ function NavContent({
     borderRadius: "0.375rem",
     transition: "background 0.12s, color 0.12s",
     color: col, padding: 0,
+    boxSizing: "border-box",
   };
 
   return (
@@ -81,16 +82,52 @@ function NavContent({
 
       {/* Nav items */}
       <div style={{ flex: 1, padding: "0.5rem 0.375rem", display: "flex", flexDirection: "column", gap: "0.125rem", overflowY: "auto", overflowX: "hidden" }}>
-        {NAV_ITEMS.map(({ title, icon: Icon, page }) => {
+        {[
+          ...NAV_ITEMS,
+          ...(hasCompletedProcess ? [{ title: "Receipt & Certificate", icon: FileBadge, page: "receipt", isNew: true }] : [])
+        ].map(({ title, icon: Icon, page, isNew }) => {
           const isActive = activePage === page;
           return (
             <button key={page} onClick={() => { onNavigate(page); onClose?.(); }}
               title={!open ? title : undefined}
-              style={{ ...row, justifyContent: open ? "flex-start" : "center", padding: open ? "0.65rem 0.625rem" : "0.65rem", gap: "0.75rem", fontSize: "0.9375rem", fontWeight: isActive ? 600 : 400, color: isActive ? colAct : col, background: isActive ? actBg : "transparent" }}
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = hover; }}
-              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
-              <Icon size={20} style={{ flexShrink: 0 }} />
-              {open && <span style={{ whiteSpace: "nowrap" }}>{title}</span>}
+              style={{
+                ...row,
+                justifyContent: open ? "flex-start" : "center",
+                padding: open ? "0.6rem 0.65rem" : "0.65rem",
+                gap: "0.65rem",
+                fontSize: "0.875rem",
+                fontWeight: isActive ? 600 : 400,
+                color: isActive ? colAct : (isNew ? "#4ade80" : col),
+                background: isActive ? actBg : (isNew ? "rgba(34,197,94,0.08)" : "transparent"),
+                border: isNew && !isActive ? "1px solid rgba(34,197,94,0.25)" : "none",
+                position: "relative",
+                boxSizing: "border-box",
+                overflow: "hidden"
+              }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = isNew ? "rgba(34,197,94,0.15)" : hover; }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = isNew ? "rgba(34,197,94,0.08)" : "transparent"; }}>
+              <Icon size={19} style={{ flexShrink: 0, color: isNew && !isActive ? "#4ade80" : undefined }} />
+              {open && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", minWidth: 0, gap: "0.4rem" }}>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {title}
+                  </span>
+                  {isNew && (
+                    <span style={{
+                      fontSize: "0.625rem",
+                      padding: "0.12rem 0.45rem",
+                      borderRadius: "9999px",
+                      background: "#22c55e",
+                      color: "#fff",
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      flexShrink: 0
+                    }}>
+                      Ready
+                    </span>
+                  )}
+                </div>
+              )}
             </button>
           );
         })}
@@ -149,7 +186,7 @@ function NavContent({
       </div>
 
       {/* Footer */}
-      <div style={{ padding: "0.5rem 0.375rem", display: "flex", flexDirection: "column", gap: "0.125rem" }}>
+      <div style={{ padding: "0.5rem 0.375rem", display: "flex", flexDirection: "column", gap: "0.25rem", borderTop: `1px solid ${border}` }}>
 
         {/* Apply Now button */}
         {onApplyNow && (
@@ -171,7 +208,7 @@ function NavContent({
             onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
             onMouseLeave={e => e.currentTarget.style.opacity = "1"}
           >
-            <Zap size={18} style={{ flexShrink: 0, color: "#fff" }} />
+            <FileBadge size={18} style={{ flexShrink: 0, color: "#fff" }} />
             {open && <span style={{ whiteSpace: "nowrap" }}>Apply Now</span>}
           </button>
         )}
@@ -216,10 +253,11 @@ function NavContent({
   );
 }
 
-  export function AppSidebar({
+export function AppSidebar({
   activePage, onNavigate, drawerOpen, onDrawerClose,
   chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-  onOpenOtpModal, userPhone, onApplyNow, onClearData
+  onOpenOtpModal, userPhone, onApplyNow, onClearData,
+  hasCompletedProcess
 }) {
   const [open, setOpen] = useState(false);
 
@@ -233,7 +271,8 @@ function NavContent({
   const navProps = {
     open, activePage, onNavigate,
     chatSessions, currentSessionId, onNewChat, onSelectChat, onDeleteChat,
-    onOpenOtpModal, userPhone, onApplyNow, onClearData
+    onOpenOtpModal, userPhone, onApplyNow, onClearData,
+    hasCompletedProcess
   };
 
   return (
@@ -250,7 +289,7 @@ function NavContent({
         <div onClick={onDrawerClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", zIndex: 200, animation: "fade-in 0.2s ease" }} />
       )}
       {/* Mobile drawer panel */}
-      <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: "16rem", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", zIndex: 201, transform: drawerOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden" }}>
+      <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, width: FULL_W, maxWidth: "calc(100vw - 3rem)", background: "rgba(10,10,10,0.85)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column", zIndex: 201, transform: drawerOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden" }}>
         <NavContent {...navProps} open={true} onClose={onDrawerClose} onToggle={null} />
       </div>
     </>

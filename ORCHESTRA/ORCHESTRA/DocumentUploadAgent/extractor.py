@@ -206,26 +206,35 @@ def sanitize_extracted_data(data: dict) -> dict:
         "test user", "applicant name", "full name", "name of applicant",
         "first name", "last name", "citizen name", "candidate name",
         "suresh", "ramesh", "s/o: suresh", "s/o suresh", "suresh sharma",
-        "sai nagar", "sainagar",
+        "sai nagar", "sainagar", "karthik sample", "demo", "placeholder",
+        "person name", "citizen", "resident", "individual", "applicant",
+        "card holder", "cardholder", "head of family", "member", "family member",
+        "beneficiary", "beneficiary name", "authorized signatory", "authorized officer",
+        "digitally signed", "signature valid", "signature invalid", "valid signature",
+        "digital signature", "certified copy", "true copy", "photo", "photograph",
+        "not available", "not specified", "not mentioned", "nil", "none", "unknown",
         # English document headers & field labels
         "government of india", "unique identification authority", "uidai",
         "transport department", "civil supplies", "government", "india",
         "tamil nadu", "department", "certificate", "family card", "smart card",
         "ration card", "consumer protection", "union of india", "driving license",
-        "driving licence", "authorisation to drive", "head of family",
-        "name of head of family", "date of birth", "dob", "card no", "ufc no",
-        "address", "pincode", "district", "taluk", "village", "state", "download date",
-        "issue date", "enrolment no", "helpdesk", "signature", "signature valid",
+        "driving licence", "authorisation to drive", "motor vehicles department",
+        "head of family", "name of head of family", "date of birth", "dob", "card no",
+        "ufc no", "address", "pincode", "district", "taluk", "village", "state",
+        "download date", "issue date", "enrolment no", "helpdesk", "signature",
+        "revenue department", "e-district", "tnega", "esevai", "e-sevai",
+        "form 7", "rule 16", "rule 16(1)", "rule 16 (1)",
         # Tamil document headers & field labels
         "முகவரி", "பிறந்த தேதி", "பிறந்ததேதி", "குடும்ப அட்டை", "குடும்ப அட்டை எண்",
         "குடும்ப அட்டை / family card", "குடும்ப அட்டை / குடும்ப அட்டை",
         "குடும்பத் தலைவரின் பெயர்", "குடும்பத்தலைவர்", "குடும்பத்தலைவரின் பெயர்",
         "தலைவர் பெயர்", "பெயர்", "தந்தை பெயர்", "தந்தை / கணவர் பெயர்",
         "தந்தை/கணவர் பெயர்", "கணவர் பெயர்", "தாயார் பெயர்", "தாய் பெயர்",
-        "அட்டை எண்", "ஆதார் எண்", "மாவட்ட", "மாவட்டம்", "வட்டம்", "கிராமம்",
+        "அட்டை எண்", "ஆதார் எண்", "ஆதார்", "மாவட்ட", "மாவட்டம்", "வட்டம்", "கிராமம்",
         "நகரம்", "தமிழ்நாடு அரசு", "அரசு", "உணவுப்பொருள் வழங்கல்",
         "நுகர்வோர் பாதுகாப்புத்துறை", "ஒன்றியம்", "அஞ்சல்", "காவல்துறை",
-        "சான்றிதழ்", "சான்றிதழ் எண்"
+        "சான்றிதழ்", "சான்றிதழ் எண்", "கடை எண்", "அட்டை வகை", "அரிசி அட்டை",
+        "சர்க்கரை அட்டை", "உறுப்பினர்கள்", "அஞ்சல் குறியீடு", "வருவாய் துறை"
     }
 
     # 1. Name Sanitization: remove honorifics / prefixes and detect dummy / hallucinated label values
@@ -236,7 +245,20 @@ def sanitize_extracted_data(data: dict) -> dict:
         name = re.sub(r"[\.,]+$", "", name).strip()
         name = re.sub(r"\s+", " ", name)
         name_lower = name.lower()
-        if name_lower in STANDALONE_TITLES or name_lower in DUMMY_NAMES or len(name) < 2 or bool(re.search(r"^\d+$", name)):
+        has_digits = bool(re.search(r"\d", name))
+        has_illegal_symbols = bool(re.search(r"[@/\\_*+=<>\[\]{};$%^]", name))
+        is_too_long = len(name) > 60
+        is_dummy = (
+            name_lower in STANDALONE_TITLES or
+            name_lower in DUMMY_NAMES or
+            any(d in name_lower for d in [
+                "government of", "unique identification", "department of",
+                "digitally signed", "signature valid", "union of india",
+                "civil supplies", "consumer protection", "family card",
+                "smart card", "driving license", "tamil nadu அரசு", "தமிழ்நாடு அரசு"
+            ])
+        )
+        if is_dummy or has_digits or has_illegal_symbols or len(name) < 2 or is_too_long:
             data["name"] = ""
         else:
             data["name"] = name
@@ -249,15 +271,52 @@ def sanitize_extracted_data(data: dict) -> dict:
         father_name = re.sub(r"[\.,]+$", "", father_name).strip()
         father_name = re.sub(r"\s+", " ", father_name)
         f_lower = father_name.lower()
-        if (name and f_lower == name.lower()) or \
-           f_lower in STANDALONE_TITLES or \
-           f_lower in DUMMY_NAMES or \
-           f_lower in {"father", "name", "father name", "husband", "son", "daughter"}:
+
+        # Reject if father_name is identical to applicant name
+        is_same_as_name = bool(name and f_lower == name.lower())
+
+        # Reject if father_name contains digits (address line leaked into father_name like "C/O: 12 Main St")
+        f_has_digits = bool(re.search(r"\d", father_name))
+        f_has_symbols = bool(re.search(r"[@/\\_*+=<>\[\]{};$%^]", father_name))
+
+        # Reject if father_name contains address keywords
+        ADDRESS_KEYWORDS_IN_NAME = {
+            "street", "road", "nagar", "colony", "puram", "salai", "palayam",
+            "lane", "avenue", "garden", "layout", "floor", "block", "plot",
+            "door", "house", "flat", "apartment", "pincode", "pin", "district",
+            "taluk", "state", "india", "tamil nadu", "chennai", "post office"
+        }
+        has_addr_words = any(re.search(rf"\b{re.escape(kw)}\b", f_lower) for kw in ADDRESS_KEYWORDS_IN_NAME)
+
+        # Reject if father_name is relational phrases or dummy labels
+        RELATIONAL_PHRASES = {
+            "father", "name", "father name", "husband", "son", "daughter",
+            "mother", "guardian", "parent", "self", "head of family", "hof",
+            "care of", "c/o", "s/o", "d/o", "w/o", "relative", "not specified",
+            "not mentioned", "applicant", "resident"
+        }
+        is_relational = f_lower in RELATIONAL_PHRASES or f_lower in STANDALONE_TITLES or f_lower in DUMMY_NAMES
+
+        if is_same_as_name or f_has_digits or f_has_symbols or has_addr_words or is_relational or len(father_name) < 2 or len(father_name) > 60:
             father_name = ""
         data["father_name"] = father_name
 
     # 2b. Mother's Name Sanitization
     mother_name = data.get("mother_name", "")
+    if mother_name and isinstance(mother_name, str):
+        mother_name = re.sub(r"^(?:M/O:?|Mother(?:\x27s)?\s*Name:?)\s*", "", mother_name, flags=re.IGNORECASE)
+        mother_name = re.sub(HONORIFICS_REGEX, "", mother_name, flags=re.IGNORECASE)
+        mother_name = re.sub(r"[\.,]+$", "", mother_name).strip()
+        mother_name = re.sub(r"\s+", " ", mother_name)
+        m_lower = mother_name.lower()
+        if (name and m_lower == name.lower()) or \
+           bool(re.search(r"\d", mother_name)) or \
+           m_lower in STANDALONE_TITLES or \
+           m_lower in DUMMY_NAMES or \
+           m_lower in {"mother", "name", "mother name", "parent", "guardian", "self"} or \
+           len(mother_name) < 2 or len(mother_name) > 60:
+            mother_name = ""
+        data["mother_name"] = mother_name
     if mother_name and isinstance(mother_name, str):
         mother_name = re.sub(r"^(?:M/O:?|Mother(?:\x27s)?\s*Name:?)\s*", "", mother_name, flags=re.IGNORECASE)
         mother_name = re.sub(HONORIFICS_REGEX, "", mother_name, flags=re.IGNORECASE)
@@ -349,12 +408,33 @@ def sanitize_extracted_data(data: dict) -> dict:
         if len(digits) == 12 and digits.startswith("91"):
             digits = digits[2:]
         if len(digits) == 10 and digits[0] in "6789":
-            if digits in {"1234567890", "0000000000", "1111111111", "9999999999"}:
+            DUMMY_PHONES = {
+                "1234567890", "0000000000", "1111111111", "9999999999",
+                "8888888888", "7777777777", "6666666666", "9123456780",
+                "9000000000", "9888888888", "9876500000"
+            }
+            if digits in DUMMY_PHONES or len(set(digits)) <= 2:
                 data["phone_number"] = ""
             else:
                 data["phone_number"] = digits
         else:
             data["phone_number"] = ""
+
+    # 8b. Email Sanitization & Anti-Hallucination
+    email_val = str(data.get("email", "")).strip().lower()
+    if email_val:
+        INSTITUTIONAL_EMAILS = [
+            "help@uidai.gov.in", "suggest@uidai.gov.in", "support@tnega.in",
+            "helpdesk@", "info@", "contact@", "admin@", "grievance@",
+            "portal@", "noreply@", "no-reply@", "webmaster@", "sample@",
+            "test@", "example@", "user@"
+        ]
+        is_institutional = any(inst in email_val for inst in INSTITUTIONAL_EMAILS)
+        is_valid_email = bool(re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email_val))
+        if is_institutional or not is_valid_email or len(email_val) > 60:
+            data["email"] = ""
+        else:
+            data["email"] = email_val
 
     # 9. Gender Normalization
     gender = str(data.get("gender", "")).strip().lower()
@@ -370,7 +450,11 @@ def sanitize_extracted_data(data: dict) -> dict:
 
     # 10. Anti-hallucination for Community & Religion & Dates:
     # Documents that never specify religion/community or residence dates:
-    is_standard_id = any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter", "address proof", "ration"])
+    is_combined = cert_type.lower() in ["combined", "application", "final"] or data.get("is_combined", False)
+    is_standard_id = not is_combined and (
+        any(t in cert_type.lower() for t in ["aadhaar", "driving", "pan", "voter", "address proof", "ration"]) or
+        bool(data.get("aadhaar_number") or data.get("dl_number") or data.get("pan_number") or data.get("ration_card_number") or data.get("voter_id"))
+    )
     if is_standard_id:
         data["religion"] = ""
         data["community"] = ""
@@ -387,15 +471,18 @@ def sanitize_extracted_data(data: dict) -> dict:
                 "puducherry", "pondicherry", "tamil nadu", "tamilnadu", "india",
                 "chennai", "cuddalore", "madurai", "coimbatore", "salem", "trichy",
                 "tiruchirappalli", "tirunelveli", "delhi", "new delhi", "state",
-                "district", "taluk", "village", "town", "none", "null", "not applicable"
+                "district", "taluk", "village", "town", "none", "null", "not applicable",
+                "hindu", "muslim", "christian", "general public", "citizen", "resident"
             }
             if comm_lower in GEOGRAPHIC_ENTITIES:
                 data["community"] = ""
-            elif comm_lower in {"oc", "general", "fc", "open"}:
+            elif comm_lower in {"oc", "general", "fc", "open", "forward caste", "forward community"}:
                 data["community"] = "OC"
             elif comm_lower in {"bc", "backward class", "obc"}:
                 data["community"] = "BC"
-            elif comm_lower in {"mbc", "most backward class", "dnc"}:
+            elif comm_lower in {"bcm", "backward class muslim", "bc muslim"}:
+                data["community"] = "BCM"
+            elif comm_lower in {"mbc", "most backward class", "dnc", "denotified community"}:
                 data["community"] = "MBC"
             elif comm_lower in {"sc", "scheduled caste"}:
                 data["community"] = "SC"
@@ -425,20 +512,36 @@ def sanitize_extracted_data(data: dict) -> dict:
             else:
                 data["religion"] = ""
 
+    # Common values for cross-field address & identity hygiene
+    f_val = str(data.get("father_name") or "").strip().lower()
+    n_val = str(data.get("name") or "").strip().lower()
+    full_addr = str(data.get("address") or "").strip().lower()
+
     # Clear classic synthetic default hallucination (Sai Nagar, 1-2-3, Hyderabad Telangana)
     door_val = str(data.get("door_no", "")).strip()
-    if door_val in {"1-2-3", "123", "1/2/3", "1-2-3/A", "1-2-3/a"}:
+    if door_val.lower() in {"1-2-3", "123", "1/2/3", "1-2-3/a", "0", "00", "none", "n/a", "no", "door"}:
         data["door_no"] = ""
 
-    st_val = str(data.get("street", "") or data.get("street_name", "")).strip().lower()
-    if "sai nagar" in st_val or "sainagar" in st_val:
-        data["street"] = ""
-        if "street_name" in data:
-            data["street_name"] = ""
+    st_val = str(data.get("street", "") or data.get("street_name", "")).strip()
+    if st_val:
+        st_low = st_val.lower()
+        if "sai nagar" in st_low or "sainagar" in st_low or st_low in {"test street", "sample street", "demo street", "main street", "street"}:
+            data["street"] = ""
+            if "street_name" in data:
+                data["street_name"] = ""
+        elif (f_val and st_low == f_val) or (n_val and st_low == n_val) or \
+             st_low in {str(data.get("district", "")).lower(), str(data.get("state", "")).lower(), str(data.get("city", "")).lower()}:
+            data["street"] = ""
+            if "street_name" in data:
+                data["street_name"] = ""
 
-    full_addr_str = str(data.get("address", "")).strip().lower()
-    if "sai nagar" in full_addr_str or "sainagar" in full_addr_str:
+    # Strip empty comma/hyphen artifacts like ", , , ,  - "
+    if not re.sub(r"[\s,\-\./]", "", full_addr):
         data["address"] = ""
+        full_addr = ""
+    elif "sai nagar" in full_addr or "sainagar" in full_addr:
+        data["address"] = ""
+        full_addr = ""
 
     state_str = str(data.get("state", "")).strip().lower()
     dist_str = str(data.get("district", "")).strip().lower()
@@ -448,9 +551,6 @@ def sanitize_extracted_data(data: dict) -> dict:
         data["taluk"] = ""
 
     # 11. Address hygiene: ensure father/applicant name, C/O, or full address dumps don't leak into street/area/city
-    f_val = (data.get("father_name") or "").lower()
-    n_val = (data.get("name") or "").lower()
-    full_addr = str(data.get("address") or "").strip().lower()
 
     for addr_key in ["door_no", "street", "area", "city", "street_name", "building_no"]:
         val = str(data.get(addr_key, "")).strip()
@@ -500,19 +600,26 @@ def sanitize_extracted_data(data: dict) -> dict:
     # 12. Door No length and plausibility
     door = str(data.get("door_no", "")).strip()
     if door:
-        if len(door) > 20 or any(bad in door.lower() for bad in ["father", "resident", "address", "india", "pincode", "district", "state"]):
+        door_lower = door.lower()
+        if len(door) > 15 or any(bad in door_lower for bad in [
+            "father", "resident", "address", "india", "pincode", "district", "state",
+            "living", "staying", "tamil", "chennai", "house of", "c/o", "s/o", "d/o", "w/o"
+        ]):
             data["door_no"] = ""
         # If door_no has no digits and contains street words, wipe it
-        elif not bool(re.search(r"\d", door)) and any(kw in door.lower() for kw in ["nagar", "street", "road", "colony", "puram"]):
+        elif not bool(re.search(r"\d", door)) and any(kw in door_lower for kw in ["nagar", "street", "road", "colony", "puram"]):
+            data["door_no"] = ""
+        elif door_lower in {"1-2-3", "123", "1/2/3", "1-2-3/a", "0", "00", "none", "n/a", "no", "door"}:
             data["door_no"] = ""
 
     # 13. District & Taluk Label Sanitization
     for geo_key in ["district", "taluk"]:
         g_val = str(data.get(geo_key, "")).strip()
         if g_val:
-            g_val = re.sub(r"\s+(?:District|Taluk|Dist\.?)$", "", g_val, flags=re.IGNORECASE).strip()
+            g_val = re.sub(r"\s+(?:District|Taluk|Dist\.?|Tk\.?)$", "", g_val, flags=re.IGNORECASE).strip()
             g_low = g_val.lower()
-            if g_low in DUMMY_NAMES or len(g_val) > 35 or (f_val and g_low == f_val) or (n_val and g_low == n_val):
+            if g_low in DUMMY_NAMES or g_low in {"tamil nadu", "tamilnadu", "india", "state", "pincode", "address"} or \
+               len(g_val) > 35 or (f_val and g_low == f_val) or (n_val and g_low == n_val):
                 data[geo_key] = ""
             else:
                 data[geo_key] = g_val
@@ -726,10 +833,13 @@ CRITICAL ANTI-HALLUCINATION RULES:
 - NEVER guess, assume, estimate, or extrapolate any values.
 - If any field is NOT explicitly visible on the document, set its value to "" (empty string).
 - For Aadhaar, Driving License, PAN, or Voter ID cards, NEVER invent religion, community, or residence dates. Set them to "".
-- Strip all title prefixes ("Mr.", "Mrs.", "Shri", "Smt", "Thiru", "Selvan", "Selvi", "Tmt") and return only the clean person name. NEVER return a standalone title like "Thiru" as a name.
-- For father_name on Aadhaar: look for a line like "C/O: Name" or "S/O: Name" — extract only the name after the colon. NEVER set father_name equal to the applicant's own name.
+- Strip all title prefixes ("Mr.", "Mrs.", "Shri", "Smt", "Thiru", "Selvan", "Selvi", "Tmt", "Dr.", "Late") and return only the clean person name. NEVER return a standalone title like "Thiru" as a name.
+- For father_name on Aadhaar: look for a line like "C/O: Name", "S/O: Name", or "D/O: Name" — extract only the clean person name after the colon. NEVER set father_name equal to the applicant's own name. NEVER extract an address as father_name.
 - For street, area, and city: return ONLY the specific street or locality name (e.g. "Main Street", "Anna Nagar"). NEVER copy or repeat the entire multi-line address into street, area, or city.
 - For community: return ONLY a valid caste category (e.g. "BC", "MBC", "SC", "ST", "OC"). NEVER return a state or city name like "Puducherry" or "Tamil Nadu".
+- NEVER extract helpline numbers (like 1947 or 1800 numbers) or website support emails (like help@uidai.gov.in) as applicant contact details. If no personal phone or email is on the card, return "".
+- NEVER use generic placeholder or dummy values like "John Doe", "Suresh", "1-2-3", "Sai Nagar", "1234 5678 9012".
+- NEVER extract document titles or labels (e.g. "GOVERNMENT OF INDIA", "UIDAI", "FAMILY CARD", "SIGNATURE VALID", "DIGITALLY SIGNED", "முகவரி") as names or address lines.
 - Return a single JSON object. Always include "certificate_type" as the first key.
 
 For Aadhaar use keys: certificate_type, name, gender, dob, aadhaar_number, father_name, address, door_no, street, area, city, state, district, taluk, pincode, phone_number
@@ -1096,7 +1206,9 @@ CRITICAL ANTI-HALLUCINATION RULES:
 2. NEVER guess, assume, or extrapolate any values.
 3. If any field is not explicitly printed in the text, you MUST return an empty string "".
 4. Do NOT guess religion or community for Aadhaar, Driving License, PAN or Voter ID cards. Always set them to "".
-5. For father_name on Aadhaar: extract ONLY the name following C/O or S/O. NEVER use the applicant's own name.
+5. For father_name on Aadhaar: extract ONLY the clean name following C/O or S/O. NEVER use the applicant's own name, and NEVER use an address or door number as father_name.
+6. NEVER extract helpline numbers (like 1947) or helpdesk emails as personal contact details.
+7. NEVER invent placeholder names, dummy addresses ("Sai Nagar"), or dummy numbers.
 
 Keys to include:
 certificate_type (e.g. "Aadhaar", "Driving License", "Ration Card", "PAN", "Income Certificate", "Caste Certificate", "Residence Certificate")

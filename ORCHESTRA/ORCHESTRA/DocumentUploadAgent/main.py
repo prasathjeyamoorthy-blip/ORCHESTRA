@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -147,7 +148,7 @@ def process_documents(
         """Get resolution from document, default to 0 if not available"""
         return doc.get("_resolution", {}).get("total_pixels", 0) if doc else 0
 
-    def _merge_with_resolution_priority(aadhaar, ration, address):
+    def _merge_with_resolution_priority(aadhaar, ration, address, caste=None):
         """Merge documents with priority based on resolution.
         
         Documents are sorted by resolution (highest first), and fields are 
@@ -232,32 +233,76 @@ def process_documents(
             or get_field_priority("ration_card_number", "number", "ration_card_no")
         )
 
-        return {
+        # Religion and community should ONLY come from caste certificate, never inferred from standard IDs
+        caste_doc = caste or {}
+        religion_val = caste_doc.get("religion", "")
+        community_val = caste_doc.get("community", "") or caste_doc.get("caste", "")
+
+        # Clean token-based address assembly to prevent comma/hyphen artifacts like ", , , ,  - "
+        addr_parts = []
+        if door_val:
+            addr_parts.append(door_val)
+        if street_val:
+            addr_parts.append(street_val)
+        if area_val:
+            addr_parts.append(area_val)
+
+        city_taluk = get_clean_address_priority("taluk", "city")
+        if city_taluk and city_taluk not in addr_parts:
+            addr_parts.append(city_taluk)
+
+        dist_val = get_clean_address_priority("district")
+        if dist_val and dist_val not in addr_parts:
+            addr_parts.append(dist_val)
+
+        state_val = get_clean_address_priority("state")
+        if state_val and state_val not in addr_parts:
+            addr_parts.append(state_val)
+
+        pincode_val = get_field_priority("pincode")
+
+        constructed_address = ", ".join(addr_parts)
+        if constructed_address and pincode_val:
+            constructed_address = f"{constructed_address} - {pincode_val}"
+        elif pincode_val and not constructed_address:
+            constructed_address = pincode_val
+
+        # Check existing raw address from documents
+        raw_address = get_field_priority("address")
+        if raw_address and re.sub(r"[\s,\-\./]", "", str(raw_address)) and len(addr_parts) < 2:
+            final_address = str(raw_address).strip()
+        else:
+            final_address = constructed_address or str(raw_address or "").strip()
+
+        if not re.sub(r"[\s,\-\./]", "", final_address):
+            final_address = ""
+
+        merged = {
+            "certificate_type": "combined",
+            "is_combined": True,
             "username": name,
             "aadhaar_number": get_aadhaar_field("aadhaar_number"),
             "dl_number": get_address_field("dl_number"),
             "dob": get_aadhaar_field("dob") or get_address_field("dob") or get_field_priority("dob"),
             "father_name": father_name,
             "gender": get_field_priority("gender"),
-            "religion": get_field_priority("religion"),
-            "community": get_field_priority("community"),
+            "religion": religion_val,
+            "community": community_val,
             "state": get_field_priority("state"),
             "district": get_field_priority("district"),
             "taluk": get_field_priority("taluk"),
             "phone_number": get_aadhaar_field("phone_number"),
             "email": get_field_priority("email"),
             "ration_card_number": ration_num,
-            "address": (
-                f"{get_aadhaar_field('door_no')}, {get_aadhaar_field('street')}, {get_aadhaar_field('area')}, {get_aadhaar_field('city')}, {get_aadhaar_field('state')} - {get_aadhaar_field('pincode')}"
-                or ""
-            ),
+            "address": final_address,
             "door_no": door_val,
             "street_name": street_val,
             "area": area_val,
-            "pincode": get_field_priority("pincode"),
+            "pincode": pincode_val,
         }
+        return extractor.sanitize_extracted_data(merged)
 
-    combined = _merge_with_resolution_priority(aadhaar_data, ration_data, address_data)
+    combined = _merge_with_resolution_priority(aadhaar_data, ration_data, address_data, caste_data)
 
     # Get resolution info for each document
     aadhaar_resolution = aadhaar_data.get("_resolution", {}).get("total_pixels", 0)

@@ -34,7 +34,7 @@ export default function AppStatusView({ currentLanguage = "en" }) {
     <div className="view-page">
       <div className="view-header">
         <h2 className="view-title">{isTa ? "விண்ணப்ப நிலையை அறிய" : "Track Application"}</h2>
-        <p className="view-sub">{isTa ? "உங்கள் விண்ணப்பத்தின் தற்போதைய நிலையைச் சரிபார்க்க குறிப்பு எண்ணை உள்ளிடவும்." : "Enter your application reference number to check the current status."}</p>
+        <p className="view-sub">{isTa ? "உங்கள் விண்ணப்பத்தின் தற்போதைய நிலையைச் சரிபார்க்க விண்ணப்ப எண்ணை உள்ளிடவும்." : "Enter your Application Number to check the current status."}</p>
       </div>
 
       <form onSubmit={handleCheck} className="status-form">
@@ -42,7 +42,7 @@ export default function AppStatusView({ currentLanguage = "en" }) {
           <LuSearch size={16} color="var(--text-3)" style={{ flexShrink: 0 }} />
           <input
             className="status-input"
-            placeholder={isTa ? "குறிப்பு / விண்ணப்ப எண்ணை உள்ளிடவும்" : "Enter reference / application number"}
+            placeholder={isTa ? "விண்ணப்ப எண்ணை உள்ளிடவும்" : "Enter Application Number (e.g. TN-7202401230101)"}
             value={refNo}
             onChange={e => setRefNo(e.target.value)}
           />

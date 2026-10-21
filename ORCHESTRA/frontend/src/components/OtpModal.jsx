@@ -176,12 +176,13 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
     }}>
       {/* Ultra Glassmorphic Container */}
       <div style={{
-        width: "100%", maxWidth: "440px",
+        width: "100%", maxWidth: "min(440px, 94vw)",
         background: "linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02))",
         backdropFilter: "blur(30px) saturate(190%)",
         WebkitBackdropFilter: "blur(30px) saturate(190%)",
         border: "1px solid rgba(255, 255, 255, 0.15)",
-        borderRadius: "28px", padding: "2.5rem 2.25rem",
+        borderRadius: "28px", padding: "clamp(1.5rem, 4vw, 2.5rem) clamp(1rem, 3.5vw, 2.25rem)",
+        boxSizing: "border-box",
         boxShadow: "0 30px 60px -12px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 50px rgba(168, 85, 247, 0.15)",
         color: "#f8fafc", fontFamily: "'Plus Jakarta Sans', sans-serif",
         position: "relative"
@@ -316,7 +317,7 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
         {step === "otp" && (
           <form onSubmit={handleVerifyOtp} style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             <div>
-              <div style={{ display: "flex", justifyContent: "center", gap: "14px" }}>
+              <div style={{ display: "flex", justifyContent: "center", gap: "clamp(6px, 2.5vw, 14px)", width: "100%", boxSizing: "border-box" }}>
                 {otp.map((digit, idx) => (
                   <input
                     key={idx}
@@ -329,11 +330,12 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
                     onKeyDown={(e) => handleKeyDown(idx, e, false)}
                     onPaste={(e) => handlePaste(e, false)}
                     style={{
-                      width: "68px", height: "64px",
-                      textAlign: "center", fontSize: "1.6rem", fontWeight: "700",
+                      width: "clamp(44px, 14vw, 68px)", height: "clamp(48px, 14vw, 64px)",
+                      boxSizing: "border-box",
+                      textAlign: "center", fontSize: "clamp(1.2rem, 4vw, 1.6rem)", fontWeight: "700",
                       background: digit ? "rgba(168, 85, 247, 0.12)" : "rgba(255, 255, 255, 0.05)",
                       border: digit ? "1.5px solid rgba(168, 85, 247, 0.8)" : "1px solid rgba(255, 255, 255, 0.15)",
-                      borderRadius: "16px", color: "#ffffff", outline: "none",
+                      borderRadius: "clamp(10px, 2.5vw, 16px)", color: "#ffffff", outline: "none",
                       backdropFilter: "blur(10px)",
                       boxShadow: digit ? "0 0 18px rgba(168, 85, 247, 0.35)" : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
                       transition: "all 0.25s ease"
@@ -395,7 +397,7 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
         {step === "pin" && (
           <form onSubmit={handleSavePin} style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             <div>
-              <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "center", gap: "clamp(4px, 1.5vw, 8px)", width: "100%", boxSizing: "border-box" }}>
                 {pin.map((digit, idx) => (
                   <input
                     key={idx}
@@ -408,11 +410,12 @@ export default function OtpModal({ isOpen, onClose, onSuccess }) {
                     onKeyDown={(e) => handleKeyDown(idx, e, true)}
                     onPaste={(e) => handlePaste(e, true)}
                     style={{
-                      width: "48px", height: "54px",
-                      textAlign: "center", fontSize: "1.5rem", fontWeight: "700",
+                      width: "clamp(34px, 10vw, 48px)", height: "clamp(42px, 12vw, 54px)",
+                      boxSizing: "border-box",
+                      textAlign: "center", fontSize: "clamp(1.1rem, 3.5vw, 1.5rem)", fontWeight: "700",
                       background: digit ? "rgba(52, 211, 153, 0.12)" : "rgba(255, 255, 255, 0.05)",
                       border: digit ? "1.5px solid rgba(52, 211, 153, 0.8)" : "1px solid rgba(255, 255, 255, 0.15)",
-                      borderRadius: "14px", color: "#ffffff", outline: "none",
+                      borderRadius: "clamp(8px, 2vw, 14px)", color: "#ffffff", outline: "none",
                       backdropFilter: "blur(10px)",
                       boxShadow: digit ? "0 0 16px rgba(52, 211, 153, 0.35)" : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
                       transition: "all 0.25s ease"

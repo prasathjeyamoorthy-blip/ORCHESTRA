@@ -600,8 +600,14 @@ def fetch_user_profile(phone_number: str) -> dict:
         t2 = profile_result.get("tab2_residency", {})
         t3 = profile_result.get("tab3_documents", {})
 
-        if t1 and "credentials" not in profile_result:
-            profile_result["credentials"] = t1
+        app = profile_result.get("applicant_details", {})
+        creds = profile_result.get("credentials") or {}
+        profile_result["credentials"] = {
+            "username": creds.get("username") or t1.get("username", "") or profile_result.get("username", ""),
+            "password": creds.get("password") or t1.get("password", "") or profile_result.get("password", ""),
+            "can_number": creds.get("can_number") or app.get("can_number") or t1.get("can_number", "") or profile_result.get("can_number", ""),
+            "aadhar_number": creds.get("aadhar_number") or creds.get("aadhaar_number") or app.get("aadhar_number") or app.get("aadhaar_number") or t1.get("aadhar_number", "") or profile_result.get("aadhar_number", "")
+        }
         if t2 and "address_details" not in profile_result:
             profile_result["address_details"] = t2
         if t3 and "supabase_urls" not in profile_result:

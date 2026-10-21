@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { LuFilePen, LuDownload, LuCircleCheck, LuSparkles } from "react-icons/lu";
+import { LuFilePen, LuDownload, LuCircleCheck } from "react-icons/lu";
 
 export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, onExit }) {
   const [uploadedFile, setUploadedFile] = useState(null);
@@ -107,8 +107,19 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
 
   return (
     <div className="overlay">
-      <div className="modal-card" style={{ maxWidth: '32rem' }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+      <div
+        className="modal-card"
+        style={{
+          maxWidth: "32rem",
+          maxHeight: "min(90vh, 640px)",
+          overflowY: "auto",
+          padding: "1.5rem",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.85rem" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "2.5rem", height: "2.5rem", borderRadius: "0.75rem", backgroundColor: "hsl(var(--primary)/0.1)", color: "hsl(var(--primary))" }}>
             <LuFilePen size={24} />
           </div>
@@ -117,11 +128,11 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
           </h2>
         </div>
 
-        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.875rem", marginBottom: "1.5rem" }}>
+        <p style={{ color: "hsl(var(--muted-foreground))", fontSize: "0.85rem", marginBottom: "0.85rem" }}>
           The Self-Declaration Form has been generated. Please follow these steps:
         </p>
 
-        <ol style={{ fontSize: "0.875rem", color: "hsl(var(--foreground))", paddingLeft: "1.5rem", marginBottom: "1.5rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <ol style={{ fontSize: "0.835rem", color: "hsl(var(--foreground))", paddingLeft: "1.25rem", marginBottom: "1rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
           <li>Download the form using the button below</li>
           <li>Print the form</li>
           <li>Sign it manually</li>
@@ -132,18 +143,19 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
         <button
           onClick={handleDownload}
           className="btn-primary"
-          style={{ width: "100%", marginBottom: "1.5rem" }}
+          style={{ width: "100%", marginBottom: "1.15rem" }}
         >
           <LuDownload size={16} /> Download Self-Declaration Form
         </button>
 
-        <div style={{ border: "1.5px dashed hsl(var(--border))", borderRadius: "1rem", padding: "1.5rem", textAlign: "center", marginBottom: "1.5rem", backgroundColor: "hsl(var(--secondary)/0.5)", transition: "all 0.2s" }} className="hover:border-primary/50">
+        <div style={{ border: "1.5px dashed hsl(var(--border))", borderRadius: "1rem", padding: "1.15rem 1rem", textAlign: "center", marginBottom: "1.25rem", backgroundColor: "hsl(var(--secondary)/0.5)", transition: "all 0.2s" }} className="hover:border-primary/50">
           {uploadedFile ? (
             <div>
               <p style={{ color: "hsl(var(--primary))", fontWeight: 600, fontSize: "0.875rem", marginBottom: "0.5rem", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem" }}>
                 <LuCircleCheck size={16} /> <span>{uploadedFile.name}</span>
               </p>
               <button
+                type="button"
                 onClick={() => setUploadedFile(null)}
                 className="btn-secondary"
                 style={{ color: "hsl(var(--destructive))", borderColor: "hsl(var(--destructive)/0.2)", backgroundColor: "hsl(var(--destructive)/0.05)" }}
@@ -153,7 +165,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
             </div>
           ) : (
             <div>
-              <p style={{ color: "hsl(var(--foreground))", fontWeight: 500, fontSize: "0.875rem", marginBottom: "0.75rem" }}>
+              <p style={{ color: "hsl(var(--foreground))", fontWeight: 500, fontSize: "0.875rem", marginBottom: "0.5rem" }}>
                 Upload Signed Self-Declaration Form
               </p>
               <label style={{ display: "inline-block", cursor: "pointer" }}>
@@ -165,43 +177,31 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
                   style={{ display: "none" }}
                 />
               </label>
-              <p style={{ fontSize: "0.75rem", color: "hsl(var(--muted-foreground))", marginTop: "0.75rem", marginBottom: 0 }}>
+              <p style={{ fontSize: "0.75rem", color: "hsl(var(--muted-foreground))", marginTop: "0.5rem", marginBottom: 0 }}>
                 Supported: PDF only (max 5MB)
               </p>
             </div>
           )}
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button onClick={onExit} disabled={isUploading} className="btn-secondary" style={{ flex: 1, minWidth: "80px" }}>
+        <div style={{ display: "flex", gap: "0.75rem", marginTop: "auto", paddingTop: "0.25rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={onExit}
+            disabled={isUploading}
+            className="btn-secondary"
+            style={{ flex: "1 1 100px" }}
+          >
             Exit
           </button>
           <button
             type="button"
-            onClick={() => onSubmit("autosign")}
-            disabled={isUploading}
-            style={{
-              flex: 1.5,
-              minWidth: "160px",
-              background: "linear-gradient(135deg, #a855f7, #6366f1)",
-              color: "#fff",
-              border: "none",
-              borderRadius: "0.5rem",
-              padding: "0.6rem 0.85rem",
-              fontWeight: 600,
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "0.35rem"
-            }}
-            title="Digitally sign and auto-upload the declaration on portal"
+            onClick={handleSubmit}
+            disabled={!uploadedFile || isUploading}
+            className="btn-primary"
+            style={{ flex: "2 1 180px" }}
           >
-            <LuSparkles size={15} /> <span>Auto-Sign &amp; Continue</span>
-          </button>
-          <button onClick={handleSubmit} disabled={!uploadedFile || isUploading} className="btn-primary" style={{ flex: 1.5, minWidth: "150px" }}>
-            {isUploading ? "Uploading..." : "Submit Signed Form"}
+            {isUploading ? "Uploading…" : "Submit Signed Form"}
           </button>
         </div>
       </div>

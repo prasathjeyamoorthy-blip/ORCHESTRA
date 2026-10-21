@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { LuBot, LuSparkles, LuShieldCheck,
+import { LuBot, LuShieldCheck,
          LuFileCheck, LuLayoutDashboard, LuPhone, LuBookOpen,
          LuMoon, LuSun, LuMenu, LuX, LuCircleCheck, LuCircleCheckBig, LuQrCode, LuTrash2,
          LuDownload } from "react-icons/lu";
 import FaqView        from "./components/FaqView";
 import AppStatusView  from "./components/AppStatusView";
 import ContactView    from "./components/ContactView";
+import ReceiptView    from "./components/ReceiptView";
 import ChatBubble      from "./components/ChatBubble";
 import ChatInput       from "./components/ChatInput";
 import DocumentChecklist    from "./components/DocumentChecklist";
@@ -53,10 +54,11 @@ function LandingOverlay({ onStart }) {
       position: "fixed", inset: 0, zIndex: 10,
       display: "flex", flexDirection: "column",
       alignItems: "center", justifyContent: "center", gap: "1.75rem",
+      padding: "1rem", boxSizing: "border-box"
     }}>
-      <div style={{ textAlign: "center" }}>
+      <div style={{ textAlign: "center", maxWidth: "90vw" }}>
         <div style={{
-          fontSize: "clamp(2rem, 4.5vw, 3.5rem)",
+          fontSize: "clamp(1.75rem, 5vw, 3.5rem)",
           fontWeight: 800,
           color: "#fff",
           fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -64,6 +66,7 @@ function LandingOverlay({ onStart }) {
           lineHeight: 1.2,
           marginBottom: "0.5rem",
           textShadow: "0 2px 24px rgba(0,0,0,0.4)",
+          wordBreak: "break-word"
         }}>
           {displayed}
           <span style={{
@@ -96,57 +99,39 @@ const DEFAULT_WELCOME_MSG = {
   text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
 };
 
-// ── TrackForm ─ inline certificate retrieval form ───────────────────────────────
+// ── TrackForm ─ inline certificate retrieval form (Application Number only) ──────
 function TrackForm({ onSubmit }) {
-  const [refType, setRefType] = useState("Application No.");
-  const [refNo,   setRefNo]   = useState("");
-  const valid = refNo.trim().length > 0;
+  const [appNo, setAppNo] = useState("");
+  const valid = appNo.trim().length > 0;
   return (
     <div className="fade-up" style={{
-      maxWidth: "400px", background: "rgba(255,255,255,0.04)",
+      maxWidth: "420px", width: "100%", background: "rgba(255,255,255,0.04)",
       border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1rem",
-      padding: "1.25rem 1.5rem", margin: "0.5rem 0",
+      padding: "1.25rem", boxSizing: "border-box",
     }}>
-      <p style={{ color: "#fff", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1rem" }}>
-        Please select your reference type and enter the number.
+      <p style={{ color: "#fff", fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.75rem", lineHeight: 1.4 }}>
+        Please enter your Application Number to fetch your certificate:
       </p>
-      {/* Radio buttons */}
-      <div style={{ display: "flex", gap: "1.5rem", marginBottom: "1rem" }}>
-        {["Application No.", "Transaction No."].map(opt => (
-          <label key={opt} style={{
-            display: "flex", alignItems: "center", gap: "0.4rem",
-            cursor: "pointer", fontSize: "0.85rem",
-            color: refType === opt ? "#c084fc" : "rgba(255,255,255,0.5)",
-            fontWeight: refType === opt ? 600 : 400,
-          }}>
-            <input
-              type="radio" name="certRefType" value={opt}
-              checked={refType === opt}
-              onChange={() => setRefType(opt)}
-              style={{ accentColor: "#a855f7", cursor: "pointer" }}
-            />
-            {opt}
-          </label>
-        ))}
-      </div>
       {/* Number input */}
       <input
-        type="text" value={refNo}
-        onChange={e => setRefNo(e.target.value)}
-        placeholder={`Enter your ${refType}`}
-        onKeyDown={e => e.key === "Enter" && valid && onSubmit(refType, refNo.trim())}
+        type="text"
+        value={appNo}
+        onChange={e => setAppNo(e.target.value)}
+        placeholder="Enter Application Number (e.g. TN-7202401230101)"
+        onKeyDown={e => e.key === "Enter" && valid && onSubmit(appNo.trim())}
         style={{
-          width: "100%", padding: "0.6rem 0.875rem",
+          width: "100%", padding: "0.65rem 0.875rem",
           borderRadius: "0.6rem", border: "1px solid rgba(255,255,255,0.15)",
           background: "rgba(255,255,255,0.06)", color: "#fff",
           fontSize: "0.9rem", outline: "none", boxSizing: "border-box",
-          marginBottom: "0.875rem",
+          marginBottom: "0.75rem",
         }}
+        autoFocus
       />
       {/* Submit button */}
       <button
         disabled={!valid}
-        onClick={() => valid && onSubmit(refType, refNo.trim())}
+        onClick={() => valid && onSubmit(appNo.trim())}
         style={{
           width: "100%", padding: "0.65rem", borderRadius: "0.6rem",
           border: "none",
@@ -157,7 +142,7 @@ function TrackForm({ onSubmit }) {
           transition: "background 0.2s",
         }}
       >
-        Retrieve Certificate
+        Fetch Certificate
       </button>
     </div>
   );
@@ -213,7 +198,7 @@ export default function App() {
   }, [dark]);
   const [activePage, setActivePage] = useState(() => {
     const hash = window.location.hash.replace("#", "");
-    return ["faq", "status", "contact"].includes(hash) ? hash : "home";
+    return ["faq", "contact", "receipt"].includes(hash) ? hash : "home";
   });
   const [_pageHistory, setPageHistory] = useState(["home"]);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -456,8 +441,20 @@ Just type your question in plain language and I will assist you right away.`,
     const quickKey = Object.keys(QUICK_RESPONSES).find(k => lower === k);
     if (quickKey) { pushBot(QUICK_RESPONSES[quickKey]); return; }
 
-    // ── ADDED: Certificate status / download intercept ──
-    // Fires independently of payment. "apply" never triggers this.
+    // ── Receipt download intercept ──
+    const receiptPhrases = [
+      "download receipt", "my receipt", "get receipt", "payment receipt",
+      "where is my receipt", "receipt download", "download my receipt", "get my receipt"
+    ];
+    if (receiptPhrases.some(kw => lower.includes(kw))) {
+      setProcessCompleted(true);
+      try { localStorage.setItem("tnega_process_completed", "true"); } catch (_) {}
+      setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]);
+      return;
+    }
+
+    // ── Certificate status / download intercept ──
+    // Fires independently of payment. Only application number is asked to fetch and give the certificate.
     const certPhrases = [
       "download my certificate", "download certificate", "get my certificate",
       "download cert", "my cert", "track my cert", "track certificate",
@@ -471,17 +468,36 @@ Just type your question in plain language and I will assist you right away.`,
       "get my residence certificate", "want my residence certificate",
       "my residence certificate", "residence certificate status",
       "status of my residence certificate", "track my residence certificate",
+      "fetch certificate", "fetch my certificate", "fetch residence certificate",
     ];
     const hasCertIntent = certPhrases.some(kw => lower.includes(kw));
+
+    // Check if user already provided an application number directly in their message
+    const appNoMatch = text.match(/\b(TN[-_]?[0-9A-Za-z]+|[0-9]{6,})\b/i);
+    const extractedAppNo = appNoMatch ? appNoMatch[0] : null;
+
     if (hasCertIntent) {
-      setMessages(prev => [...prev, { sender: "agent", text: "", type: "cert_loading" }]);
+      if (extractedAppNo) {
+        // Application number already provided in message -> retrieve directly
+        setMessages(prev => [...prev, { sender: "agent", text: "", type: "cert_fetching", appNo: extractedAppNo }]);
+        setTimeout(() => {
+          setMessages(prev => prev.map(m => m.type === "cert_fetching" && m.appNo === extractedAppNo ? { sender: "agent", text: "", type: "cert_download", appNo: extractedAppNo } : m));
+        }, 3500);
+      } else {
+        // Only ask for application number
+        setMessages(prev => [...prev, { sender: "agent", text: "", type: "track_form" }]);
+      }
+      return;
+    }
+
+    // If an inline track_form is active and user typed the application number in the chat input
+    const hasActiveTrackForm = messages.some(m => m.type === "track_form");
+    if (hasActiveTrackForm && (extractedAppNo || text.trim().length >= 4)) {
+      const appNoToUse = extractedAppNo || text.trim();
+      setMessages(prev => prev.map(m => m.type === "track_form" ? { sender: "agent", text: "", type: "cert_fetching", appNo: appNoToUse } : m));
       setTimeout(() => {
-        setMessages(prev => {
-          const ridx = [...prev].reverse().findIndex(m => m.type === "cert_loading");
-          if (ridx === -1) return prev;
-          return prev.map((m, i) => i === prev.length - 1 - ridx ? { ...m, type: "track_form" } : m);
-        });
-      }, 10000);
+        setMessages(prev => prev.map(m => m.type === "cert_fetching" ? { sender: "agent", text: "", type: "cert_download", appNo: appNoToUse } : m));
+      }, 3500);
       return;
     }
 
@@ -612,6 +628,8 @@ Just type your question in plain language and I will assist you right away.`,
       setMessages([DEFAULT_WELCOME_MSG]);
       setShowChecklist(false);
       setShowClearModal(false);
+      setProcessCompleted(false);
+      try { localStorage.removeItem("tnega_process_completed"); } catch (_) {}
     } catch (err) {
       alert("Error clearing data: " + (err.message || "Unknown error"));
     } finally {
@@ -630,7 +648,12 @@ Just type your question in plain language and I will assist you right away.`,
   const [automationStatus, setAutomationStatus]       = useState("");
   // ── ADDED: post-payment states ─────────────────────────────────────────────
   const [gettingReceipt, setGettingReceipt]           = useState(false);  // loading spinner after "I have paid"
-  const [trackingState, setTrackingState]             = useState(null);    // null | "loading" | "done"
+  const [processCompleted, setProcessCompleted]       = useState(() => {
+    try {
+      return localStorage.getItem("tnega_process_completed") === "true";
+    } catch (_) { return false; }
+  });
+  const hasCompletedProcess = processCompleted || messages.some(m => m.type === "receipt_download" || m.type === "cert_download");
 
   const openAutomationSocket = useCallback(() => new Promise((resolve, reject) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -681,7 +704,7 @@ Just type your question in plain language and I will assist you right away.`,
           else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
           else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
           else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
-          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); setGettingReceipt(false); setIsGenerating(false); setAutomationEvent(null); setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]); }
+          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); setGettingReceipt(false); setIsGenerating(false); setAutomationEvent(null); setProcessCompleted(true); try { localStorage.setItem("tnega_process_completed", "true"); } catch (_) {} setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]); }
           else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
           else if (data.type === "CLEANER_ERROR")               {
             window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
@@ -757,6 +780,7 @@ Just type your question in plain language and I will assist you right away.`,
           userPhone={userPhone}
           onApplyNow={handleApplyNow}
           onClearData={() => setShowClearModal(true)}
+          hasCompletedProcess={hasCompletedProcess}
         />
       )}
 
@@ -795,6 +819,7 @@ Just type your question in plain language and I will assist you right away.`,
               {activePage === "faq"     && <FaqView />}
               {activePage === "status"  && <AppStatusView />}
               {activePage === "contact" && <ContactView />}
+              {activePage === "receipt" && <ReceiptView currentLanguage={currentLanguage} />}
             </div>
           </div>
         ) : (<>
@@ -803,7 +828,7 @@ Just type your question in plain language and I will assist you right away.`,
           <div className="chat-inner">
 
             {/* Gooey morphing title */}
-            <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.5rem", marginTop: "2rem" }}>
+            <div style={{ display: "flex", justifyContent: "center", paddingBottom: "0.25rem", marginTop: "0.25rem" }}>
               <GooeyText
                 texts={["TNeGA", "ORCHESTRA"]}
                 morphTime={1.2}
@@ -814,41 +839,47 @@ Just type your question in plain language and I will assist you right away.`,
             </div>
             {messages.map((msg, i) =>
               msg.type === "receipt_download" ? (
-                <div key={i} className="fade-up" style={{ maxWidth: "360px", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0" }}>
-                  <p style={{ color: "#fff", fontWeight: 600, marginBottom: "0.75rem", fontSize: "0.95rem" }}>Payment complete. Your receipt is ready.</p>
-                  <a href="/receipt.pdf" download="Receipt.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.6rem 1.25rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.9rem" }}>
-                    <LuDownload size={15} /> Download Receipt
-                  </a>
+                <div key={i} className="fade-up" style={{ maxWidth: "420px", width: "100%", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "1rem", padding: "1.25rem", boxSizing: "border-box" }}>
+                  <p style={{ color: "#fff", fontWeight: 600, marginBottom: "0.35rem", fontSize: "0.95rem" }}>Payment complete. Your receipt is ready.</p>
+                  <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.82rem", marginBottom: "0.85rem", lineHeight: 1.5 }}>
+                    You can also access your receipt and fetch your certificate anytime from the <strong>Receipt & Certificate</strong> section in the sidebar.
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <a href="/receipt.pdf" download="Receipt.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.6rem 1.15rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.85rem" }}>
+                      <LuDownload size={14} /> Download Receipt
+                    </a>
+                    <button onClick={() => navigate("receipt")} style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.6rem 1.15rem", borderRadius: "0.5rem", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: "0.85rem" }}>
+                      Open in Sidebar
+                    </button>
+                  </div>
                 </div>
               ) : msg.type === "cert_loading" ? (
-                <div key={i} className="fade-up" style={{ maxWidth: "380px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0", display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                <div key={i} className="fade-up" style={{ maxWidth: "420px", width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "0.85rem", boxSizing: "border-box" }}>
                   <span style={{ display: "inline-block", width: "20px", height: "20px", flexShrink: 0, border: "2.5px solid rgba(255,255,255,0.15)", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
                   <p style={{ color: "#aaa", fontSize: "0.9rem", margin: 0 }}>Fetching your Residence Certificate… please wait</p>
                 </div>
               ) : msg.type === "track_form" ? (
-                <TrackForm key={i} onSubmit={(refType, refNo) => {
-                  setTrackingState("loading");
+                <TrackForm key={i} onSubmit={(appNo) => {
                   // Replace form with fetching indicator
                   setMessages(prev => prev.map((m, idx) =>
-                    idx === i ? { ...m, type: "cert_fetching", refType, refNo } : m
+                    idx === i ? { ...m, type: "cert_fetching", appNo } : m
                   ));
-                  // 7s later → replace cert_fetching in-place with cert_download (no duplicate)
+                  // 3.5s later → replace cert_fetching in-place with cert_download (no duplicate)
                   setTimeout(() => {
-                    setTrackingState("done");
                     setMessages(prev => prev.map((m, idx) =>
-                      idx === i ? { sender: "agent", text: "", type: "cert_download" } : m
+                      idx === i ? { sender: "agent", text: "", type: "cert_download", appNo } : m
                     ));
-                  }, 7000);
+                  }, 3500);
                 }} />
               ) : msg.type === "cert_fetching" ? (
-                <div key={i} className="fade-up" style={{ maxWidth: "400px", background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.2)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0", display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                <div key={i} className="fade-up" style={{ maxWidth: "420px", width: "100%", background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.2)", borderRadius: "1rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "0.85rem", boxSizing: "border-box" }}>
                   <span style={{ display: "inline-block", width: "20px", height: "20px", flexShrink: 0, border: "2.5px solid rgba(168,85,247,0.3)", borderTopColor: "#a855f7", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
-                  <p style={{ color: "#c084fc", fontSize: "0.9rem", margin: 0 }}>Retrieving certificate for {msg.refType} <strong>{msg.refNo}</strong>…</p>
+                  <p style={{ color: "#c084fc", fontSize: "0.9rem", margin: 0, lineHeight: 1.4 }}>Retrieving certificate for Application Number <strong>{msg.appNo || msg.refNo}</strong>…</p>
                 </div>
               ) : msg.type === "cert_download" ? (
-                <div key={i} className="fade-up" style={{ maxWidth: "360px", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0" }}>
+                <div key={i} className="fade-up" style={{ maxWidth: "420px", width: "100%", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "1rem", padding: "1.25rem", boxSizing: "border-box" }}>
                   <p style={{ color: "#fff", fontWeight: 600, marginBottom: "0.75rem", fontSize: "0.95rem" }}>Your Residence Certificate is ready.</p>
-                  <a href="/certificate.pdf" download="ResidenceCertificate.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.6rem 1.25rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#22c55e,#16a34a)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.9rem" }}>
+                  <a href="/certificate.pdf" download="ResidenceCertificate.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.65rem 1.35rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#22c55e,#16a34a)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.9rem", boxShadow: "0 4px 14px rgba(34,197,94,0.3)" }}>
                     <LuDownload size={15} /> Download Certificate
                   </a>
                 </div>
@@ -897,7 +928,6 @@ Just type your question in plain language and I will assist you right away.`,
           disabled={isGenerating || showChecklist}
           isGenerating={isGenerating}
           onStop={() => setIsGenerating(false)}
-          showChips={messages.length <= 1 && !showChecklist}
         />
       </>)}
       </>)}
@@ -912,44 +942,72 @@ Just type your question in plain language and I will assist you right away.`,
       {(paymentQr || paymentSuccess) && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 1000,
-          background: "rgba(0,0,0,0.75)", display: "flex",
-          alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.75)", backdropFilter: "blur(10px)", display: "flex",
+          alignItems: "center", justifyContent: "center", padding: "1rem", boxSizing: "border-box"
         }}>
           <div style={{
-            background: "#1a1a2e", borderRadius: "1rem", padding: "2rem",
-            maxWidth: "420px", width: "90%", textAlign: "center",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.6)", color: "#fff",
+            background: "#1a1a2e", borderRadius: "1.25rem", padding: "1.75rem",
+            maxWidth: "420px", width: "100%", textAlign: "center",
+            boxShadow: "0 12px 48px rgba(0,0,0,0.6)", color: "#fff",
+            position: "relative", boxSizing: "border-box", border: "1px solid rgba(255,255,255,0.1)"
           }}>
+            <button
+              onClick={() => { setPaymentQr(null); setPaymentSuccess(null); }}
+              style={{
+                position: "absolute", top: "1rem", right: "1rem",
+                background: "rgba(255,255,255,0.08)", border: "none",
+                color: "rgba(255,255,255,0.6)", borderRadius: "50%",
+                width: "28px", height: "28px", display: "flex",
+                alignItems: "center", justifyContent: "center", cursor: "pointer"
+              }}
+              title="Close"
+            >
+              <LuX size={16} />
+            </button>
+
             {paymentSuccess ? (
               <>
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.75rem" }}>
-                  <LuCircleCheckBig size={52} color="#4ade80" />
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.75rem", marginTop: "0.5rem" }}>
+                  <LuCircleCheckBig size={48} color="#4ade80" />
                 </div>
-                <h2 style={{ margin: "0 0 0.5rem" }}>Payment Successful!</h2>
+                <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.35rem" }}>Payment Successful!</h2>
+                <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.85rem", marginBottom: "1.25rem", lineHeight: 1.5 }}>
+                  Your process is complete! You can download your receipt and certificate from the sidebar at any time.
+                </p>
 
-                <button onClick={() => setPaymentSuccess(null)} style={{
-                  padding: "0.6rem 1.5rem", borderRadius: "0.5rem",
-                  background: "#4ade80", border: "none", color: "#000",
-                  fontWeight: 700, cursor: "pointer",
-                }}>Close</button>
+                <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center", flexWrap: "wrap" }}>
+                  <button onClick={() => { setPaymentSuccess(null); navigate("receipt"); }} style={{
+                    padding: "0.65rem 1.25rem", borderRadius: "0.5rem",
+                    background: "linear-gradient(135deg,#22c55e,#16a34a)", border: "none", color: "#fff",
+                    fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "0.4rem",
+                    fontSize: "0.9rem"
+                  }}>
+                    <LuDownload size={15} /> Go to Downloads
+                  </button>
+                  <button onClick={() => setPaymentSuccess(null)} style={{
+                    padding: "0.65rem 1.25rem", borderRadius: "0.5rem",
+                    background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff",
+                    fontWeight: 600, cursor: "pointer", fontSize: "0.9rem"
+                  }}>Close</button>
+                </div>
               </>
             ) : (
               <>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
-                  <LuQrCode size={24} color="#60a5fa" />
-                  <h2 style={{ margin: 0 }}>Scan to Pay</h2>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", marginBottom: "0.25rem", marginTop: "0.25rem" }}>
+                  <LuQrCode size={22} color="#60a5fa" />
+                  <h2 style={{ margin: 0, fontSize: "1.25rem" }}>Scan to Pay</h2>
                 </div>
-                <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
+                <p style={{ color: "#aaa", fontSize: "0.82rem", marginBottom: "1rem", lineHeight: 1.4 }}>
                   Open any UPI app and scan the QR code below to complete your ₹60 payment.
                 </p>
                 <img src="/upi_qr.png" alt="UPI QR Code"
-                  style={{ width: "260px", height: "260px", objectFit: "contain",
+                  style={{ width: "220px", maxWidth: "100%", height: "auto", aspectRatio: "1/1", objectFit: "contain",
                     borderRadius: "0.75rem", background: "#fff", padding: "0.5rem",
-                    marginBottom: "1.25rem" }} />
-                <p style={{ color: "#888", fontSize: "0.78rem", marginBottom: "1.25rem" }}>
+                    margin: "0 auto 1rem", display: "block" }} />
+                <p style={{ color: "#888", fontSize: "0.78rem", marginBottom: "1rem" }}>
                   After scanning and completing the payment, click the button below.
                 </p>
-                {/* ── ADDED: Loading receipt spinner ── */}
+                {/* ── Loading receipt spinner ── */}
                 {gettingReceipt && (
                   <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "0.75rem", textAlign: "center" }}>
                     <span style={{ display: "inline-block", width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", marginRight: "0.5rem", verticalAlign: "middle" }} />
@@ -957,12 +1015,12 @@ Just type your question in plain language and I will assist you right away.`,
                   </p>
                 )}
                 <button
-                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); setGettingReceipt(true); /* ADDED */ }}
+                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); setGettingReceipt(true); }}
                   style={{
                     width: "100%", padding: "0.75rem", borderRadius: "0.6rem",
                     background: "linear-gradient(135deg, #22c55e, #16a34a)",
                     border: "none", color: "#fff", fontWeight: 700,
-                    fontSize: "1rem", cursor: "pointer",
+                    fontSize: "0.95rem", cursor: "pointer",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.5rem",
                     boxShadow: "0 4px 14px rgba(34, 197, 94, 0.35)",
                   }}

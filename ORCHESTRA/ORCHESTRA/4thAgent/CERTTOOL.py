@@ -110,13 +110,13 @@ class TNeGACertificateDownloader:
             # Selector from
             page.get_by_role('link', name='CheckStatus').click()
             
-            # --- STAGE 3: SEARCH TRANSACTION ---
-            print(f"[Bot] Searching: {transaction_id}")
+            # --- STAGE 3: SEARCH APPLICATION NUMBER ---
+            print(f"[Bot] Searching Application Number: {transaction_id}")
             
-            # Select 'Transaction No' Radio Button
-            page.get_by_role('radio', name='Transaction No').click()
+            # Select 'Application No' Radio Button (nth 0 is Application No)
+            page.locator("input[type='radio']").nth(0).check()
             
-            # Fill Transaction ID using the specific ID selector
+            # Fill Application No using the specific ID selector
             page.locator('#txtAPPNo').fill(transaction_id)
             
             # Click Fetch
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download TNeGA Residence Certificate")
     parser.add_argument("--payload", help="Path to JSON file with username, password, transaction_id")
     parser.add_argument("--username", help="TNeGA portal username")
-    parser.add_argument("--transaction-id", dest="transaction_id", help="Transaction / Application number")
+    parser.add_argument("--application-no", "--app-no", "--transaction-id", dest="transaction_id", help="Application number")
     args = parser.parse_args()
 
     if args.payload and os.path.exists(args.payload):
@@ -179,7 +179,7 @@ if __name__ == "__main__":
         user_input_json = {
             "username": args.username or input("Enter TNeGA username: ").strip(),
             "password": getpass.getpass("Enter TNeGA password: "),
-            "transaction_id": args.transaction_id or input("Enter Transaction ID: ").strip()
+            "transaction_id": args.transaction_id or input("Enter Application Number: ").strip()
         }
 
     bot = TNeGACertificateDownloader()

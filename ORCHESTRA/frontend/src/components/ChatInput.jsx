@@ -12,17 +12,9 @@ function useAutoResize(minH = 48, maxH = 150) {
   return { ref, adjust };
 }
 
-const QUICK_ACTIONS = [
-  { label: "Required Documents",  send: "required documents" },
-  { label: "Step-by-Step Guide",  send: "step-by-step guide" },
-  { label: "Track Application",   send: "track application" },
-  { label: "Submit Documents",    send: "submit documents" },
-  { label: "General Help",        send: "general help" },
-];
-
-export default function ChatInput({ onSend, disabled, isGenerating, onStop, _showChips, currentLanguage = "en" }) {
+export default function ChatInput({ onSend, disabled, isGenerating, onStop, currentLanguage = "en" }) {
   const [input, setInput] = useState("");
-  const { ref, adjust } = useAutoResize(48, 150);
+  const { ref, adjust } = useAutoResize(38, 150);
 
   const handleSend = () => {
     if (isGenerating) { onStop?.(); return; }
@@ -33,10 +25,8 @@ export default function ChatInput({ onSend, disabled, isGenerating, onStop, _sho
   };
 
   return (
-    <div className="input-bar-wrap" style={{ paddingBottom: "1.25rem" }}>
+    <div className="input-bar-wrap">
       <div className="input-bar-inner">
-
-
 
         {/* Input box */}
         <div style={{
@@ -58,9 +48,9 @@ export default function ChatInput({ onSend, disabled, isGenerating, onStop, _sho
               width: "100%", resize: "none", border: "none", outline: "none",
               background: "transparent",
               color: "#fff", fontSize: "0.9375rem",
-              fontFamily: "inherit", lineHeight: 1.6,
-              padding: "0.75rem 1rem 0",
-              minHeight: "48px", maxHeight: "150px",
+              fontFamily: "inherit", lineHeight: 1.5,
+              padding: "0.625rem 0.875rem 0.15rem",
+              minHeight: "38px", maxHeight: "150px",
               overflow: "hidden",
               boxSizing: "border-box",
             }}
@@ -68,7 +58,7 @@ export default function ChatInput({ onSend, disabled, isGenerating, onStop, _sho
           <div style={{
             display: "flex", alignItems: "center",
             justifyContent: "space-between",
-            padding: "0.375rem 0.625rem 0.5rem",
+            padding: "0.2rem 0.5rem 0.35rem",
           }}>
             <button
               aria-label="Attach"
