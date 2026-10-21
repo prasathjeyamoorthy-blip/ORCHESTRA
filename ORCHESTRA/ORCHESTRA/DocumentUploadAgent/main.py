@@ -236,7 +236,7 @@ def process_documents(
             "username": name,
             "aadhaar_number": get_aadhaar_field("aadhaar_number"),
             "dl_number": get_address_field("dl_number"),
-            "dob": get_field_priority("dob"),
+            "dob": get_aadhaar_field("dob"),  # DOB from Aadhaar only — ration card DOB is parent's not applicant's
             "father_name": father_name,
             "gender": get_field_priority("gender"),
             "religion": get_field_priority("religion"),

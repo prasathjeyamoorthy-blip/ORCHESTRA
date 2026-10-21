@@ -706,3 +706,32 @@ def clear_cache_endpoint():
 
 
 
+
+
+@app.post("/test/payment-qr")
+def test_payment_qr():
+    """DEV ONLY — fires a PAYMENT_QR WebSocket event with the UPI QR from public folder."""
+    import base64, os
+    qr_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "public", "upi_qr.png")
+    qr_b64 = ""
+    if os.path.exists(qr_path):
+        with open(qr_path, "rb") as f:
+            qr_b64 = base64.b64encode(f.read()).decode()
+    manager.send_event_sync({
+        "type": "PAYMENT_QR",
+        "payment_url": "",
+        "qr_image": f"data:image/png;base64,{qr_b64}" if qr_b64 else "",
+    })
+    return {"status": "sent"}
+
+
+@app.post("/test/payment-success")
+def test_payment_success():
+    """DEV ONLY — fires a PAYMENT_SUCCESS WebSocket event to test the success screen."""
+    manager.send_event_sync({
+        "type": "PAYMENT_SUCCESS",
+        "screenshot": "",
+        "url": "",
+        "receipt_url": "",
+    })
+    return {"status": "sent"}

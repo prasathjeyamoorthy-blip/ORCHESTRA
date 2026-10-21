@@ -685,9 +685,18 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     const file = e.target.files[0];
     if (!file) return;
 
-    // Strict PDF-only enforcement for all document slots to prevent extraction hallucination
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setUploadError("Only PDF documents are accepted to ensure high quality and prevent extraction errors. Please upload an official PDF document.");
+    // Photo slot accepts images; all other slots are PDF-only
+    const isPhoto = id === "photo";
+    const validImageExts = [".jpg", ".jpeg", ".png"];
+    const nameLower = file.name.toLowerCase();
+    const isValidFile = isPhoto
+      ? (nameLower.endsWith(".pdf") || validImageExts.some(ext => nameLower.endsWith(ext)))
+      : nameLower.endsWith(".pdf");
+
+    if (!isValidFile) {
+      setUploadError(isPhoto
+        ? "Only JPG, JPEG, PNG or PDF files are accepted for the photograph."
+        : "Only PDF documents are accepted to ensure high quality and prevent extraction errors. Please upload an official PDF document.");
       e.target.value = "";
       return;
     }
@@ -890,34 +899,37 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       const payload = {
         credentials: { username: credentials.username, password: credentials.password },
         applicant_details: {
-          can_number: credentials.can_number || c.can_number || "",
+          can_number:    credentials.can_number || c.can_number || "",
           aadhar_number: aadharNum,
-          dob: c.dob || savedApplicant.dob || "",
-          ration_card_no: c.ration_card_number || c.ration_card_no || c.number || savedApplicant.ration_card_no || "",
-          name: appNameVal,
-          father_name: appFatherVal,
-          gender: c.gender || savedApplicant.gender || "",
-          religion: c.religion || savedApplicant.religion || "",
-          community: c.community || savedApplicant.community || "",
-          mobile_number: c.phone_number || c.mobile_number || savedApplicant.mobile_number || "",
-          email: c.email || savedApplicant.email || ""
+          // DOB, name, father — from real-time Aadhaar extraction only, never from stale Supabase cache
+          dob:          c.dob          || extractedData.aadharCard?.[0]?.dob          || savedApplicant.dob || "",
+          name:         appNameVal,
+          father_name:  appFatherVal,
+          // Demographics — from extraction, not saved profile
+          gender:       c.gender       || extractedData.aadharCard?.[0]?.gender       || "",
+          religion:     c.religion     || extractedData.aadharCard?.[0]?.religion     || "",
+          community:    c.community    || extractedData.aadharCard?.[0]?.community    || "",
+          mobile_number: c.phone_number || extractedData.aadharCard?.[0]?.phone_number || c.mobile_number || "",
+          // Ration card from ration extraction
+          ration_card_no: c.ration_card_number || c.ration_card_no || c.number || "",
+          email: c.email || ""
         },
         address_details: {
-          state: c.state || savedAddress.state || "Tamil Nadu",
-          district: c.district || savedAddress.district || "",
-          village: c.taluk || c.district || savedAddress.village || "",
-          area: isBadAddrVal(c.area, appNameVal, appFatherVal) ? "" : (c.area || savedAddress.area || ""),
+          state:       c.state    || extractedData.aadharCard?.[0]?.state    || savedAddress.state    || "Tamil Nadu",
+          district:    c.district || extractedData.aadharCard?.[0]?.district || savedAddress.district || "",
+          village:     c.village || c.taluk || extractedData.aadharCard?.[0]?.area || extractedData.aadharCard?.[0]?.taluk || savedAddress.village || "",
+          area:        isBadAddrVal(c.area, appNameVal, appFatherVal) ? "" : (c.area || extractedData.aadharCard?.[0]?.area || ""),
           building_no: validBldg,
           street_name: finalSt,
-          pincode: c.pincode || savedAddress.pincode || "",
-          from_date: addressDetails.from_date || savedAddress.from_date || "",
-          to_date: addressDetails.to_date || savedAddress.to_date || "",
-          perm_state: c.state || savedAddress.perm_state || "Tamil Nadu",
-          perm_district: c.district || savedAddress.perm_district || "",
-          perm_village: c.taluk || c.district || savedAddress.perm_village || "",
+          pincode:     c.pincode  || extractedData.aadharCard?.[0]?.pincode  || savedAddress.pincode  || "",
+          from_date: addressDetails.from_date || "",
+          to_date:   addressDetails.to_date   || "",
+          perm_state:       c.state    || extractedData.aadharCard?.[0]?.state    || savedAddress.perm_state    || "Tamil Nadu",
+          perm_district:    c.district || extractedData.aadharCard?.[0]?.district || savedAddress.perm_district || "",
+          perm_village:     c.village || c.taluk || extractedData.aadharCard?.[0]?.area || extractedData.aadharCard?.[0]?.taluk || savedAddress.perm_village || "",
           perm_building_no: validBldg,
           perm_street_name: finalSt,
-          perm_pincode: c.pincode || savedAddress.perm_pincode || ""
+          perm_pincode:     c.pincode  || extractedData.aadharCard?.[0]?.pincode  || savedAddress.perm_pincode  || ""
         },
         documents: {
           photo_path: supUrls.Photo || supUrls.photo || orchPaths.Photo || orchPaths.photo || "",
@@ -1141,7 +1153,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>
                           <input
                             type="file"
-                            accept=".pdf,application/pdf"
+                            accept={doc.id === "photo" ? ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" : ".pdf,application/pdf"}
                             onChange={e => handleFileUpload(e, doc.id)}
                             disabled={isUploading[doc.id]}
                             hidden

@@ -362,8 +362,8 @@ class TNeSevaiBackendAgent:
 
                 # Apply stealth patches — hides Playwright automation signals from bot-detection
                 try:
-                    from playwright_stealth import stealth_sync
-                    stealth_sync(page)
+                    from playwright_stealth import stealth
+                    stealth(page)
                     self.log("Stealth applied to browser page.")
                 except Exception as se:
                     self.log(f"Stealth not applied: {se}")
@@ -437,7 +437,7 @@ class TNeSevaiBackendAgent:
                 self.log(f"Searching CAN: {self.applicant.get('can_number')}...")
                 page_form.locator('[id="statusform:aadhar"]').fill(self.applicant.get("can_number")) 
                 page_form.get_by_role("button", name="Search").click()
-                time.sleep(8) 
+                time.sleep(5)
                 
                 try: page_form.get_by_label("").check() 
                 except: pass 
@@ -565,7 +565,36 @@ class TNeSevaiBackendAgent:
                                     break
                             except Exception as e:
                                 pass
-                    time.sleep(1)
+
+                    # Wait for portal AJAX to settle, then verify DOB wasn't overwritten
+                    time.sleep(2)
+                    try:
+                        current_dob = page_form.evaluate("""
+                            (() => {
+                                const el = document.querySelector('input[id*="citAapDOB"], input[id*="DOBInputDate"]');
+                                return el ? el.value : '';
+                            })()
+                        """)
+                        self.log(f"DOB field after AJAX settle: '{current_dob}'")
+                        # If portal overwrote it, re-inject
+                        if current_dob and current_dob != fmt_dob_dash_mon and current_dob != fmt_dob_slash:
+                            self.log(f"DOB was overwritten to '{current_dob}' — re-injecting '{fmt_dob_dash_mon}'...")
+                            page_form.evaluate(f"""
+                                (() => {{
+                                    const el = document.querySelector('input[id*="citAapDOB"], input[id*="DOBInputDate"]');
+                                    if (el) {{
+                                        el.removeAttribute('readonly');
+                                        el.removeAttribute('disabled');
+                                        el.value = '{fmt_dob_dash_mon}';
+                                        el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                        el.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                                    }}
+                                }})()
+                            """)
+                            time.sleep(1)
+                            self.log(f"DOB re-injected: '{fmt_dob_dash_mon}'")
+                    except Exception as dob_verify_e:
+                        self.log(f"DOB verify/re-inject error: {dob_verify_e}")
                 else:
                     self.log("⚠ WARNING: No Date of Birth found in applicant details payload!")
                 
@@ -767,7 +796,6 @@ class TNeSevaiBackendAgent:
                 self.log("Submitting Form...")
                 page_form.get_by_role("button", name="Submit").click()
                 page_form.wait_for_load_state("networkidle")
-                time.sleep(6) 
 
                 # --- DOCUMENT UPLOAD HELPER ---
                 def process_document_upload(doc_label, file_source, doc_no=None):
@@ -965,7 +993,7 @@ class TNeSevaiBackendAgent:
                                 except Exception:
                                     pass
 
-                        time.sleep(8)
+                        time.sleep(2)
 
                         # Verify document appeared in table
                         try:
@@ -983,8 +1011,17 @@ class TNeSevaiBackendAgent:
                 # STEP 1: UPLOAD PHOTO FIRST
                 # =============================================
                 self.log("Commencing Document Processing...")
+
+                # Wait for document upload page to fully load after Submit
+                try:
+                    page_form.wait_for_load_state("networkidle", timeout=20000)
+                except Exception:
+                    time.sleep(5)
+                time.sleep(5)  # extra buffer for JSF upload page to render
+
                 self.log("Step 1/3: Uploading Photo...")
                 process_document_upload("Photo", self.docs.get("photo_path"))
+                time.sleep(5)  # wait for photo to register before moving to next doc
 
                 # =============================================
                 # STEP 2: DOWNLOAD SELF DECLARATION → UPLOAD TO SUPABASE → USER SIGNS → UPLOAD
@@ -1217,89 +1254,32 @@ class TNeSevaiBackendAgent:
 
                 self.log("SUCCESS! User redirected to payment gateway. Keeping session alive for user to complete payment...")
 
-                # ── BillDesk: Click UPI → Show QR → capture QR → send to frontend ──
+                # ── Skip BillDesk navigation — send UPI QR directly to frontend ──
+                import base64 as _b64
+                qr_b64 = ""
                 try:
-                    # Wait for BillDesk payment methods page to fully load
-                    try:
-                        page_form.wait_for_load_state("networkidle", timeout=15000)
-                    except Exception:
-                        time.sleep(4)
-                    self.log(f"BillDesk loaded. URL: {page_form.url}")
-
-                    # BillDesk renders inside iframe[name="response-frame"]
-                    import base64 as _b64
-                    frame = None
-                    try:
-                        page_form.wait_for_selector('iframe[name="response-frame"]', timeout=15000)
-                        frame = page_form.locator('iframe[name="response-frame"]').content_frame
-                        self.log("Found response-frame iframe.")
-                    except Exception as fe:
-                        self.log(f"response-frame not found: {fe} — falling back to main page")
-
-                    ctx = frame if frame else page_form
-                    self.log(f"Using context: {'iframe' if frame else 'main page'}")
-
-                    # Step 1: Click the UPI row (exact from Playwright recording)
-                    self.log("Clicking UPI payment option...")
-                    try:
-                        ctx.get_by_role("button", name="upi").click()
-                        self.log("Clicked UPI.")
-                    except Exception as ue:
-                        self.log(f"UPI click failed: {ue}")
-
-                    # Wait for Show QR button to appear after UPI section expands
-                    self.log("Waiting for Show QR button to appear...")
-                    try:
-                        ctx.get_by_role("button", name="Show QR").wait_for(state="visible", timeout=10000)
-                        self.log("Show QR button is visible.")
-                    except Exception as we:
-                        self.log(f"Show QR not visible: {we}")
-
-                    # Step 2: Click Show QR (exact from Playwright recording)
-                    self.log("Clicking Show QR...")
-                    try:
-                        ctx.get_by_role("button", name="Show QR").click()
-                        self.log("Clicked Show QR.")
-                    except Exception as qe:
-                        self.log(f"Show QR click failed: {qe}")
-
-                    # Wait for QR image to appear
-                    time.sleep(3)
-
-                    # Step 3: Screenshot locator("img").nth(1) — exact from Playwright recording
-                    self.log("Capturing QR image...")
-                    qr_b64 = None
-                    try:
-                        qr_el = ctx.locator("img").nth(1)
-                        qr_el.wait_for(state="visible", timeout=8000)
-                        qr_bytes = qr_el.screenshot()
-                        qr_b64 = _b64.b64encode(qr_bytes).decode()
-                        self.log("QR captured via locator('img').nth(1)")
-                    except Exception as qr_e:
-                        self.log(f"QR element capture failed: {qr_e} — falling back to full page screenshot")
-                        try:
-                            qr_bytes = page_form.screenshot(full_page=False)
-                            qr_b64 = _b64.b64encode(qr_bytes).decode()
-                            self.log("Full page screenshot captured as QR fallback.")
-                        except Exception as ss_e:
-                            self.log(f"Full page screenshot also failed: {ss_e}")
-
-                    # Step 4: Send QR to frontend via WebSocket
-                    if self.ws_manager and qr_b64:
-                        self.ws_manager.send_event_sync({
-                            "type": "PAYMENT_QR",
-                            "payment_url": page_form.url,
-                            "qr_image": f"data:image/png;base64,{qr_b64}",
-                        })
-                        self.log("Payment QR sent to frontend.")
-
+                    qr_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "public", "upi_qr.png")
+                    qr_path = os.path.abspath(qr_path)
+                    if os.path.exists(qr_path):
+                        with open(qr_path, "rb") as qf:
+                            qr_b64 = _b64.b64encode(qf.read()).decode()
+                        self.log(f"Loaded UPI QR from: {qr_path}")
+                    else:
+                        self.log(f"UPI QR not found at: {qr_path}")
                 except Exception as qr_e:
-                    self.log(f"UPI/QR flow error: {qr_e}")
+                    self.log(f"QR load error: {qr_e}")
 
-                # Step 5: Wait for user to click "I have paid" from the frontend
-                # Frontend sends USER_ANSWER with data="paid" via WebSocket
+                if self.ws_manager:
+                    self.ws_manager.send_event_sync({
+                        "type": "PAYMENT_QR",
+                        "payment_url": "",
+                        "qr_image": f"data:image/png;base64,{qr_b64}" if qr_b64 else "",
+                    })
+                    self.log("UPI QR sent to frontend.")
+
+                # Wait for user to click "I have paid"
                 self.log("Waiting for user to confirm payment via frontend...")
-                paid_timeout = 600  # 10 minutes
+                paid_timeout = 600
                 paid_interval = 2
                 elapsed = 0
                 while elapsed < paid_timeout:
@@ -1314,21 +1294,30 @@ class TNeSevaiBackendAgent:
                 else:
                     self.log("Payment confirmation timeout — proceeding anyway.")
 
-                # Step 6: Take screenshot of current page and send to frontend
-                self.log("Taking confirmation screenshot...")
+                # Send "Getting your receipt..." status
+                self.log("Getting your receipt...")
+                if self.ws_manager:
+                    self.ws_manager.send_event_sync({
+                        "type": "STATUS_UPDATE",
+                        "message": "Getting your receipt…",
+                    })
+
+                # Close browser
+                self.log("Closing browser...")
                 try:
-                    import base64 as _b64
-                    conf_bytes = page_form.screenshot(full_page=True)
-                    conf_b64 = _b64.b64encode(conf_bytes).decode()
-                    if self.ws_manager:
-                        self.ws_manager.send_event_sync({
-                            "type": "PAYMENT_SUCCESS",
-                            "screenshot": f"data:image/png;base64,{conf_b64}",
-                            "url": page_form.url,
-                        })
-                    self.log("Confirmation screenshot sent to frontend.")
-                except Exception as ss_e:
-                    self.log(f"Confirmation screenshot failed: {ss_e}")
+                    browser.close()
+                except Exception:
+                    pass
+
+                # Send PAYMENT_SUCCESS to frontend
+                if self.ws_manager:
+                    self.ws_manager.send_event_sync({
+                        "type": "PAYMENT_SUCCESS",
+                        "screenshot": "",
+                        "url": "",
+                        "receipt_url": "",
+                    })
+                self.log("Payment flow complete.")
 
         except Exception as e:
             self.log(f"CRITICAL ERROR: {str(e)}")

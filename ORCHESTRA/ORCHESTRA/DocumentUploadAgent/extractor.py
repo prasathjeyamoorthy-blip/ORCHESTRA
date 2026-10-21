@@ -142,12 +142,15 @@ def run_vlm(image, text_prompt):
                 ]
             }
             try:
-                res = requests.post(invoke_url, headers=headers, json=payload, timeout=60)
+                res = requests.post(invoke_url, headers=headers, json=payload, timeout=7)
                 if res.status_code == 200:
                     content = res.json()["choices"][0]["message"]["content"]
                     if content and content.strip():
                         print(f"[run_vlm] NVIDIA NIM VLM extraction success with Key #{idx+1}!")
                         return content
+                elif res.status_code == 429:
+                    print(f"[run_vlm] NVIDIA NIM Key #{idx+1} hit 429 rate limit — switching to next key...")
+                    continue
                 else:
                     print(f"[run_vlm] NVIDIA NIM Key #{idx+1} returned status {res.status_code}: {res.text[:150]}")
             except Exception as ne:
