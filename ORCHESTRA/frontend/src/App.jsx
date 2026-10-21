@@ -639,6 +639,8 @@ Just type your question in plain language and I will assist you right away.`,
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
   const [automationEvent, setAutomationEvent]       = useState(null);
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
@@ -656,10 +658,12 @@ Just type your question in plain language and I will assist you right away.`,
   const hasCompletedProcess = processCompleted || messages.some(m => m.type === "receipt_download" || m.type === "cert_download");
 
   const openAutomationSocket = useCallback(() => new Promise((resolve, reject) => {
+    // If already connected, resolve immediately
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       resolve();
       return;
     }
+    // If currently connecting, await completion rather than creating competing sockets
     if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
       const start = Date.now();
       const check = setInterval(() => {
@@ -674,23 +678,38 @@ Just type your question in plain language and I will assist you right away.`,
       }, 150);
       return;
     }
-    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-      try {
-        wsRef.current.onclose = null;
-        wsRef.current.onerror = null;
-        wsRef.current.close();
-      } catch (_) {}
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
+
+    // Reset attempt counter on fresh intentional connect
+    reconnectAttemptsRef.current = 0;
+
     let settled = false;
     const connect = () => {
       const wsBase = getWsBase();
-      const socket = new WebSocket(`${wsBase}/ws/automation`);
+      let socket;
+      try {
+        socket = new WebSocket(`${wsBase}/ws/automation`);
+      } catch (err) {
+        if (!settled) { settled = true; reject(err); }
+        return;
+      }
+
       let ping;
       socket.onopen = () => {
         console.log("[WebSocket] Automation socket connected to:", wsBase);
-        ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "PING" })), 5000);
+        reconnectAttemptsRef.current = 0;
+        ping = setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "PING" }));
+          }
+        }, 5000);
         if (!settled) { settled = true; resolve(); }
       };
+
       socket.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
@@ -724,21 +743,33 @@ Just type your question in plain language and I will assist you right away.`,
           console.error("[WebSocket] Parse error:", err);
         }
       };
+
       socket.onclose = () => {
         clearInterval(ping);
-        setTimeout(() => {
-          if (wsRef.current === socket) {
-            connect();
+        // Only reconnect if this socket is still the active one and attempts < 5
+        if (wsRef.current === socket) {
+          if (reconnectAttemptsRef.current < 5) {
+            const delay = Math.min(1500 * Math.pow(1.5, reconnectAttemptsRef.current), 8000);
+            reconnectAttemptsRef.current += 1;
+            reconnectTimerRef.current = setTimeout(() => {
+              if (wsRef.current === socket) {
+                connect();
+              }
+            }, delay);
+          } else {
+            console.warn("[WebSocket] Max reconnect attempts reached. Will reconnect on next activity.");
           }
-        }, 2000);
+        }
       };
-      socket.onerror = (err) => {
+
+      socket.onerror = () => {
         clearInterval(ping);
-        console.error("[WebSocket] Socket error:", err);
         if (!settled) { settled = true; reject(new Error("WebSocket connection failed")); }
       };
+
       wsRef.current = socket;
     };
+
     connect();
   }), []);
 
