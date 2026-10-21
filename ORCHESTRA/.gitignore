@@ -1,27 +1,71 @@
-# Environment variables (contains sensitive secrets & keys)
+# ── Environment variables (secrets & API keys) ─────────────────────────────
 .env
 .env.local
 .env.*.local
 *.env
 
-# Dependencies
-node_modules/
+# ── Python dependencies & virtual environments ──────────────────────────────
 .venv/
 venv/
 ENV/
 env/
-
-# Build and dist outputs
-dist/
-build/
-*.egg-info/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+*.spec
 
-# Local runtime & log files
-*.log
-last_payload.json
+# ── Node / frontend ──────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+
+# ── Playwright & browser automation ─────────────────────────────────────────
 backend_captcha.png
+last_payload.json
+playwright-report/
+test-results/
+*.har
+
+# ── Uploaded / generated files ───────────────────────────────────────────────
 uploads/
 uploaded_documents/
+downloaded_docs/
+receipts/
+screenshots/
+*.pdf
+*.png
+!frontend/public/upi_qr.png
+!frontend/public/receipt.pdf
+!frontend/public/certificate.pdf
+
+# ── Logs & runtime artifacts ─────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── IDEs & OS files ──────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.coverage
+htmlcov/

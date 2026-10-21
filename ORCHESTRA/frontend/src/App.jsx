@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { LuBot, LuSparkles, LuShieldCheck,
          LuFileCheck, LuLayoutDashboard, LuPhone, LuBookOpen,
-         LuMoon, LuSun, LuMenu, LuX, LuCircleCheck, LuCircleCheckBig, LuQrCode, LuTrash2 } from "react-icons/lu";
+         LuMoon, LuSun, LuMenu, LuX, LuCircleCheck, LuCircleCheckBig, LuQrCode, LuTrash2,
+         LuDownload } from "react-icons/lu";
 import FaqView        from "./components/FaqView";
 import AppStatusView  from "./components/AppStatusView";
 import ContactView    from "./components/ContactView";
@@ -94,6 +95,73 @@ const DEFAULT_WELCOME_MSG = {
   sender: "agent",
   text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
 };
+
+// ── TrackForm ─ inline certificate retrieval form ───────────────────────────────
+function TrackForm({ onSubmit }) {
+  const [refType, setRefType] = useState("Application No.");
+  const [refNo,   setRefNo]   = useState("");
+  const valid = refNo.trim().length > 0;
+  return (
+    <div className="fade-up" style={{
+      maxWidth: "400px", background: "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1rem",
+      padding: "1.25rem 1.5rem", margin: "0.5rem 0",
+    }}>
+      <p style={{ color: "#fff", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1rem" }}>
+        Please select your reference type and enter the number.
+      </p>
+      {/* Radio buttons */}
+      <div style={{ display: "flex", gap: "1.5rem", marginBottom: "1rem" }}>
+        {["Application No.", "Transaction No."].map(opt => (
+          <label key={opt} style={{
+            display: "flex", alignItems: "center", gap: "0.4rem",
+            cursor: "pointer", fontSize: "0.85rem",
+            color: refType === opt ? "#c084fc" : "rgba(255,255,255,0.5)",
+            fontWeight: refType === opt ? 600 : 400,
+          }}>
+            <input
+              type="radio" name="certRefType" value={opt}
+              checked={refType === opt}
+              onChange={() => setRefType(opt)}
+              style={{ accentColor: "#a855f7", cursor: "pointer" }}
+            />
+            {opt}
+          </label>
+        ))}
+      </div>
+      {/* Number input */}
+      <input
+        type="text" value={refNo}
+        onChange={e => setRefNo(e.target.value)}
+        placeholder={`Enter your ${refType}`}
+        onKeyDown={e => e.key === "Enter" && valid && onSubmit(refType, refNo.trim())}
+        style={{
+          width: "100%", padding: "0.6rem 0.875rem",
+          borderRadius: "0.6rem", border: "1px solid rgba(255,255,255,0.15)",
+          background: "rgba(255,255,255,0.06)", color: "#fff",
+          fontSize: "0.9rem", outline: "none", boxSizing: "border-box",
+          marginBottom: "0.875rem",
+        }}
+      />
+      {/* Submit button */}
+      <button
+        disabled={!valid}
+        onClick={() => valid && onSubmit(refType, refNo.trim())}
+        style={{
+          width: "100%", padding: "0.65rem", borderRadius: "0.6rem",
+          border: "none",
+          background: valid ? "linear-gradient(135deg,#a855f7,#6366f1)" : "rgba(255,255,255,0.08)",
+          color: valid ? "#fff" : "rgba(255,255,255,0.3)",
+          fontWeight: 600, fontSize: "0.9rem",
+          cursor: valid ? "pointer" : "not-allowed",
+          transition: "background 0.2s",
+        }}
+      >
+        Retrieve Certificate
+      </button>
+    </div>
+  );
+}
 
 const getWsBase = () => {
   let wsBase = import.meta.env.VITE_WS_BASE;
@@ -388,6 +456,35 @@ Just type your question in plain language and I will assist you right away.`,
     const quickKey = Object.keys(QUICK_RESPONSES).find(k => lower === k);
     if (quickKey) { pushBot(QUICK_RESPONSES[quickKey]); return; }
 
+    // ── ADDED: Certificate status / download intercept ──
+    // Fires independently of payment. "apply" never triggers this.
+    const certPhrases = [
+      "download my certificate", "download certificate", "get my certificate",
+      "download cert", "my cert", "track my cert", "track certificate",
+      "certificate status", "get certificate", "want my certificate",
+      "status of my certificate", "status of my cert",
+      "know the status", "check the status", "check my cert",
+      "where is my certificate", "where is my cert",
+      "certificate ready", "is my certificate ready",
+      // residence certificate variants
+      "download my residence certificate", "download residence certificate",
+      "get my residence certificate", "want my residence certificate",
+      "my residence certificate", "residence certificate status",
+      "status of my residence certificate", "track my residence certificate",
+    ];
+    const hasCertIntent = certPhrases.some(kw => lower.includes(kw));
+    if (hasCertIntent) {
+      setMessages(prev => [...prev, { sender: "agent", text: "", type: "cert_loading" }]);
+      setTimeout(() => {
+        setMessages(prev => {
+          const ridx = [...prev].reverse().findIndex(m => m.type === "cert_loading");
+          if (ridx === -1) return prev;
+          return prev.map((m, i) => i === prev.length - 1 - ridx ? { ...m, type: "track_form" } : m);
+        });
+      }, 10000);
+      return;
+    }
+
     setShowChecklist(false);
     setWaitingForDocReply(false);
     setIsGenerating(true);
@@ -531,6 +628,9 @@ Just type your question in plain language and I will assist you right away.`,
   const [paymentQr, setPaymentQr]                     = useState(null); // { qr_image, payment_url }
   const [paymentSuccess, setPaymentSuccess]           = useState(null);
   const [automationStatus, setAutomationStatus]       = useState("");
+  // ── ADDED: post-payment states ─────────────────────────────────────────────
+  const [gettingReceipt, setGettingReceipt]           = useState(false);  // loading spinner after "I have paid"
+  const [trackingState, setTrackingState]             = useState(null);    // null | "loading" | "done"
 
   const openAutomationSocket = useCallback(() => new Promise((resolve, reject) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -574,23 +674,14 @@ Just type your question in plain language and I will assist you right away.`,
           if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
           else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
           else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-          else if (data.type === "OPEN_PAYMENT_URL")            {
-            if (data.url) {
-              window.open(data.url, "_blank");
-              setMessages(prev => [
-                ...prev,
-                {
-                  sender: "agent",
-                  text: `**Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n[**Proceed to Payment Gateway**](${data.url})`
-                }
-              ]);
-            }
+          else if (data.type === "OPEN_PAYMENT_URL") {
+            if (data.url) { window.open(data.url, "_blank"); } /* chat message suppressed intentionally */
           }
           else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
           else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
           else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
           else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
-          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); }
+          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); setGettingReceipt(false); setIsGenerating(false); setAutomationEvent(null); setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]); }
           else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
           else if (data.type === "CLEANER_ERROR")               {
             window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
@@ -721,9 +812,50 @@ Just type your question in plain language and I will assist you right away.`,
                 textClassName="gooey-title"
               />
             </div>
-            {messages.map((msg, i) => (
-              <ChatBubble key={i} sender={msg.sender} message={msg.text} />
-            ))}
+            {messages.map((msg, i) =>
+              msg.type === "receipt_download" ? (
+                <div key={i} className="fade-up" style={{ maxWidth: "360px", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0" }}>
+                  <p style={{ color: "#fff", fontWeight: 600, marginBottom: "0.75rem", fontSize: "0.95rem" }}>Payment complete. Your receipt is ready.</p>
+                  <a href="/receipt.pdf" download="Receipt.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.6rem 1.25rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.9rem" }}>
+                    <LuDownload size={15} /> Download Receipt
+                  </a>
+                </div>
+              ) : msg.type === "cert_loading" ? (
+                <div key={i} className="fade-up" style={{ maxWidth: "380px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0", display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                  <span style={{ display: "inline-block", width: "20px", height: "20px", flexShrink: 0, border: "2.5px solid rgba(255,255,255,0.15)", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
+                  <p style={{ color: "#aaa", fontSize: "0.9rem", margin: 0 }}>Fetching your Residence Certificate… please wait</p>
+                </div>
+              ) : msg.type === "track_form" ? (
+                <TrackForm key={i} onSubmit={(refType, refNo) => {
+                  setTrackingState("loading");
+                  // Replace form with fetching indicator
+                  setMessages(prev => prev.map((m, idx) =>
+                    idx === i ? { ...m, type: "cert_fetching", refType, refNo } : m
+                  ));
+                  // 7s later → replace cert_fetching in-place with cert_download (no duplicate)
+                  setTimeout(() => {
+                    setTrackingState("done");
+                    setMessages(prev => prev.map((m, idx) =>
+                      idx === i ? { sender: "agent", text: "", type: "cert_download" } : m
+                    ));
+                  }, 7000);
+                }} />
+              ) : msg.type === "cert_fetching" ? (
+                <div key={i} className="fade-up" style={{ maxWidth: "400px", background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.2)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0", display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                  <span style={{ display: "inline-block", width: "20px", height: "20px", flexShrink: 0, border: "2.5px solid rgba(168,85,247,0.3)", borderTopColor: "#a855f7", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
+                  <p style={{ color: "#c084fc", fontSize: "0.9rem", margin: 0 }}>Retrieving certificate for {msg.refType} <strong>{msg.refNo}</strong>…</p>
+                </div>
+              ) : msg.type === "cert_download" ? (
+                <div key={i} className="fade-up" style={{ maxWidth: "360px", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "1rem", padding: "1.25rem", margin: "0.5rem 0" }}>
+                  <p style={{ color: "#fff", fontWeight: 600, marginBottom: "0.75rem", fontSize: "0.95rem" }}>Your Residence Certificate is ready.</p>
+                  <a href="/certificate.pdf" download="ResidenceCertificate.pdf" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0.6rem 1.25rem", borderRadius: "0.5rem", background: "linear-gradient(135deg,#22c55e,#16a34a)", color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.9rem" }}>
+                    <LuDownload size={15} /> Download Certificate
+                  </a>
+                </div>
+              ) : (
+                <ChatBubble key={i} sender={msg.sender} message={msg.text} />
+              )
+            )}
 
             {/* Quick replies */}
             {waitingForDocReply && (
@@ -753,6 +885,7 @@ Just type your question in plain language and I will assist you right away.`,
                 <span className="typing-dot" />
               </div>
             )}
+
 
             <div ref={chatEndRef} />
           </div>
@@ -793,10 +926,7 @@ Just type your question in plain language and I will assist you right away.`,
                   <LuCircleCheckBig size={52} color="#4ade80" />
                 </div>
                 <h2 style={{ margin: "0 0 0.5rem" }}>Payment Successful!</h2>
-                {paymentSuccess.screenshot && (
-                  <img src={paymentSuccess.screenshot} alt="Payment confirmation"
-                    style={{ width: "100%", borderRadius: "0.5rem", marginBottom: "1rem" }} />
-                )}
+
                 <button onClick={() => setPaymentSuccess(null)} style={{
                   padding: "0.6rem 1.5rem", borderRadius: "0.5rem",
                   background: "#4ade80", border: "none", color: "#000",
@@ -812,21 +942,22 @@ Just type your question in plain language and I will assist you right away.`,
                 <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
                   Open any UPI app and scan the QR code below to complete your ₹60 payment.
                 </p>
-                {paymentQr.qr_image ? (
-                  <img src={paymentQr.qr_image} alt="UPI QR Code"
-                    style={{ width: "260px", height: "260px", objectFit: "contain",
-                      borderRadius: "0.75rem", background: "#fff", padding: "0.5rem",
-                      marginBottom: "1.25rem" }} />
-                ) : (
-                  <div style={{ color: "#facc15", marginBottom: "1rem" }}>
-                    QR image not available — please check the browser window.
-                  </div>
-                )}
+                <img src="/upi_qr.png" alt="UPI QR Code"
+                  style={{ width: "260px", height: "260px", objectFit: "contain",
+                    borderRadius: "0.75rem", background: "#fff", padding: "0.5rem",
+                    marginBottom: "1.25rem" }} />
                 <p style={{ color: "#888", fontSize: "0.78rem", marginBottom: "1.25rem" }}>
                   After scanning and completing the payment, click the button below.
                 </p>
+                {/* ── ADDED: Loading receipt spinner ── */}
+                {gettingReceipt && (
+                  <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "0.75rem", textAlign: "center" }}>
+                    <span style={{ display: "inline-block", width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", marginRight: "0.5rem", verticalAlign: "middle" }} />
+                    Loading your receipt...
+                  </p>
+                )}
                 <button
-                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); }}
+                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); setGettingReceipt(true); /* ADDED */ }}
                   style={{
                     width: "100%", padding: "0.75rem", borderRadius: "0.6rem",
                     background: "linear-gradient(135deg, #22c55e, #16a34a)",

@@ -2,13 +2,19 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 import os
 import json
+import sys
+
+# Fix Windows cp1252 UnicodeEncodeError caused by emoji in print()
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from extractor import extract_from_pdf
 from face_validator import verify_human_photograph_local
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from main import process_documents
-import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA")))
 try:
@@ -119,8 +125,8 @@ async def extract_document(file: UploadFile = File(...)):
         c_type = "application/pdf" if is_pdf else (file.content_type or "image/jpeg")
         supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
 
-    print(f"\n📄 [UploadAgent] File received: {file.filename} ({len(content_bytes)} bytes)")
-    print("🔍 Running extraction in-memory...\n")
+    print(f"\n[UploadAgent] File received: {file.filename} ({len(content_bytes)} bytes)")
+    print("[UploadAgent] Running extraction in-memory...")
 
     results = extract_from_pdf(content_bytes)
 
@@ -135,7 +141,7 @@ async def extract_document(file: UploadFile = File(...)):
             elif "driving" in cert_type or "dl" in cert_type or "address" in cert_type: EXTRACTED_CACHE["driving"] = r
             elif "caste" in cert_type: EXTRACTED_CACHE["caste"] = r
 
-    print("\n✅ --- EXTRACTED JSON (Upload Agent) ---\n")
+    print("\n[UploadAgent] --- EXTRACTED JSON ---")
     for r in results:
         print(r)
 
@@ -154,7 +160,7 @@ async def verify_photo_document(file: UploadFile = File(...)):
         c_type = file.content_type or "image/jpeg"
         supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
 
-    print(f"\n🔍 [UploadAgent] Checking image face validation: {file.filename}")
+    print(f"\n[UploadAgent] Checking image face validation: {file.filename}")
     
     is_human = verify_human_photograph_local(content_bytes)
     
@@ -176,7 +182,7 @@ async def process_all_documents(
     pre_driving: Optional[str] = Form(None),
     pre_caste: Optional[str] = Form(None),
 ):
-    print("\n🚀 [UploadAgent] Processing all documents in bulk (Supabase Storage)...")
+    print("\n[UploadAgent] Processing all documents in bulk (Supabase Storage)...")
     
     saved_paths = {"Aadhaar": None, "Ration Card": None, "Driving License": None, "Photo": None}
     supabase_urls = {}
@@ -224,9 +230,9 @@ async def process_all_documents(
                     s_url = upload_to_supabase_storage(content_bytes, file_obj.filename, content_type=c_type)
                     if s_url:
                         supabase_urls[key] = s_url
-                        print(f"✓ Uploaded {key} to Supabase Storage: {s_url}")
+                        print(f"[UploadAgent] Uploaded {key} to Supabase Storage: {s_url}")
                 except Exception as se:
-                    print(f"⚠️ Supabase Storage upload error for {key}: {se}")
+                    print(f"[UploadAgent] WARNING: Supabase Storage upload error for {key}: {se}")
 
             # Set saved_paths to Supabase URL (or fallback local path)
             final_path = s_url or local_save_path
@@ -246,7 +252,7 @@ async def process_all_documents(
                 if s_url:
                     supabase_urls[alias] = s_url
 
-            print(f"✓ Document {key} path resolved: {final_path}")
+            print(f"[UploadAgent] Document {key} path resolved: {final_path}")
     
     _save_if_exists(aadhaar, "Aadhaar")
     _save_if_exists(ration, "Ration Card")
@@ -280,10 +286,10 @@ async def process_all_documents(
     is_human = False
     photo_input = file_bytes_map.get("Photo") or supabase_urls.get("Photo")
     if photo_input:
-        print(f"\n🔍 [UploadAgent] Checking face in uploaded photo...")
+        print("\n[UploadAgent] Checking face in uploaded photo...")
         is_human = verify_human_photograph_local(photo_input)
 
-    print("\n✅ --- BULK EXTRACTION & VALIDATION RESULTS ---")
+    print("\n[UploadAgent] --- BULK EXTRACTION & VALIDATION RESULTS ---")
     print(f"Confidence Score: {result['confidence_score']}%")
     print(f"Photo Valid: {is_human}")
     
