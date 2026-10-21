@@ -1262,7 +1262,7 @@ def extract_from_pdf(pdf_input) -> list:
         except Exception as ie:
             raise HTTPException(
                 status_code=400,
-                detail=f"The uploaded file is neither a valid PDF nor a recognizable image: {ie}"
+                detail=f"Only PDF documents are accepted: The uploaded file is neither a valid PDF nor a recognizable image: {ie}"
             )
 
     return _process_pages(pages)

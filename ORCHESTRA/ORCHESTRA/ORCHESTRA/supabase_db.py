@@ -607,6 +607,34 @@ def fetch_user_profile(phone_number: str) -> dict:
         if t3 and "supabase_urls" not in profile_result:
             profile_result["supabase_urls"] = t3
 
+    # Map any missing canonical documents from profile's supabase_urls
+    doc_id_map = {
+        "aadhaar": "aadharCard",
+        "ration": "rationCard",
+        "driving": "drivingLicense",
+        "dl": "drivingLicense",
+        "photo": "photo",
+    }
+    s_urls = profile_result.get("supabase_urls", {})
+    if isinstance(s_urls, dict):
+        for raw_k, u in s_urls.items():
+            if not u:
+                continue
+            k_lower = str(raw_k).lower()
+            canon_id = None
+            for match_k, cid in doc_id_map.items():
+                if match_k in k_lower:
+                    canon_id = cid
+                    break
+            if canon_id and canon_id not in saved_docs:
+                saved_docs[canon_id] = {
+                    "doc_id": canon_id,
+                    "filename": f"{canon_id}.pdf" if canon_id != "photo" else "photo.jpg",
+                    "supabase_url": u,
+                    "extracted_data": [],
+                    "updated_at": time.time()
+                }
+
     has_saved = bool(profile_result or saved_docs)
     return {
         "phone_number": phone_clean,

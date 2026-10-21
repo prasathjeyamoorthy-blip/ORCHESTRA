@@ -12,6 +12,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: HEADLESS
+        value: "true"
       - key: OPEN_ROUTER_API_KEY
         sync: false
       - key: QDRANT_URL

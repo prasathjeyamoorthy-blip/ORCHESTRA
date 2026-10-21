@@ -131,7 +131,7 @@ export default function PaymentModal({ isOpen, paymentUrl, onClose }) {
           justifyContent: "space-between"
         }}>
           <span style={{ fontSize: "0.75rem", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "0.375rem" }}>
-            <LuCircleCheck size={14} color="#10b981" /> Application filled ✓ Complete payment above
+            <LuCircleCheck size={14} color="#10b981" /> Application filled · Complete payment above
           </span>
           <button
             onClick={onClose}

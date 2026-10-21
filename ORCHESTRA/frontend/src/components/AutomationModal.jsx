@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { LuTriangleAlert } from "react-icons/lu";
+import { LuTriangleAlert, LuRotateCw } from "react-icons/lu";
 
 function AutomationModalContent({ eventData, onSubmit, onAction }) {
   const [inputValue, setInputValue] = useState("");
-  const [captchaSrc, setCaptchaSrc] = useState(eventData?.image || "");
+  const [fetchedCaptchaSrc, setFetchedCaptchaSrc] = useState("");
+  const captchaSrc = eventData?.image || fetchedCaptchaSrc;
   const [multiInputValues, setMultiInputValues] = useState(() => {
     if (eventData?.type === 'REQUEST_MISSING_DETAILS' && eventData.missing_fields) {
       const init = {};
@@ -16,14 +17,11 @@ function AutomationModalContent({ eventData, onSubmit, onAction }) {
   const [otpSending, setOtpSending] = useState(false);
 
   useEffect(() => {
-    if (eventData?.image) {
-      setCaptchaSrc(eventData.image);
-      setRefreshing(false);
-    } else if (eventData?.type === 'REQUEST_CAPTCHA') {
+    if (!eventData?.image && eventData?.type === 'REQUEST_CAPTCHA') {
       const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
       fetch(`${apiBase}/automation/captcha-b64?t=${Date.now()}`)
         .then(r => r.json())
-        .then(d => { if (d.image) setCaptchaSrc(d.image); })
+        .then(d => { if (d.image) setFetchedCaptchaSrc(d.image); })
         .catch(err => console.error("[Captcha] Failed to load:", err));
     }
   }, [eventData?.type, eventData?.image]);
@@ -93,7 +91,7 @@ function AutomationModalContent({ eventData, onSubmit, onAction }) {
               disabled={refreshing}
               style={{ width: "100%", padding: "0.5rem", borderRadius: "var(--radius-md)", border: "1.5px solid var(--border)", background: "var(--surface-2)", color: "var(--text-2)", fontSize: "0.8rem", cursor: refreshing ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem" }}
             >
-              <span style={{ display: "inline-block", animation: refreshing ? "spin 0.8s linear infinite" : "none" }}>↻</span>
+              <LuRotateCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
               {refreshing ? "Loading new captcha…" : "Refresh Captcha"}
             </button>
           </div>
@@ -138,7 +136,7 @@ function AutomationModalContent({ eventData, onSubmit, onAction }) {
                   transition: "background 0.2s, color 0.2s",
                 }}
               >
-                <span style={{ display: "inline-block", animation: otpSending ? "spin 0.8s linear infinite" : "none", fontSize: "1rem" }}>⟳</span>
+                <LuRotateCw size={13} style={{ animation: otpSending ? "spin 0.8s linear infinite" : "none" }} />
                 {otpSending ? "Sending OTP…" : "Generate OTP"}
               </button>
             )}

@@ -10,6 +10,7 @@ services:
       - "8001:8001"
     environment:
       - PORT=8001
+      - HEADLESS=${HEADLESS:-true}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY}
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}

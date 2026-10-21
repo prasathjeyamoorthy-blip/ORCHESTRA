@@ -1,9 +1,40 @@
 import os
+import sys
 import json
 import time
 import getpass
 import argparse
 from playwright.sync_api import sync_playwright
+
+
+def should_run_headless() -> bool:
+    """Decide whether browser automation should run headless or headed."""
+    headless_env = os.getenv("HEADLESS")
+    if headless_env is not None and headless_env.strip() != "":
+        return headless_env.strip().lower() in ("true", "1", "yes")
+
+    is_deployed = bool(
+        os.getenv("RENDER")
+        or os.getenv("IS_PULL_REQUEST")
+        or os.getenv("AWS_EXECUTION_ENV")
+        or os.getenv("ECS_CONTAINER_METADATA_URI")
+        or os.getenv("ENVIRONMENT", "").lower() in ("production", "prod", "staging", "deployed")
+        or os.getenv("NODE_ENV", "").lower() == "production"
+        or os.path.exists("/.dockerenv")
+    )
+    if is_deployed:
+        return True
+
+    has_display = bool(
+        os.name == "nt"
+        or getattr(sys, "platform", "") == "darwin"
+        or os.getenv("DISPLAY")
+        or os.getenv("WAYLAND_DISPLAY")
+    )
+    if not has_display:
+        return True
+
+    return False
 
 class TNeGACertificateDownloader:
     def __init__(self):
@@ -20,8 +51,8 @@ class TNeGACertificateDownloader:
         transaction_id = config.get("transaction_id")
         
         playwright = sync_playwright().start()
-        is_headless = os.getenv("HEADLESS", "").lower() in ("true", "1")
-        launch_kwargs = {"headless": is_headless}
+        is_headless = should_run_headless()
+        launch_kwargs = {"headless": is_headless, "slow_mo": 50 if not is_headless else 0}
         for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
             if os.path.exists(chrome_path):
                 launch_kwargs["executable_path"] = chrome_path

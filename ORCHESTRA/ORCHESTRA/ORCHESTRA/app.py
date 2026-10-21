@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Optional
@@ -532,7 +532,7 @@ async def submit_application(payload: dict):
 
 @app.post("/delete-saved-application")
 async def delete_saved_application(payload: dict = None):
-    """Developer endpoint: Run headless automation to delete pending Saved Applications on portal."""
+    """Developer endpoint: Run automation to delete pending Saved Applications on portal."""
     payload = payload or {}
     creds = payload.get("credentials")
     if not creds:
@@ -550,7 +550,7 @@ async def delete_saved_application(payload: dict = None):
 
     cleaner_payload = {"credentials": creds}
     _threading.Thread(target=run_delete_saved_app_agent, args=(cleaner_payload,), daemon=True).start()
-    return {"status": "success", "message": "Headless cleaner task started"}
+    return {"status": "success", "message": "Cleaner task started"}
 
 
 @app.get("/latest-payload")
@@ -761,6 +761,9 @@ def download_declaration():
     """Download self declaration PDF form."""
     from fastapi.responses import FileResponse
     declaration_path = os.path.join(playwright_dir, "Self_Declaration_Form_To_Sign.pdf")
+    if not os.path.exists(declaration_path):
+        declaration_path = os.path.join(playwright_dir, "Self_Declaration_Form_For_User.pdf")
+
     if os.path.exists(declaration_path):
         return FileResponse(
             declaration_path,
@@ -768,6 +771,51 @@ def download_declaration():
             filename="Self_Declaration_Form.pdf"
         )
     return JSONResponse(status_code=404, content={"error": "Declaration form not found"})
+
+
+@app.post("/upload-signed-declaration")
+async def upload_signed_declaration(file: UploadFile = File(...)):
+    """Save the signed self-declaration form locally and optionally upload to Supabase Storage."""
+    try:
+        content_bytes = await file.read()
+        
+        # Save locally in playwright directory and uploaded_documents
+        uploads_dir = os.path.join(playwright_dir, "uploaded_documents")
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Save as specific name and canonical Signed_Self_Declaration.pdf
+        clean_name = f"Signed_{file.filename}"
+        local_saved_path = os.path.join(uploads_dir, clean_name)
+        with open(local_saved_path, "wb") as f_out:
+            f_out.write(content_bytes)
+
+        canon_path = os.path.join(uploads_dir, "Signed_Self_Declaration.pdf")
+        with open(canon_path, "wb") as f_out:
+            f_out.write(content_bytes)
+
+        # Also copy to root of playwright_dir for maximum discovery
+        with open(os.path.join(playwright_dir, "Signed_Self_Declaration.pdf"), "wb") as f_out:
+            f_out.write(content_bytes)
+
+        s_url = ""
+        try:
+            from supabase_db import upload_to_supabase_storage
+            c_type = getattr(file, "content_type", "application/pdf") or "application/pdf"
+            s_url = upload_to_supabase_storage(content_bytes, clean_name, content_type=c_type)
+        except Exception as se:
+            print(f"[Supabase Storage] Notice: upload skipped ({se})")
+
+        print(f"[INFO] Signed self-declaration saved locally: {local_saved_path}, Supabase: {s_url}")
+
+        return {
+            "status": "success",
+            "message": "Signed declaration saved successfully",
+            "file_path": local_saved_path,
+            "supabase_url": s_url
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to save signed declaration: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
 @app.post("/clear-cache")

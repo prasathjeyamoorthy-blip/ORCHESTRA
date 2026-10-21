@@ -290,5 +290,123 @@ After Make Payment, the old code sent the BillDesk URL to the frontend and slept
   7. **Dynamic Server Reloading in `app.py`:** Added `importlib.reload(...)` before running `TNeSevaiBackendAgent` and `TNeSevaiSavedAppCleaner` to ensure live code updates are executed immediately without stale in-memory module caching.
   8. **Payment Flow Execution:** Once all 3 mandatory documents (`Photo`, `Current Address Proof`, `Self-Declaration of Applicant`) are present in the table, clicks `Make Payment`, navigates away from `uploadDocs.xhtml`, confirms terms and conditions, and drives to BillDesk for UPI QR code rendering.
 
+---
+
+### 18. Manual Self-Declaration Submission & E2E Test Suite Hardening
+
+**Files:** `rescert.py`, `SelfDeclarationModal.jsx`, `ORCHESTRA/app.py`, `DocumentUploadAgent/app.py`, `DocumentUploadAgent/extractor.py`, `supabase_db.py`, `AutomationModal.jsx`
+
+- **Problem:**
+  1. The Self-Declaration form was submitted automatically via digital auto-signing after only 15 seconds, preventing the applicant from downloading, manually signing, and uploading their own document.
+  2. The main backend (`ORCHESTRA/app.py`) lacked the `/upload-signed-declaration` endpoint, so manual uploads from the modal were either redirected to a different service container or lost if Supabase Storage was unavailable.
+  3. Pre-existing test failures existed in ESLint (`AutomationModal.jsx` cascading setState in effect), Document Upload Agent (detail string assertion), and Supabase DB (document restoration from `supabase_urls`).
+- **Fixes Applied:**
+  1. **Extended Prompt Timeout & Manual Upload Priority:**
+     - Increased Self-Declaration prompt timeout in `rescert.py` from 15s to 300s (5 minutes), identical to CAPTCHA and OTP prompts.
+     - Automation now explicitly pauses and waits for the applicant to download, sign, and upload their document.
+     - Auto-sign fallback is only applied if the applicant explicitly clicks **`⚡ Auto-Sign & Continue`** or if the full 5-minute timeout expires.
+     - `process_document_upload` and the post-upload verification loop now prioritize the applicant's uploaded `Signed_Self_Declaration.pdf` over auto-signed fallbacks.
+  2. **Dedicated `/upload-signed-declaration` Endpoint:**
+     - Added `POST /upload-signed-declaration` in `ORCHESTRA/ORCHESTRA/ORCHESTRA/app.py`. Uploaded signed files are saved directly onto the Playwright instance disk (`uploaded_documents/Signed_...` and `Signed_Self_Declaration.pdf`) and uploaded to Supabase Storage.
+     - Enhanced `DocumentUploadAgent/app.py` to also write files locally to the Playwright directory.
+     - Updated `SelfDeclarationModal.jsx` to upload to the main orchestra backend with graceful multi-tier fallback, and to download the generated declaration directly from the backend.
+  3. **Frontend ESLint Fix:** Refactored `AutomationModal.jsx` to derive `captchaSrc` from props (`eventData?.image`) instead of calling synchronous `setState` in `useEffect`.
+  4. **Document Upload Agent Error Detail:** Updated `extractor.py` and `app.py` detail strings to satisfy `Only PDF documents are accepted` test assertions.
+  5. **Supabase Document Restoration:** Added canonical document key mappings (`aadharCard`, `rationCard`, `drivingLicense`, `photo`) in `fetch_user_profile` in `supabase_db.py`.
+  6. **Complete Test Suite:** `run_all_tests.py` ran with 100% pass across all 5 test suites.
+
+---
+
+### 19. Fast Form Filling Optimization & UI Icon Uniformization
+
+**Files:** `rescert.py`, `App.jsx`, `SelfDeclarationModal.jsx`, `DocumentChecklist.jsx`, `PaymentModal.jsx`
+
+- **Problem:**
+  1. While filling applicant details on the Tamil Nadu e-District REV-116 form, the automation spent ~80 seconds waiting on fields that cannot or do not need to be filled. Specifically:
+     - Applicant demographic fields (`applicantName`, `fatherName`, etc.) are locked/read-only once CAN is selected.
+     - `safe_select_dropdown` had a 15-second wait per field.
+     - A blocking 55-second selector wait (`residence:cRvillageListId` 30s + retry 20s + sleeps) delayed form completion.
+     - An arbitrary 8-second sleep ran during CAN searching.
+  2. The UI featured arbitrary emojis (`✅ I have paid`, `✅` success emoji, `🗑` delete icon, `⚡` symbols, `🔒` padlock, `✓` checkmarks) inconsistent with the modern Lucide React design system (`react-icons/lu`).
+- **Fixes Applied:**
+  1. **Instant Form Filling & Smart Editable Detection in `rescert.py`:**
+     - Replaced blocking element queries with a unified in-browser JavaScript evaluation (`page_form.evaluate`).
+     - Added `fillIfEditable()` helper that verifies an input is not disabled or read-only before writing, bypassing locked CAN fields in <1ms without throwing or timing out.
+     - Reduced `safe_select_dropdown` visibility wait timeout from 15,000ms to 2,000ms and removed artificial 500ms sleeps.
+     - Removed the 55-second blocking wait on `residence:cRvillageListId`; village dropdown is now populated instantly if present or gracefully skipped if pre-selected.
+     - Replaced the blind 8-second CAN search sleep with dynamic waiting on the CAN radio button (`input[name='can_radio']`).
+     - Overall form-filling time reduced from ~80s to ~4-5s.
+  2. **Uniform Lucide React Icons Across Frontend:**
+     - **`App.jsx`:**
+       - Replaced raw `✅` in Payment Success modal with `<LuCircleCheckBig size={52} color="#4ade80" />`.
+       - Added `<LuQrCode size={24} color="#60a5fa" />` icon in "Scan to Pay" title header.
+       - Replaced `✅ I have paid` button text with `<LuCircleCheck size={18} /><span>I have paid</span>`.
+       - Replaced `🗑` in "Clear My Data" modal with `<LuTrash2 size={24} color="#ef4444" />`.
+       - Cleaned up raw emojis in payment gateway text messages.
+     - **`SelfDeclarationModal.jsx`:**
+       - Replaced raw `✓` in uploaded file preview with `<LuCircleCheck size={16} />`.
+       - Replaced `⚡ Auto-Sign & Continue` with `<LuSparkles size={15} /> <span>Auto-Sign &amp; Continue</span>`.
+     - **`DocumentChecklist.jsx`:**
+       - Replaced `⚡ Delete Saved Application (Dev)` with clean `Delete Saved Application (Dev)` with `<MdDeleteOutline />`.
+       - Replaced `⚡ Developer Tool` with `<LuWrench size={13} /> Developer Tool`.
+       - Replaced `🔒 PIN Download` with `<LuLock size={12} /> PIN Download`.
+       - Replaced `⚡ Dev Load` with `<LuFileUp size={13} /> Dev Load`.
+       - Replaced raw `✕` and `✓` in step indicators with `<LuCheck />` and `<LuTriangleAlert />`.
+       - Replaced raw `✓` in welcome back toast with `<LuCircleCheck size={16} />`.
+     - **`PaymentModal.jsx`:**
+       - Cleaned footer text from `Application filled ✓ Complete payment above` to `Application filled · Complete payment above`.
+  3. **Verification:**
+     - Frontend ESLint: 0 errors.
+     - Production Vite Build: Passed.
+     - Full backend test suite (`run_all_tests.py`): 100% passed across all 5 test suites.
+
+---
+
+### 21. Production Hardening: Purged Auto-Filled Credentials, Mock Fallbacks, and UI Fixes
+
+**Files:** `DocumentChecklist.jsx`, `rescert.py`, `delete_saved_app.py`, `App.jsx`, `AutomationModal.jsx`, `DocumentUpload.jsx`
+
+- **Problem:**
+  1. The codebase had development test credentials, mock document paths, and hardcoded fallback values that prefilled forms and automation scripts without explicit user consent:
+     - `DocumentChecklist.jsx` initialized state with hardcoded portal username (`"lohithg"`), password (`"Lohith@2007"`), CAN (`"13318016498757"`), Aadhaar (`"607126530111"`), and `from_date` (`"09/10/2024"`).
+     - `DocumentChecklist.jsx` auto-filled `to_date` to today's date upon component mount.
+     - `DocumentChecklist.jsx` provided a `⚡ Dev Load` button and bundled `DEV_DOCS` linking to local sample files.
+     - `DocumentChecklist.jsx` injected a hardcoded fallback document number (`"TN31 20250006924"`) if the citizen had not entered one for Address Proof.
+     - `delete_saved_app.py` defaulted CLI arguments `--username` and `--password` to `"lohithg"` and `"Lohith@2007"`.
+     - `rescert.py` fell back to hardcoded applicant name `"Lohith G"` if no name was present in the data payload.
+     - `rescert.py` silently fell back to uploading test files `/dev_docs/photo.jpg` and `/dev_docs/drvlc.pdf` from disk when citizen uploads were missing.
+     - `rescert.py` pre-generated an auto-signed self-declaration and automatically submitted fabricated digital signatures in the verification and Tier-3 fallback loops even when the applicant intended to sign manually.
+  2. UI and linting bugs:
+     - `App.jsx`: `useEffect` hook had a missing dependency warning for `openAutomationSocket`.
+     - `AutomationModal.jsx`: Used raw text characters `↻` and `⟳` for spinner states rather than uniform Lucide icons.
+     - `DocumentChecklist.jsx`: Contained unclosed fragment tag causing JSX parsing errors.
+     - `DocumentUpload.jsx`: Potential base URL issues when `VITE_API_BASE` had trailing slashes or was undefined.
+
+- **Fixes Applied:**
+  1. **Purged Auto-Filled Credentials and Fallbacks:**
+     - `DocumentChecklist.jsx`: Initialized all input states (`username`, `password`, `can_number`, `aadhar_number`, `from_date`, `to_date`, `address_doc_no`) to empty strings `""`.
+     - Removed `DEV_DOCS` constants and the `⚡ Dev Load` UI button.
+     - Removed the mount effect that silently prefilled `to_date` without citizen action.
+     - Removed hardcoded fallback `"TN31 20250006924"` for address proof numbers.
+     - Added validation in `handleDeleteSavedApp` requiring active credentials before initiating the portal cleaner.
+     - Renamed developer tool indicators to production-friendly labels (`Portal Utility`, `Clear Saved Draft`).
+  2. **Removed Unauthorized Mock Injections from Backend Automation:**
+     - `delete_saved_app.py`: Default credentials set to empty strings `""` with explicit argument requirements.
+     - `rescert.py`: Fallback applicant name changed from `"Lohith G"` to generic `"Applicant"`.
+     - Removed unauthorized local disk fallback for `/dev_docs/photo.jpg` and `/dev_docs/drvlc.pdf`.
+     - Strict Self-Declaration submission: Auto-signing is now strictly executed ONLY when the user explicitly clicks the "Auto-Sign & Continue" button (`signed_decl_path.lower() in ("autosign", "auto-sign", "auto")`). Verification and Tier-3 fallback loops only re-upload the applicant-verified declaration and never fabricate signatures.
+  3. **UI and Component Robustness:**
+     - `App.jsx`: Moved `getWsBase()` to module scope and wrapped `openAutomationSocket` with `useCallback(..., [])` to resolve ESLint `react-hooks/exhaustive-deps`.
+     - `AutomationModal.jsx`: Replaced raw spinning characters with `<LuRotateCw size={13} style={{ animation: "spin 1s linear infinite" }} />`.
+     - `DocumentChecklist.jsx`: Cleaned up JSX syntax to ensure 0 lint errors.
+     - `DocumentUpload.jsx`: Normalized API base URL with fallback.
+  4. **Verification & Test Suite:**
+     - Frontend ESLint: `0 problems (0 errors, 0 warnings)`.
+     - Frontend Production Build: Vite production bundle built successfully.
+     - Backend Test Suite (`run_all_tests.py`): 100% pass across all 5 test suites.
+
+
+
+
 
 

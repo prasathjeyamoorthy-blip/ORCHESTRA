@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import time
 import json
@@ -6,6 +7,47 @@ import asyncio
 import urllib.request
 from datetime import datetime
 from playwright.sync_api import sync_playwright  # type: ignore
+
+
+def is_deployed_environment() -> bool:
+    """Check if code is running in a deployed/cloud environment (Render, Docker, AWS, etc.)."""
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("IS_PULL_REQUEST")
+        or os.getenv("AWS_EXECUTION_ENV")
+        or os.getenv("ECS_CONTAINER_METADATA_URI")
+        or os.getenv("ENVIRONMENT", "").lower() in ("production", "prod", "staging", "deployed")
+        or os.getenv("NODE_ENV", "").lower() == "production"
+        or os.path.exists("/.dockerenv")
+    )
+
+
+def has_gui_display() -> bool:
+    """Check if a graphical display environment (X11, Wayland, Windows, macOS) is available."""
+    if os.name == "nt" or getattr(sys, "platform", "") == "darwin":
+        return True
+    return bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
+
+
+def should_run_headless() -> bool:
+    """
+    Decide whether browser automation should run headless or headed:
+    1. Explicit HEADLESS environment variable takes precedence if set ('true'/'1' or 'false'/'0').
+    2. Deployed environments (Render, Docker, AWS, production) run headless (True).
+    3. Headless servers with no graphical display available run headless (True).
+    4. Local development with display available runs headed (False) with visible UI.
+    """
+    headless_env = os.getenv("HEADLESS")
+    if headless_env is not None and headless_env.strip() != "":
+        return headless_env.strip().lower() in ("true", "1", "yes")
+
+    if is_deployed_environment():
+        return True
+
+    if not has_gui_display():
+        return True
+
+    return False
 
 
 class TNeSevaiBackendAgent:
@@ -245,7 +287,7 @@ class TNeSevaiBackendAgent:
             self.applicant.get("name") or
             self.data.get("applicant_details", {}).get("applicant_name") or
             self.data.get("applicant_details", {}).get("name") or
-            "Lohith G"
+            "Applicant"
         )
 
         candidates = [
@@ -326,11 +368,11 @@ class TNeSevaiBackendAgent:
         if not value: return False
         try:
             dropdown = page.locator(selector)
-            dropdown.wait_for(state="visible", timeout=15000)
-            time.sleep(0.5)
+            dropdown.wait_for(state="visible", timeout=8000)
             
             try:
-                dropdown.select_option(label=value)
+                dropdown.select_option(label=value, timeout=3000)
+                time.sleep(0.5)
                 self.log(f"✓ Selected {field_name}: {value}")
                 return True
             except: pass
@@ -340,13 +382,15 @@ class TNeSevaiBackendAgent:
                 for option in options:
                     if option.strip().upper() == "SELECT": continue
                     if value.lower() in option.lower() or option.lower() in value.lower():
-                        dropdown.select_option(label=option)
+                        dropdown.select_option(label=option, timeout=3000)
+                        time.sleep(0.5)
                         self.log(f"✓ Selected {field_name}: {option} (matched with {value})")
                         return True
             except: pass
             
             try:
-                dropdown.select_option(value=value)
+                dropdown.select_option(value=value, timeout=3000)
+                time.sleep(0.5)
                 self.log(f"✓ Selected {field_name} by value: {value}")
                 return True
             except: pass
@@ -358,15 +402,16 @@ class TNeSevaiBackendAgent:
                     if option_text.upper() != "SELECT" and option_text:
                         option_value = option.get_attribute('value')
                         if option_value:
-                            dropdown.select_option(value=option_value)
+                            dropdown.select_option(value=option_value, timeout=3000)
+                            time.sleep(0.5)
                             self.log(f"✓ Selected {field_name}: {option_text} (first available option)")
                             return True
             except: pass
             
-            self.log(f"✗ WARNING: Could not select {field_name} with value '{value}'")
+            self.log(f"✗ Note: Could not select {field_name} with value '{value}'")
             return False
         except Exception as e:
-            self.log(f"✗ ERROR selecting {field_name}: {str(e)}")
+            self.log(f"✗ Note selecting {field_name}: {str(e)}")
             return False
 
     PORTAL_URL = "https://www.tnesevai.tn.gov.in/"
@@ -414,8 +459,9 @@ class TNeSevaiBackendAgent:
             self._check_connectivity()
 
             with sync_playwright() as playwright:
-                self.log("Launching Browser...")
-                is_headless = os.getenv("HEADLESS", "true").lower() in ("true", "1") or not bool(os.getenv("DISPLAY"))
+                is_headless = should_run_headless()
+                mode_label = "headless" if is_headless else "headed (visible UI)"
+                self.log(f"Launching Browser ({mode_label})...")
                 launch_kwargs = {
                     "headless": is_headless,
                     "slow_mo": 200 if not is_headless else 0,
@@ -428,7 +474,7 @@ class TNeSevaiBackendAgent:
                 try:
                     browser = playwright.chromium.launch(**launch_kwargs)
                 except Exception as launch_err:
-                    self.log(f"Headful browser launch failed ({launch_err}). Falling back to headless mode...")
+                    self.log(f"Headed browser launch failed ({launch_err}). Falling back to headless mode...")
                     launch_kwargs["headless"] = True
                     launch_kwargs["slow_mo"] = 0
                     browser = playwright.chromium.launch(**launch_kwargs)
@@ -512,20 +558,51 @@ class TNeSevaiBackendAgent:
                 self.log(f"Searching CAN: {self.applicant.get('can_number')}...")
                 page_form.locator('[id="statusform:aadhar"]').fill(self.applicant.get("can_number")) 
                 page_form.get_by_role("button", name="Search").click()
-                time.sleep(8) 
                 
-                try: page_form.get_by_label("").check() 
-                except: pass 
+                # Wait for search results table and radio button
+                try:
+                    page_form.wait_for_selector('input[type="radio"], [id*="citRadio"], tr.rich-table-row', timeout=12000)
+                    time.sleep(2)
+                except Exception:
+                    time.sleep(4)
+                
+                # Check radio button with multiple fallback selectors
+                radio_checked = False
+                for r_sel in [
+                    'input[type="radio"]',
+                    'input[name*="citRadio"]',
+                    '[id*="citRadio"]',
+                    'tr.rich-table-row input[type="radio"]',
+                    'input[name="can_radio"]'
+                ]:
+                    try:
+                        r_loc = page_form.locator(r_sel)
+                        if r_loc.count() > 0:
+                            r_loc.first.check(force=True)
+                            self.log(f"✓ Checked CAN radio button via {r_sel}")
+                            radio_checked = True
+                            break
+                    except Exception:
+                        pass
+
+                if not radio_checked:
+                    try:
+                        page_form.get_by_label("").first.check(force=True)
+                        self.log("✓ Checked CAN radio button via empty label fallback")
+                    except Exception:
+                        pass
+
+                time.sleep(2)
                 
                 self.log("Typing Aadhaar Number securely...")
                 aadhar_input = page_form.locator('[id="statusform:citAadharNo"]')
                 aadhar_input.click()
                 
-                try: aadhar_input.press_sequentially(self.applicant.get("aadhar_number"), delay=150)
-                except AttributeError: aadhar_input.type(self.applicant.get("aadhar_number"), delay=150)
+                try: aadhar_input.press_sequentially(self.applicant.get("aadhar_number"), delay=50)
+                except AttributeError: aadhar_input.type(self.applicant.get("aadhar_number"), delay=50)
                 
                 aadhar_input.press("Tab")
-                time.sleep(5)
+                time.sleep(2)
                 
                 # --- DOB Injection ---
                 self.log("Injecting Date of Birth...")
@@ -690,65 +767,30 @@ class TNeSevaiBackendAgent:
                 
                 self.log("OTP Confirmed. Proceeding to Form...")
                 page_form.get_by_role("button", name="Proceed").click()
-                # Wait for both network and DOM to settle — portal uses AJAX to populate dropdowns
+                
+                # Wait for navigation to residence certificate form page
                 try:
-                    page_form.wait_for_load_state("networkidle", timeout=30000)
+                    page_form.wait_for_url(lambda u: "residence" in u.lower() or "rev" in u.lower(), timeout=25000)
                 except Exception:
                     pass
-                time.sleep(6)  # extra buffer for AJAX-populated dropdowns
+                
+                try:
+                    page_form.wait_for_load_state("domcontentloaded", timeout=20000)
+                    page_form.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+                
+                # Ensure residence form container is loaded
+                try:
+                    page_form.wait_for_selector('form[id*="residence"], [id*="residence"], [id*="buildForList"]', timeout=20000)
+                    self.log("✓ Residence certificate form loaded.")
+                except Exception:
+                    self.log("Note: Proceeding to form fields...")
+                
+                time.sleep(3)
 
                 # --- Fill Form Details ---
                 self.log("Filling Form Details...")
-
-                # Wait for form to fully load — the village dropdown is dynamically populated
-                # so we wait for it with a generous timeout, falling back gracefully if absent
-                try:
-                    page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=30000)
-                except Exception:
-                    # Dropdown may not appear immediately — wait an extra few seconds and continue
-                    self.log("WARNING: Village dropdown did not appear within 30s — retrying after additional wait...")
-                    time.sleep(5)
-                    try:
-                        page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=20000)
-                    except Exception:
-                        self.log("WARNING: Village dropdown still not visible — proceeding without it.")
-                
-                def is_field_empty(locator_str):
-                    try:
-                        element = page_form.locator(locator_str)
-                        if element.count() == 0: return True
-                        value = element.input_value() if element.count() > 0 else ""
-                        return not value or value.strip() == ""
-                    except: return True
-
-                def is_dropdown_empty(locator_str):
-                    try:
-                        element = page_form.locator(locator_str)
-                        if element.count() == 0: return True
-                        value = element.input_value() if element.count() > 0 else ""
-                        return not value or value.strip() == "" or value.strip().upper() == "SELECT"
-                    except: return True
-
-                if self.applicant.get("name") and is_field_empty('[id="residence:applicantName"]'):
-                    try: page_form.locator('[id="residence:applicantName"]').fill(self.applicant.get("name"))
-                    except: pass
-                if self.applicant.get("father_name") and is_field_empty('[id="residence:fatherName"]'):
-                    try: page_form.locator('[id="residence:fatherName"]').fill(self.applicant.get("father_name"))
-                    except: pass
-
-                revenue_village_value = self.address.get("area") or self.address.get("village")
-                if is_dropdown_empty('[id="residence:cRvillageListId"]'):
-                    if revenue_village_value:
-                        success = self.safe_select_dropdown(page_form, '[id="residence:cRvillageListId"]', revenue_village_value, "Revenue Village")
-                        if not success:
-                            try:
-                                dropdown = page_form.locator('[id="residence:cRvillageListId"]')
-                                options = dropdown.locator('option').all()
-                                for option in options:
-                                    if option.text_content().strip().upper() != "SELECT":
-                                        dropdown.select_option(value=option.get_attribute('value'))
-                                        break
-                            except: pass
 
                 def is_valid_addr(val):
                     if not val: return False
@@ -761,88 +803,237 @@ class TNeSevaiBackendAgent:
                     if any(bad in v_s for bad in ["c/o", "s/o", "d/o", "w/o"]): return False
                     return True
 
-                bldg_val = self.address.get("building_no") or self.address.get("door_no")
-                street_val = self.address.get("street_name") or self.address.get("area")
+                applicant_name = (self.applicant.get("name") or "").replace("'", "\\'")
+                father_name = (self.applicant.get("father_name") or "").replace("'", "\\'")
+                ration_card_no = (self.applicant.get("ration_card_no") or "").replace("'", "\\'")
+                bldg_val = self.address.get("building_no") or self.address.get("door_no") or ""
+                street_val = self.address.get("street_name") or self.address.get("area") or ""
+                if not is_valid_addr(bldg_val): bldg_val = ""
+                if not is_valid_addr(street_val): street_val = ""
+                st_to_fill = street_val or bldg_val
+                pincode_val = self.address.get("pincode") or ""
+                revenue_village_value = (self.address.get("area") or self.address.get("village") or "").replace("'", "\\'")
+                fmt_from = self.format_date_for_injection(self.address.get("from_date"), "%d/%m/%Y") if self.address.get("from_date") else ""
+                fmt_to = self.format_date_for_injection(self.address.get("to_date"), "%d/%m/%Y") if self.address.get("to_date") else ""
 
-                if bldg_val and is_valid_addr(bldg_val) and is_field_empty('[id="residence:buildForList"]'):
-                    page_form.locator('[id="residence:buildForList"]').fill(str(bldg_val))
-                elif not bldg_val and street_val and is_valid_addr(street_val) and is_field_empty('[id="residence:buildForList"]'):
-                    page_form.locator('[id="residence:buildForList"]').fill(str(street_val))
+                # Wait up to 6 seconds for village dropdown to initialize if present
+                try:
+                    page_form.wait_for_selector('[id="residence:cRvillageListId"]', timeout=6000)
+                except Exception:
+                    pass
 
-                # Street Name field is MANDATORY on TNeSevai portal (marked with red asterisk)
-                st_to_fill = street_val if (street_val and is_valid_addr(street_val)) else (bldg_val if (bldg_val and is_valid_addr(bldg_val)) else "")
-                if st_to_fill and is_field_empty('[id="residence:streetForList"]'):
-                    page_form.locator('[id="residence:streetForList"]').fill(str(st_to_fill))
+                # Fast, non-blocking in-browser execution: skips CAN-locked readonly fields and fills editable address fields
+                page_form.evaluate(f"""
+                    (() => {{
+                        function fillIfEditable(id, val) {{
+                            if (!val) return;
+                            const el = document.getElementById(id);
+                            if (el && !el.disabled && !el.readOnly && !el.hasAttribute('readonly')) {{
+                                if (!el.value || el.value.trim() === '') {{
+                                    el.value = val;
+                                    ['input', 'change', 'blur'].forEach(evt => el.dispatchEvent(new Event(evt, {{ bubbles: true }})));
+                                }}
+                            }}
+                        }}
 
-                if self.address.get("pincode") and is_field_empty('[id="residence:pinForList"]'):
-                    page_form.locator('[id="residence:pinForList"]').fill(self.address.get("pincode"))
+                        // Fill demographic fields if editable (unlocked)
+                        fillIfEditable('residence:applicantName', '{applicant_name}');
+                        fillIfEditable('residence:fatherName', '{father_name}');
+                        fillIfEditable('residence:rationCardId', '{ration_card_no}');
 
-                if self.address.get("from_date") or self.address.get("to_date"):
-                    fmt_from = self.format_date_for_injection(self.address.get("from_date"), "%d/%m/%Y") if self.address.get("from_date") else ""
-                    fmt_to = self.format_date_for_injection(self.address.get("to_date"), "%d/%m/%Y") if self.address.get("to_date") else ""
-                    self.log(f"Injecting Address Dates: From='{fmt_from}', To='{fmt_to}'...")
+                        // Fill address fields if editable and empty
+                        fillIfEditable('residence:buildForList', '{bldg_val}');
+                        fillIfEditable('residence:streetForList', '{st_to_fill}');
+                        fillIfEditable('residence:pinForList', '{pincode_val}');
 
-                    page_form.evaluate(f"""
-                        (() => {{
-                            function setAddressDate(id, dateStr) {{
-                                if (!dateStr) return;
-                                const el = document.getElementById(id);
-                                if (!el) return;
-                                el.removeAttribute('readonly');
-                                el.removeAttribute('disabled');
-                                el.value = dateStr;
-                                el.focus();
-                                ['input', 'change', 'keydown', 'keyup', 'blur'].forEach(evt => {{
-                                    el.dispatchEvent(new Event(evt, {{ bubbles: true }}));
-                                }});
-                                try {{
-                                    const parts = dateStr.split('/');
-                                    if (parts.length === 3) {{
-                                        const d = parseInt(parts[0], 10);
-                                        const m = parseInt(parts[1], 10) - 1;
-                                        const y = parseInt(parts[2], 10);
-                                        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {{
-                                            const jsDate = new Date(y, m, d);
-                                            const compId = id.replace('InputDate', '');
-                                            if (window.RichFaces && RichFaces.$) {{
-                                                const comp = RichFaces.$(compId) || RichFaces.$(id);
-                                                if (comp && typeof comp.setValue === 'function') {{
-                                                    comp.setValue(jsDate);
-                                                }}
-                                                if (comp && typeof comp.collapse === 'function') {{
-                                                    comp.collapse();
-                                                }}
+                        // Fast Revenue Village selection if dropdown is present and on "SELECT"
+                        const vSel = document.getElementById('residence:cRvillageListId');
+                        if (vSel && !vSel.disabled && vSel.options && vSel.options.length > 1) {{
+                            const curVal = (vSel.value || '').trim();
+                            const curText = (vSel.options[vSel.selectedIndex]?.text || '').trim().toUpperCase();
+                            if (!curVal || curText === 'SELECT' || curVal === '0') {{
+                                const target = '{revenue_village_value}'.toLowerCase();
+                                let matched = false;
+                                if (target) {{
+                                    for (let i = 0; i < vSel.options.length; i++) {{
+                                        const optText = (vSel.options[i].text || '').toLowerCase();
+                                        if (optText.toUpperCase() !== 'SELECT' && (optText.includes(target) || target.includes(optText))) {{
+                                            vSel.selectedIndex = i;
+                                            matched = true;
+                                            break;
+                                        }}
+                                    }}
+                                }}
+                                if (!matched && vSel.options.length > 1) {{
+                                    for (let i = 1; i < vSel.options.length; i++) {{
+                                        if ((vSel.options[i].text || '').trim().toUpperCase() !== 'SELECT') {{
+                                            vSel.selectedIndex = i;
+                                            break;
+                                        }}
+                                    }}
+                                }}
+                                vSel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            }}
+                        }}
+
+                        // Inject Address Dates
+                        function setAddressDate(id, dateStr) {{
+                            if (!dateStr) return;
+                            const el = document.getElementById(id);
+                            if (!el) return;
+                            el.removeAttribute('readonly');
+                            el.removeAttribute('disabled');
+                            el.value = dateStr;
+                            ['input', 'change', 'keydown', 'keyup', 'blur'].forEach(evt => {{
+                                el.dispatchEvent(new Event(evt, {{ bubbles: true }}));
+                            }});
+                            try {{
+                                const parts = dateStr.split('/');
+                                if (parts.length === 3) {{
+                                    const d = parseInt(parts[0], 10);
+                                    const m = parseInt(parts[1], 10) - 1;
+                                    const y = parseInt(parts[2], 10);
+                                    if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {{
+                                        const jsDate = new Date(y, m, d);
+                                        const compId = id.replace('InputDate', '');
+                                        if (window.RichFaces && RichFaces.$) {{
+                                            const comp = RichFaces.$(compId) || RichFaces.$(id);
+                                            if (comp && typeof comp.setValue === 'function') {{
+                                                comp.setValue(jsDate);
+                                            }}
+                                            if (comp && typeof comp.collapse === 'function') {{
+                                                comp.collapse();
                                             }}
                                         }}
                                     }}
-                                }} catch(e) {{}}
-                            }}
+                                }}
+                            }} catch(e) {{}}
+                        }}
 
-                            setAddressDate('residence:fromDateListInputDate', '{fmt_from}');
-                            setAddressDate('residence:toDateListInputDate', '{fmt_to}');
-                            document.querySelectorAll('.rich-calendar-popup').forEach(p => {{ try {{ p.style.display = 'none'; }} catch(_) {{}} }});
-                        }})()
-                    """)
+                        setAddressDate('residence:fromDateListInputDate', '{fmt_from}');
+                        setAddressDate('residence:toDateListInputDate', '{fmt_to}');
+                        document.querySelectorAll('.rich-calendar-popup').forEach(p => {{ try {{ p.style.display = 'none'; }} catch(_) {{}} }});
+                    }})()
+                """)
+
+                time.sleep(1)
+
+                # Fallback: if ration card number is still empty, fill it via locator
+                if self.applicant.get("ration_card_no"):
+                    try:
+                        rc_input = page_form.locator('[id="residence:rationCardId"]')
+                        if rc_input.count() > 0 and rc_input.first.is_visible() and not rc_input.first.input_value():
+                            rc_input.first.fill(str(self.applicant.get("ration_card_no")))
+                            time.sleep(0.5)
+                    except Exception:
+                        pass
+
+                self.log("Submitting Details Table (Adding residency period)...")
+                add_clicked = False
+                for add_sel in [
+                    'button:has-text("Add")',
+                    'input[value="Add"]',
+                    '[id*="addBtn"]',
+                    '[id*="Add"]'
+                ]:
+                    try:
+                        btn = page_form.locator(add_sel).first
+                        if btn.is_visible():
+                            btn.click()
+                            add_clicked = True
+                            self.log(f"Clicked Add button via {add_sel}")
+                            break
+                    except Exception:
+                        pass
+                
+                if not add_clicked:
+                    try:
+                        page_form.get_by_role("button", name="Add").click()
+                        add_clicked = True
+                    except Exception:
+                        pass
+                
+                # Verify that residency row appears in table (wait up to 10s for RichFaces AJAX)
+                table_row_added = False
+                for _ in range(10):
                     time.sleep(1)
+                    try:
+                        row_count = page_form.evaluate("""() => {
+                            const rows = document.querySelectorAll('tr.rich-table-row, table[id*="residence"] tbody tr, table.rich-table tbody tr');
+                            return rows.length;
+                        }""")
+                        if row_count and row_count > 0:
+                            table_row_added = True
+                            self.log(f"✓ Residency details row verified in table ({row_count} rows).")
+                            break
+                    except Exception:
+                        pass
+                
+                if not table_row_added:
+                    self.log("Residency row not yet verified; retrying Add button click once...")
+                    try:
+                        page_form.locator('input[value="Add"], button:has-text("Add")').first.click(force=True)
+                    except Exception:
+                        pass
+                    time.sleep(3)
 
-                if self.applicant.get("ration_card_no") and is_field_empty('[id="residence:rationCardId"]'):
-                    page_form.locator('[id="residence:rationCardId"]').fill(self.applicant.get("ration_card_no"))
-                    time.sleep(2) 
-
-                self.log("Submitting Details Table...")
-                page_form.get_by_role("button", name="Add").click()
-                time.sleep(4)
-
-                # Dialog Handler
+                # Dialog Handler to catch and log any alert messages from portal
                 def safe_dialog_handler(dialog):
-                    try: dialog.accept()
-                    except Exception: pass 
+                    try:
+                        self.log(f"Portal dialog alert: {dialog.message}")
+                        dialog.accept()
+                    except Exception:
+                        pass 
                 page_form.on("dialog", safe_dialog_handler) 
 
-                self.log("Submitting Form...")
-                page_form.get_by_role("button", name="Submit").click()
-                page_form.wait_for_load_state("networkidle")
-                time.sleep(6) 
+                self.log("Submitting Form to navigate to Document Upload...")
+                submit_clicked = False
+                for sub_sel in [
+                    'input[value="Submit"]',
+                    'button:has-text("Submit")',
+                    '[id*="submit"]',
+                    '[id*="Submit"]'
+                ]:
+                    try:
+                        s_btn = page_form.locator(sub_sel).first
+                        if s_btn.is_visible():
+                            s_btn.click()
+                            submit_clicked = True
+                            self.log(f"Clicked Submit button via {sub_sel}")
+                            break
+                    except Exception:
+                        pass
+
+                if not submit_clicked:
+                    try:
+                        page_form.get_by_role("button", name="Submit").click()
+                    except Exception:
+                        pass
+
+                # CRITICAL: Wait for portal to actually navigate away from residence.xhtml to uploadDocs.xhtml
+                self.log("Waiting for portal to navigate to Document Upload page...")
+                navigated_to_upload = False
+                try:
+                    page_form.wait_for_url(lambda u: "upload" in u.lower() or "doc" in u.lower(), timeout=35000)
+                    navigated_to_upload = True
+                    self.log(f"✓ Navigated to Document Upload page: {page_form.url}")
+                except Exception as ne:
+                    self.log(f"Navigation to uploadDocs wait note: {ne}")
+
+                try:
+                    page_form.wait_for_load_state("domcontentloaded", timeout=15000)
+                    page_form.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+
+                # Wait for upload controls to be present
+                try:
+                    page_form.wait_for_selector("input[type='file'], [id*='dsctype'], [id*='upload'], select", timeout=25000)
+                    self.log("✓ Document upload controls ready on page.")
+                except Exception as se:
+                    self.log(f"Upload controls wait note: {se}")
+
+                time.sleep(3) 
 
                 # --- TABLE PARSER HELPER ---
                 def get_uploaded_docs_from_table():
@@ -879,32 +1070,15 @@ class TNeSevaiBackendAgent:
 
                 # --- DOCUMENT UPLOAD HELPER ---
                 def process_document_upload(doc_label, file_source, doc_no=None):
-                    # Dev / local fallback if file_source not provided
+                    # Check for applicant's uploaded signed declaration if source not explicitly passed
                     if not file_source:
-                        if doc_label == "Photo":
-                            for dev_p in [
-                                os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "public", "dev_docs", "photo.jpg"),
-                                os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist", "dev_docs", "photo.jpg"),
+                        if "Self" in doc_label or "Declaration" in doc_label:
+                            for p in [
+                                os.path.join(os.path.dirname(__file__), "uploaded_documents", "Signed_Self_Declaration.pdf"),
+                                os.path.join(os.path.dirname(__file__), "Signed_Self_Declaration.pdf"),
                             ]:
-                                if os.path.exists(dev_p):
-                                    file_source = dev_p
-                                    break
-                        elif "Address" in doc_label:
-                            for dev_p in [
-                                os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "public", "dev_docs", "drvlc.pdf"),
-                                os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist", "dev_docs", "drvlc.pdf"),
-                            ]:
-                                if os.path.exists(dev_p):
-                                    file_source = dev_p
-                                    break
-                        elif "Self" in doc_label or "Declaration" in doc_label:
-                            for dev_p in [
-                                os.path.join(os.path.dirname(__file__), "uploaded_documents", "Signed_Self_Declaration_Auto.pdf"),
-                                os.path.join(os.path.dirname(__file__), "uploaded_documents", "Signed_Self_Declaration_Auto.jpg"),
-                                os.path.join(os.path.dirname(__file__), "Self_Declaration_Form_To_Sign.pdf"),
-                            ]:
-                                if os.path.exists(dev_p):
-                                    file_source = dev_p
+                                if os.path.exists(p):
+                                    file_source = p
                                     break
 
                     if not file_source:
@@ -1145,7 +1319,7 @@ class TNeSevaiBackendAgent:
                                 self.applicant.get("dl_number") or
                                 self.applicant.get("driving_license_number") or
                                 self.applicant.get("aadhaar_number") or
-                                "TN31 20250006924"
+                                ""
                             )
 
                         if actual_doc_no:
@@ -1274,8 +1448,12 @@ class TNeSevaiBackendAgent:
                 try:
                     download = None
                     try:
-                        with page_form.expect_download(timeout=8000) as download_info:
-                            dl_link = page_form.locator("a:has-text('Download Self declaration form'), a:has-text('Self declaration'), [id*='selfDeclaration'], text='Download Self declaration form'").first
+                        dl_link = page_form.locator("a:has-text('Download Self declaration form'), a:has-text('Self declaration'), [id*='selfDeclaration'], text='Download Self declaration form'").first
+                        try:
+                            dl_link.wait_for(state="visible", timeout=10000)
+                        except Exception:
+                            pass
+                        with page_form.expect_download(timeout=12000) as download_info:
                             if dl_link.count() > 0:
                                 dl_link.click(force=True)
                         download = download_info.value
@@ -1299,11 +1477,14 @@ class TNeSevaiBackendAgent:
                 except Exception as e:
                     self.log(f"Download note: {e}. Proceeding.")
 
-                # Pre-generate auto-signed declaration as guaranteed fallback
-                auto_signed_path = self._generate_auto_signed_declaration(local_self_decl_path)
+                # Send event to frontend to show SelfDeclarationModal and wait for manual user upload
+                self.log("Waiting for applicant to download, sign, and upload Self-Declaration form...")
+                if self.ws_manager:
+                    self.ws_manager.send_event_sync({
+                        "type": "STATUS_MESSAGE",
+                        "message": "Self-Declaration form downloaded. Please sign and upload it in the modal."
+                    })
 
-                # Send event to frontend to show SelfDeclarationModal with Supabase URL
-                self.log("Sending Self Declaration to user for signing...")
                 signed_decl_response = None
                 try:
                     signed_decl_response = self._ws_prompt({
@@ -1311,16 +1492,25 @@ class TNeSevaiBackendAgent:
                         "message": "Please download the Self Declaration form, sign it, and upload the signed version.",
                         "download_path": self_decl_supabase_url or self_decl_save_name,
                         "file_path": self_decl_supabase_url or self_decl_save_name
-                    }, timeout=15)
+                    }, timeout=300)
                 except Exception as wse:
-                    self.log(f"Self Declaration prompt note: {wse} — proceeding with auto-signed declaration")
+                    self.log(f"Self Declaration prompt wait ended: {wse}")
 
                 signed_decl_path = str(signed_decl_response).strip() if signed_decl_response else ""
 
-                # Auto-sign fallback if user exited, requested auto-sign, or didn't upload within window
-                if not signed_decl_path or signed_decl_path.lower() in ("exit", "autosign", "auto-sign", "auto"):
-                    self.log("Using digital signed Self-Declaration for applicant...")
-                    signed_decl_path = auto_signed_path or self._generate_auto_signed_declaration(local_self_decl_path)
+                if signed_decl_path.lower() in ("exit", "cancel"):
+                    self.log("User cancelled Self Declaration upload. Aborting.")
+                    raise RuntimeError("Self Declaration submission cancelled by user.")
+
+                # If user explicitly opted for auto-sign in the modal
+                if signed_decl_path.lower() in ("autosign", "auto-sign", "auto"):
+                    self.log("Applicant explicitly requested Auto-Sign. Applying digital signature...")
+                    signed_decl_path = self._generate_auto_signed_declaration(local_self_decl_path)
+                elif not signed_decl_path:
+                    self.log("WARNING: No signed declaration received within timeout. Cannot proceed without applicant's signed declaration.")
+                    raise RuntimeError("Signed Self-Declaration form is required to proceed with submission.")
+                else:
+                    self.log(f"✓ Manual signed Self Declaration received from applicant: {signed_decl_path}")
 
                 if signed_decl_path and (os.path.exists(signed_decl_path) or signed_decl_path.startswith("http")):
                     self.log(f"Uploading Self Declaration: {signed_decl_path}")
@@ -1357,11 +1547,11 @@ class TNeSevaiBackendAgent:
                     self.log(f"Document table status: Photo={has_photo}, AddressProof={has_addr}, SelfDeclaration={has_decl}")
 
                     if not has_decl:
-                        self.log("Self-Declaration missing from table — performing immediate upload...")
-                        decl_to_upload = signed_decl_path if (signed_decl_path and os.path.exists(signed_decl_path)) else auto_signed_path
-                        if not decl_to_upload or not os.path.exists(decl_to_upload):
-                            decl_to_upload = self._generate_auto_signed_declaration(local_self_decl_path)
-                        process_document_upload("Self-Declaration of Applicant", decl_to_upload)
+                        self.log("Self-Declaration missing from table — re-uploading declaration...")
+                        if signed_decl_path and (os.path.exists(signed_decl_path) or signed_decl_path.startswith("http")):
+                            process_document_upload("Self-Declaration of Applicant", signed_decl_path)
+                        else:
+                            self.log("WARNING: Cannot re-upload Self-Declaration because no valid signed declaration is available.")
 
                     if not has_photo:
                         self.log("Photo missing from table — re-uploading Photo...")
@@ -1378,7 +1568,7 @@ class TNeSevaiBackendAgent:
                     # Tier-3 fallback: If Self-Declaration is still missing after verification, select index 3 directly
                     docs_in_table_recheck = get_uploaded_docs_from_table()
                     decl_still_missing = not any(("self" in (r.get("docName", "") + " " + r.get("fileName", "")).lower() or "declaration" in (r.get("docName", "") + " " + r.get("fileName", "")).lower()) for r in docs_in_table_recheck)
-                    if decl_still_missing:
+                    if decl_still_missing and signed_decl_path and (os.path.exists(signed_decl_path) or signed_decl_path.startswith("http")):
                         self.log("Direct fallback: Selecting Self-Declaration at index 3...")
                         for sel_id in ['[id="ss:dsctype"]', 'select[id*="dsctype"]']:
                             sel_el = page_form.locator(sel_id)
@@ -1391,8 +1581,7 @@ class TNeSevaiBackendAgent:
                                 }""")
                                 time.sleep(3)
                                 break
-                        decl_file = auto_signed_path or self._generate_auto_signed_declaration(local_self_decl_path)
-                        page_form.locator("input[type='file']").last.set_input_files(decl_file)
+                        page_form.locator("input[type='file']").last.set_input_files(signed_decl_path)
                         time.sleep(3)
                         try:
                             page_form.get_by_text("Upload", exact=True).click(force=True)

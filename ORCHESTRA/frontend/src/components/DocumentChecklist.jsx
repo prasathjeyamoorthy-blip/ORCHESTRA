@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { MdOutlineCloudUpload, MdDeleteOutline } from "react-icons/md";
-import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader, LuEye, LuEyeOff, LuCalendar } from "react-icons/lu";
+import { LuCircleCheck, LuChevronDown, LuChevronUp, LuTriangleAlert, LuChevronLeft, LuChevronRight, LuCheck, LuLoader, LuEye, LuEyeOff, LuCalendar, LuWrench, LuLock } from "react-icons/lu";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -499,17 +499,14 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   const [isDeletingSavedApp, setIsDeletingSavedApp] = useState(false);
   const [deleteSavedAppMsg, setDeleteSavedAppMsg]   = useState("");
   const [credentials, setCredentials]     = useState({
-    username: "lohithg",
-    password: "Lohith@2007",
-    can_number: "13318016498757",
-    aadhar_number: "607126530111",
+    username: "",
+    password: "",
+    can_number: "",
+    aadhar_number: "",
   });
-  const [addressDetails, setAddressDetails] = useState(() => {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, "0");
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const yyyy = today.getFullYear();
-    return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
+  const [addressDetails, setAddressDetails] = useState({
+    from_date: "",
+    to_date: "",
   });
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
@@ -517,12 +514,12 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
   useEffect(() => {
     const onStatus = (e) => setDeleteSavedAppMsg(e.detail);
     const onDone = (e) => {
-      setDeleteSavedAppMsg(e.detail || "✓ Saved application deleted successfully!");
+      setDeleteSavedAppMsg(e.detail || "Saved application deleted successfully!");
       setIsDeletingSavedApp(false);
       setTimeout(() => setDeleteSavedAppMsg(""), 7000);
     };
     const onError = (e) => {
-      setDeleteSavedAppMsg(`❌ ${e.detail || "Failed to delete saved application"}`);
+      setDeleteSavedAppMsg(e.detail || "Failed to delete saved application");
       setIsDeletingSavedApp(false);
       setTimeout(() => setDeleteSavedAppMsg(""), 8000);
     };
@@ -652,15 +649,6 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       .catch(err => console.warn("[User Memory] Error fetching restored user profile:", err));
   }, []);
 
-  // ── Auto-fill "Residing To" with today's date on mount ───────────────────
-  useEffect(() => {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, "0");
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const yyyy = today.getFullYear();
-    setAddressDetails(prev => ({ ...prev, to_date: `${dd}/${mm}/${yyyy}` }));
-  }, []);
-
   const handleCredChange = (e) => {
     const val = e.target.name === "aadhar_number" ? e.target.value.replace(/\D/g, "").slice(0, 12) : e.target.value;
     setCredentials(prev => ({ ...prev, [e.target.name]: val }));
@@ -683,25 +671,24 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSupabaseDocUrls({});
     setSavedProfileLoaded(false);
     setSavedProfile({});
-    setCredentials({ username: "lohithg", password: "Lohith@2007", can_number: "13318016498757", aadhar_number: "607126530111" });
-    setAddressDetails(() => {
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, "0");
-      const mm = String(today.getMonth() + 1).padStart(2, "0");
-      const yyyy = today.getFullYear();
-      return { from_date: "09/10/2024", to_date: `${dd}/${mm}/${yyyy}` };
-    });
+    setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
+    setAddressDetails({ from_date: "", to_date: "" });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
   };
 
-  // ── Dev headless action: Delete Saved Application on portal ──────────────────
+  // ── Portal Action: Delete Saved Application on portal ──────────────────
   const handleDeleteSavedApp = async () => {
-    const un = (credentials?.username || "lohithg").trim() || "lohithg";
-    const pw = (credentials?.password || "Lohith@2007").trim() || "Lohith@2007";
+    const un = (credentials?.username || "").trim();
+    const pw = (credentials?.password || "").trim();
+    if (!un || !pw) {
+      setDeleteSavedAppMsg("Please enter your TNeSevai username and password in Step 1 first.");
+      setTimeout(() => setDeleteSavedAppMsg(""), 5000);
+      return;
+    }
     const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
 
     setIsDeletingSavedApp(true);
-    setDeleteSavedAppMsg("🚀 Launching headless browser on portal…");
+    setDeleteSavedAppMsg("Launching browser on portal…");
 
     try {
       if (onOpenSocket) {
@@ -729,68 +716,12 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         throw new Error(`Server returned HTTP ${res.status}`);
       }
 
-      setDeleteSavedAppMsg("Cleaner running in headless mode. Enter captcha in modal if requested.");
+      setDeleteSavedAppMsg("Cleaner running on portal. Enter captcha in modal if requested.");
     } catch (e) {
       console.error("[Cleaner Error]", e);
       setDeleteSavedAppMsg(`Failed to start cleaner: ${e.message || "Unknown error"}`);
       setIsDeletingSavedApp(false);
       setTimeout(() => setDeleteSavedAppMsg(""), 6000);
-    }
-  };
-
-  // ── Dev quick-load: upload a pre-stored local file for a given doc slot ──
-  const DEV_DOCS = {
-    aadharCard:     { url: "/dev_docs/aadhar.jpeg",  name: "aadhar.jpeg",  mime: "image/jpeg" },
-    rationCard:     { url: "/dev_docs/ration.jpeg",  name: "ration.jpeg",  mime: "image/jpeg" },
-    drivingLicense: { url: "/dev_docs/drvlc.pdf",    name: "drvlc.pdf",    mime: "application/pdf" },
-    photo:          { url: "/dev_docs/photo.jpg",    name: "photo.jpg",    mime: "image/jpeg" },
-  };
-
-  const handleDevLoad = async (id) => {
-    if (!DEV_DOCS[id]) return;
-    const { url, name, mime } = DEV_DOCS[id];
-    setIsUploading(p => ({ ...p, [id]: true }));
-    setUploadError(null);
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const file = new File([blob], name, { type: mime });
-      const formData = new FormData();
-      formData.append("file", file);
-      const extUrl = id === "photo"
-        ? `${import.meta.env.VITE_DOC_API_BASE}/verify/photo`
-        : `${import.meta.env.VITE_DOC_API_BASE}/extract`;
-      const extRes = await fetch(extUrl, { method: "POST", body: formData });
-      if (!extRes.ok) throw new Error("Dev extract failed");
-      const data = await extRes.json();
-      if (id === "photo" && data.is_human_photo === false)
-        throw new Error("Dev photo failed face validation.");
-      if (id !== "photo" && data.extracted_data?.length > 0) {
-        setExtractedData(p => ({ ...p, [id]: data.extracted_data }));
-        if (id === "aadharCard" || id === "drivingLicense" || id === "addressProof") {
-          const ex = data.extracted_data.find(r => r && typeof r === "object") || {};
-          setAddressDetails(prev => ({
-            ...prev,
-            village:     prev.village     || ex.area    || ex.taluk  || "",
-            building_no: prev.building_no || ex.door_no || "",
-            street_name: prev.street_name || ex.street  || ex.street_name || "",
-            pincode:     prev.pincode     || ex.pincode || "",
-          }));
-          if (ex.aadhaar_number) {
-            const cleanAadhaar = String(ex.aadhaar_number).replace(/\D/g, "");
-            setCredentials(prev => ({ ...prev, aadhar_number: prev.aadhar_number || cleanAadhaar }));
-          }
-        }
-      }
-      setUploadedFiles(p => ({ ...p, [id]: name }));
-      setRawFiles(p => ({ ...p, [id]: file }));
-      if (data.supabase_url) setSupabaseDocUrls(p => ({ ...p, [id]: data.supabase_url }));
-      setCheckedItems(p => ({ ...p, [id]: true }));
-      setExpandedItem(null);
-    } catch (err) {
-      setUploadError(err.message || "Dev load failed.");
-    } finally {
-      setIsUploading(p => ({ ...p, [id]: false }));
     }
   };
 
@@ -1080,7 +1011,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           address_doc_no:
             c.dl_number || c.driving_license_number || c.driving_licence_number ||
             c.license_number || c.ration_card_number || c.smart_card_no ||
-            c.aadhaar_number || c.aadhar_number || savedApplicant.address_doc_no || "TN31 20250006924"
+            c.aadhaar_number || c.aadhar_number || savedApplicant.address_doc_no || ""
         },
       };
 
@@ -1138,8 +1069,8 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     return (
       <div className="cl-card fade-up">
         <div className="cl-live-header">
-          <div className={`cl-live-icon ${isDone ? (isError ? "error" : "done") : "running"}`}>
-            {isDone ? (isError ? "✕" : "✓") : <span className="cl-spin-ring" />}
+          <div className={`cl-live-icon ${isDone ? (isError ? "error" : "done") : "running"}`} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {isDone ? (isError ? <LuTriangleAlert size={16} /> : <LuCheck size={16} />) : <span className="cl-spin-ring" />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h3 className="cl-title" key={automationStatus} style={{ animation: "status-fade 0.35s ease both" }}>
@@ -1160,7 +1091,9 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             { label: "Submitted to portal", done: completedSteps.submitted },
           ].map((s, i) => (
             <div key={i} className={`cl-step ${s.done ? "done" : ""}`}>
-              <div className="cl-step-dot">{s.done ? "✓" : i + 1}</div>
+              <div className="cl-step-dot" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {s.done ? <LuCheck size={11} /> : i + 1}
+              </div>
               <span className="cl-step-label">{s.label}</span>
             </div>
           ))}
@@ -1220,10 +1153,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             gap: "0.4rem",
             transition: "all 0.2s",
           }}
-          title="Developer feature: Log into portal in headless mode and delete pending Saved Application"
+          title="Log into portal and delete pending Saved Applications"
         >
           {isDeletingSavedApp ? <LuLoader size={13} style={{ animation: "spin 1s linear infinite" }} /> : <MdDeleteOutline size={14} />}
-          <span>{isDeletingSavedApp ? "Deleting on Portal…" : "⚡ Delete Saved Application (Dev)"}</span>
+          <span>{isDeletingSavedApp ? "Deleting on Portal…" : "Clear Saved Draft"}</span>
         </button>
       </div>
 
@@ -1260,7 +1193,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           gap: "0.5rem"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span>✓</span> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
+            <LuCircleCheck size={16} /> Welcome back! Your profile details and uploaded documents were loaded from Supabase.
           </div>
           <button
             type="button"
@@ -1301,7 +1234,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem"
           }}>
             <span style={{ fontSize: "0.75rem", color: "#a855f7", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.35rem" }}>
-              ⚡ Developer Tool
+              <LuWrench size={13} /> Portal Utility
             </span>
             <button
               type="button"
@@ -1323,7 +1256,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
               title="Delete draft Saved Application on portal"
             >
               {isDeletingSavedApp ? <LuLoader size={12} style={{ animation: "spin 1s linear infinite" }} /> : <MdDeleteOutline size={13} />}
-              <span>{isDeletingSavedApp ? "Deleting on Portal…" : "Delete Saved App on Portal"}</span>
+              <span>{isDeletingSavedApp ? "Deleting on Portal…" : "Clear Draft on Portal"}</span>
             </button>
           </div>
         </div>
@@ -1380,7 +1313,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                                   display: "flex", alignItems: "center", gap: "4px"
                                 }}
                               >
-                                🔒 PIN Download
+                                <LuLock size={12} /> PIN Download
                               </button>
                               <button className="cl-remove-btn" onClick={() => handleRemoveFile(doc.id)}><MdDeleteOutline size={17} /></button>
                             </div>
@@ -1402,7 +1335,6 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                           ))}
                         </div>
                       ) : (
-                        <>
                         <label className="upload-zone" style={{ opacity: isUploading[doc.id] ? 0.6 : 1 }}>
                           <input
                             type="file"
@@ -1417,22 +1349,6 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                           {uploadError && <div className="cl-error-inline"><LuTriangleAlert size={13} /> {uploadError}</div>}
                           <span className="upload-zone-btn">{isUploading[doc.id] ? "Uploading…" : "Browse Files"}</span>
                         </label>
-                        {DEV_DOCS[doc.id] && (
-                          <button
-                            type="button"
-                            disabled={isUploading[doc.id]}
-                            onClick={() => handleDevLoad(doc.id)}
-                            style={{
-                              marginTop: "0.5rem", width: "100%",
-                              padding: "0.4rem", borderRadius: "0.5rem",
-                              background: "rgba(168,85,247,0.15)", border: "1px solid rgba(168,85,247,0.4)",
-                              color: "#c084fc", fontSize: "0.78rem", cursor: "pointer",
-                            }}
-                          >
-                            ⚡ Dev Load
-                          </button>
-                        )}
-                        </>
                       )}
                     </div>
                   )}

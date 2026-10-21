@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Playwright browser and system dependencies
 RUN playwright install chromium --with-deps
 
+ENV HEADLESS=true
+
 COPY . .
 
 EXPOSE 8001

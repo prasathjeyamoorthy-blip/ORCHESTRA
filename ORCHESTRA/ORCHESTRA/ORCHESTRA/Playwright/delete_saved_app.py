@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 import base64
@@ -10,6 +11,47 @@ try:
     from playwright_stealth import stealth_sync
 except ImportError:
     stealth_sync = None
+
+
+def is_deployed_environment() -> bool:
+    """Check if code is running in a deployed/cloud environment (Render, Docker, AWS, etc.)."""
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("IS_PULL_REQUEST")
+        or os.getenv("AWS_EXECUTION_ENV")
+        or os.getenv("ECS_CONTAINER_METADATA_URI")
+        or os.getenv("ENVIRONMENT", "").lower() in ("production", "prod", "staging", "deployed")
+        or os.getenv("NODE_ENV", "").lower() == "production"
+        or os.path.exists("/.dockerenv")
+    )
+
+
+def has_gui_display() -> bool:
+    """Check if a graphical display environment (X11, Wayland, Windows, macOS) is available."""
+    if os.name == "nt" or getattr(sys, "platform", "") == "darwin":
+        return True
+    return bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
+
+
+def should_run_headless() -> bool:
+    """
+    Decide whether browser automation should run headless or headed:
+    1. Explicit HEADLESS environment variable takes precedence if set ('true'/'1' or 'false'/'0').
+    2. Deployed environments (Render, Docker, AWS, production) run headless (True).
+    3. Headless servers with no graphical display available run headless (True).
+    4. Local development with display available runs headed (False) with visible UI.
+    """
+    headless_env = os.getenv("HEADLESS")
+    if headless_env is not None and headless_env.strip() != "":
+        return headless_env.strip().lower() in ("true", "1", "yes")
+
+    if is_deployed_environment():
+        return True
+
+    if not has_gui_display():
+        return True
+
+    return False
 
 
 class TNeSevaiSavedAppCleaner:
@@ -125,12 +167,14 @@ class TNeSevaiSavedAppCleaner:
             self.log(f"✗ {err}")
             return {"status": "error", "message": err}
 
-        self.log("🚀 Starting headless browser to clear saved applications...")
-
         with sync_playwright() as playwright:
+            is_headless = should_run_headless()
+            mode_label = "headless" if is_headless else "headed (visible UI)"
+            self.log(f"🚀 Starting browser ({mode_label}) to clear saved applications...")
+
             launch_kwargs = {
-                "headless": True,
-                "slow_mo": 0,
+                "headless": is_headless,
+                "slow_mo": 100 if not is_headless else 0,
                 "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
             }
             for chrome_path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
@@ -138,7 +182,13 @@ class TNeSevaiSavedAppCleaner:
                     launch_kwargs["executable_path"] = chrome_path
                     break
 
-            browser = playwright.chromium.launch(**launch_kwargs)
+            try:
+                browser = playwright.chromium.launch(**launch_kwargs)
+            except Exception as launch_err:
+                self.log(f"Headed launch failed ({launch_err}). Falling back to headless mode...")
+                launch_kwargs["headless"] = True
+                launch_kwargs["slow_mo"] = 0
+                browser = playwright.chromium.launch(**launch_kwargs)
             context = browser.new_context(accept_downloads=True)
             page = context.new_page()
 
@@ -388,8 +438,8 @@ class TNeSevaiSavedAppCleaner:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Delete saved applications on TNeSevai / e-District portal.")
-    parser.add_argument("--username", default="lohithg", help="TNeSevai Username")
-    parser.add_argument("--password", default="Lohith@2007", help="TNeSevai Password")
+    parser.add_argument("--username", default="", help="TNeSevai Username")
+    parser.add_argument("--password", default="", help="TNeSevai Password")
     args = parser.parse_args()
 
     cleaner = TNeSevaiSavedAppCleaner(credentials={"username": args.username, "password": args.password})

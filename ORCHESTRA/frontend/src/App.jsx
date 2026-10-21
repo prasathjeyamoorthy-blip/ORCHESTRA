@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { LuBot, LuSparkles, LuShieldCheck,
          LuFileCheck, LuLayoutDashboard, LuPhone, LuBookOpen,
-         LuMoon, LuSun, LuMenu, LuX } from "react-icons/lu";
+         LuMoon, LuSun, LuMenu, LuX, LuCircleCheck, LuCircleCheckBig, LuQrCode, LuTrash2 } from "react-icons/lu";
 import FaqView        from "./components/FaqView";
 import AppStatusView  from "./components/AppStatusView";
 import ContactView    from "./components/ContactView";
@@ -93,6 +93,20 @@ function LandingOverlay({ onStart }) {
 const DEFAULT_WELCOME_MSG = {
   sender: "agent",
   text: "Welcome to the Official TNeGA e-Sevai Assistant. I can guide you step-by-step to obtain a Residence Certificate. How may I help you?",
+};
+
+const getWsBase = () => {
+  let wsBase = import.meta.env.VITE_WS_BASE;
+  if (!wsBase) {
+    const apiBase = import.meta.env.VITE_API_BASE;
+    if (apiBase) {
+      wsBase = apiBase.replace(/^http/, "ws");
+    } else {
+      const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+      wsBase = `${isHttps ? "wss" : "ws"}://${typeof window !== "undefined" ? window.location.host : "localhost:8001"}`;
+    }
+  }
+  return wsBase.replace(/\/$/, "");
 };
 
 export default function App() {
@@ -518,21 +532,7 @@ Just type your question in plain language and I will assist you right away.`,
   const [paymentSuccess, setPaymentSuccess]           = useState(null);
   const [automationStatus, setAutomationStatus]       = useState("");
 
-  const getWsBase = () => {
-    let wsBase = import.meta.env.VITE_WS_BASE;
-    if (!wsBase) {
-      const apiBase = import.meta.env.VITE_API_BASE;
-      if (apiBase) {
-        wsBase = apiBase.replace(/^http/, "ws");
-      } else {
-        const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-        wsBase = `${isHttps ? "wss" : "ws"}://${typeof window !== "undefined" ? window.location.host : "localhost:8001"}`;
-      }
-    }
-    return wsBase.replace(/\/$/, "");
-  };
-
-  const openAutomationSocket = () => new Promise((resolve, reject) => {
+  const openAutomationSocket = useCallback(() => new Promise((resolve, reject) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       resolve();
       return;
@@ -581,7 +581,7 @@ Just type your question in plain language and I will assist you right away.`,
                 ...prev,
                 {
                   sender: "agent",
-                  text: `💳 **Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n👉 [**Proceed to Payment Gateway**](${data.url})`
+                  text: `**Payment Gateway is Ready!**\n\nIf the payment tab did not open automatically, please click below:\n\n[**Proceed to Payment Gateway**](${data.url})`
                 }
               ]);
             }
@@ -597,7 +597,7 @@ Just type your question in plain language and I will assist you right away.`,
             setAutomationEvent(null);
           }
           else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
-            window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "✓ Saved application deleted successfully!" }));
+            window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "Saved application deleted successfully!" }));
             setAutomationEvent(null);
           }
           else if (data.type === "AUTOMATION_ERROR")            {
@@ -626,14 +626,14 @@ Just type your question in plain language and I will assist you right away.`,
       wsRef.current = socket;
     };
     connect();
-  });
+  }), []);
 
   // Proactively connect automation WebSocket when checklist is opened
   useEffect(() => {
     if (showChecklist) {
       openAutomationSocket().catch(err => console.warn("[WebSocket] Checklist open auto-connect:", err));
     }
-  }, [showChecklist]);
+  }, [showChecklist, openAutomationSocket]);
 
   const sendWS = (payload) => {
     const ws = wsRef.current;
@@ -789,7 +789,9 @@ Just type your question in plain language and I will assist you right away.`,
           }}>
             {paymentSuccess ? (
               <>
-                <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>✅</div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.75rem" }}>
+                  <LuCircleCheckBig size={52} color="#4ade80" />
+                </div>
                 <h2 style={{ margin: "0 0 0.5rem" }}>Payment Successful!</h2>
                 {paymentSuccess.screenshot && (
                   <img src={paymentSuccess.screenshot} alt="Payment confirmation"
@@ -803,7 +805,10 @@ Just type your question in plain language and I will assist you right away.`,
               </>
             ) : (
               <>
-                <h2 style={{ margin: "0 0 0.25rem" }}>Scan to Pay</h2>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                  <LuQrCode size={24} color="#60a5fa" />
+                  <h2 style={{ margin: 0 }}>Scan to Pay</h2>
+                </div>
                 <p style={{ color: "#aaa", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
                   Open any UPI app and scan the QR code below to complete your ₹60 payment.
                 </p>
@@ -827,9 +832,12 @@ Just type your question in plain language and I will assist you right away.`,
                     background: "linear-gradient(135deg, #22c55e, #16a34a)",
                     border: "none", color: "#fff", fontWeight: 700,
                     fontSize: "1rem", cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.5rem",
+                    boxShadow: "0 4px 14px rgba(34, 197, 94, 0.35)",
                   }}
                 >
-                  ✅ I have paid
+                  <LuCircleCheck size={18} />
+                  <span>I have paid</span>
                 </button>
               </>
             )}
@@ -842,7 +850,7 @@ Just type your question in plain language and I will assist you right away.`,
         <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
           <div style={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "1.25rem", padding: "2rem", maxWidth: "22rem", width: "100%", textAlign: "center", boxShadow: "0 24px 64px rgba(0,0,0,0.5)" }}>
             <div style={{ width: "3.5rem", height: "3.5rem", borderRadius: "50%", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
-              <span style={{ fontSize: "1.5rem" }}>🗑</span>
+              <LuTrash2 size={24} color="#ef4444" />
             </div>
             <h3 style={{ color: "#fff", fontWeight: 700, fontSize: "1.1rem", marginBottom: "0.5rem" }}>Clear All My Data?</h3>
             <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.875rem", lineHeight: 1.6, marginBottom: "1.5rem" }}>

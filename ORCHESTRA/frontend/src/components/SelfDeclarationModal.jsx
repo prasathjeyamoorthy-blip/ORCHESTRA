@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { LuFilePen, LuDownload } from "react-icons/lu";
+import { LuFilePen, LuDownload, LuCircleCheck, LuSparkles } from "react-icons/lu";
 
 export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, onExit }) {
   const [uploadedFile, setUploadedFile] = useState(null);
@@ -43,21 +43,55 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
     try {
       const formData = new FormData();
       formData.append("file", uploadedFile);
+      const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
       const docApiBase = (import.meta.env.VITE_DOC_API_BASE || "http://localhost:8000").replace(/\/$/, "");
 
-      const response = await fetch(`${docApiBase}/upload-signed-declaration`, {
-        method: "POST",
-        body: formData
-      });
+      let uploadSuccess = false;
+      let filePath = "";
 
-      if (!response.ok) {
-        throw new Error("Failed to upload signed declaration");
+      // Try orchestra apiBase first (same server as Playwright automation)
+      try {
+        const response = await fetch(`${apiBase}/upload-signed-declaration`, {
+          method: "POST",
+          body: formData
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === "success" && (data.file_path || data.supabase_url)) {
+            filePath = data.file_path || data.supabase_url;
+            uploadSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.warn("[SelfDeclaration] Upload to apiBase notice:", err);
       }
 
-      const data = await response.json();
-      onSubmit(data.file_path || "autosign");
+      // If not yet uploaded, try docApiBase
+      if (!uploadSuccess) {
+        try {
+          const response = await fetch(`${docApiBase}/upload-signed-declaration`, {
+            method: "POST",
+            body: formData
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.status === "success" && (data.file_path || data.supabase_url)) {
+              filePath = data.file_path || data.supabase_url;
+              uploadSuccess = true;
+            }
+          }
+        } catch (err2) {
+          console.warn("[SelfDeclaration] Upload to docApiBase notice:", err2);
+        }
+      }
+
+      if (!uploadSuccess || !filePath) {
+        throw new Error("Could not save the uploaded declaration to backend storage.");
+      }
+
+      onSubmit(filePath);
     } catch (_error) {
-      alert("Failed to upload signed declaration. Please try again.");
+      alert(`Failed to upload signed declaration: ${_error.message || "Please try again."}`);
       setIsUploading(false);
     }
   };
@@ -66,8 +100,8 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
     if (downloadPath && (downloadPath.startsWith("http://") || downloadPath.startsWith("https://"))) {
       window.open(downloadPath, '_blank');
     } else {
-      const docApiBase = (import.meta.env.VITE_DOC_API_BASE || "http://localhost:8000").replace(/\/$/, "");
-      window.open(`${docApiBase}/download-declaration`, '_blank');
+      const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+      window.open(`${apiBase}/download-declaration`, '_blank');
     }
   };
 
@@ -106,8 +140,8 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
         <div style={{ border: "1.5px dashed hsl(var(--border))", borderRadius: "1rem", padding: "1.5rem", textAlign: "center", marginBottom: "1.5rem", backgroundColor: "hsl(var(--secondary)/0.5)", transition: "all 0.2s" }} className="hover:border-primary/50">
           {uploadedFile ? (
             <div>
-              <p style={{ color: "hsl(var(--primary))", fontWeight: 600, fontSize: "0.875rem", marginBottom: "0.5rem" }}>
-                ✓ {uploadedFile.name}
+              <p style={{ color: "hsl(var(--primary))", fontWeight: 600, fontSize: "0.875rem", marginBottom: "0.5rem", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem" }}>
+                <LuCircleCheck size={16} /> <span>{uploadedFile.name}</span>
               </p>
               <button
                 onClick={() => setUploadedFile(null)}
@@ -164,7 +198,7 @@ export default function SelfDeclarationModal({ isOpen, downloadPath, onSubmit, o
             }}
             title="Digitally sign and auto-upload the declaration on portal"
           >
-            ⚡ Auto-Sign &amp; Continue
+            <LuSparkles size={15} /> <span>Auto-Sign &amp; Continue</span>
           </button>
           <button onClick={handleSubmit} disabled={!uploadedFile || isUploading} className="btn-primary" style={{ flex: 1.5, minWidth: "150px" }}>
             {isUploading ? "Uploading..." : "Submit Signed Form"}

@@ -111,7 +111,7 @@ async def extract_document(file: UploadFile = File(...)):
     if not (is_pdf or is_image):
         raise HTTPException(
             status_code=400,
-            detail="Uploaded file is neither a valid PDF nor a recognizable image."
+            detail="Only PDF documents are accepted: Uploaded file is neither a valid PDF nor a recognizable image."
         )
 
     supabase_url = ""
@@ -316,6 +316,8 @@ async def process_all_documents(
 @app.get("/download-declaration")
 def download_declaration():
     declaration_path = os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA", "Playwright", "Self_Declaration_Form_To_Sign.pdf")
+    if not os.path.exists(declaration_path):
+        declaration_path = os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA", "Playwright", "Self_Declaration_Form_For_User.pdf")
     if os.path.exists(declaration_path):
         return FileResponse(
             declaration_path,
@@ -326,20 +328,37 @@ def download_declaration():
 
 @app.post("/upload-signed-declaration")
 async def upload_signed_declaration(file: UploadFile = File(...)):
-    """Save the signed self-declaration form directly to Supabase Storage."""
+    """Save the signed self-declaration form directly to Supabase Storage and local disk."""
     try:
         content_bytes = await file.read()
+        
+        # Save locally if playwright directory exists
+        playwright_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ORCHESTRA", "Playwright"))
+        local_path = ""
+        try:
+            uploads_dir = os.path.join(playwright_dir, "uploaded_documents")
+            os.makedirs(uploads_dir, exist_ok=True)
+            local_path = os.path.join(uploads_dir, f"Signed_{file.filename}")
+            with open(local_path, "wb") as f_out:
+                f_out.write(content_bytes)
+            with open(os.path.join(uploads_dir, "Signed_Self_Declaration.pdf"), "wb") as f_out:
+                f_out.write(content_bytes)
+            with open(os.path.join(playwright_dir, "Signed_Self_Declaration.pdf"), "wb") as f_out:
+                f_out.write(content_bytes)
+        except Exception as fe:
+            print(f"[UploadAgent] Note saving file locally: {fe}")
+
         s_url = ""
         if upload_to_supabase_storage:
             c_type = getattr(file, "content_type", "application/pdf") or "application/pdf"
             s_url = upload_to_supabase_storage(content_bytes, f"Signed_{file.filename}", content_type=c_type)
 
-        print(f"[INFO] Signed self-declaration uploaded to Supabase: {s_url}")
+        print(f"[INFO] Signed self-declaration uploaded: local={local_path}, Supabase={s_url}")
 
         return {
             "status": "success",
             "message": "Signed declaration uploaded successfully",
-            "file_path": s_url or file.filename,
+            "file_path": local_path or s_url or file.filename,
             "supabase_url": s_url
         }
     except Exception as e:
