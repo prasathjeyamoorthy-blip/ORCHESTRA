@@ -26,6 +26,8 @@ build/
 
 # Local runtime & debug files
 *.log
+*.patch
+*.swp
 last_payload.json
 backend_captcha.png
 after_payment_click.png
@@ -33,5 +35,9 @@ before_payment_click.png
 after_delete.png
 before_delete.png
 captcha_delete_snapshot.png
+temp_uploads/
+uploaded_documents/
+Downloaded_Certificates/
+dev_docs/
 .DS_Store
 .vscode/
