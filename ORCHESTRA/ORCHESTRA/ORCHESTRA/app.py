@@ -376,6 +376,11 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
+        # Clean up any closed or disconnected connections
+        self._connections = [
+            c for c in self._connections
+            if getattr(c, "client_state", None) is not None and getattr(c.client_state, "name", "") == "CONNECTED"
+        ]
         self._connections.append(websocket)
         self._main_loop = _asyncio.get_running_loop()
         print(f"[WebSocket] Client connected — total: {len(self._connections)}")
@@ -392,6 +397,8 @@ class ConnectionManager:
             await websocket.send_json(event_data)
         except Exception as e:
             print(f"[WebSocket ERROR] send failed: {e}")
+            if websocket in self._connections:
+                self._connections.remove(websocket)
 
     async def send_event(self, event_data: dict):
         if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):

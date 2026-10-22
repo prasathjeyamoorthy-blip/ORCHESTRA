@@ -1150,7 +1150,7 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       }
 
       if (!wsReady) {
-        throw new Error("Unable to establish live connection to the automation server. Please reload the page or check your connection and try again.");
+        console.warn("[WebSocket] Live socket not detected within 5s; proceeding with submission as backend queues events.");
       }
 
       const submitRes = await fetch(`${apiBase}/submit-application`, {
