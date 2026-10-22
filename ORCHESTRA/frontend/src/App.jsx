@@ -830,7 +830,7 @@ Just type your question in plain language and I will assist you right away.`,
       let socket;
       try {
         socket = new WebSocket(`${wsBase}/ws/automation`);
-      } catch (err) {
+      } catch (_err) {
         sessionStorage.setItem("tnega_ws_blocked", "true");
         startSSE();
         if (!settled) { settled = true; resolve(); }
