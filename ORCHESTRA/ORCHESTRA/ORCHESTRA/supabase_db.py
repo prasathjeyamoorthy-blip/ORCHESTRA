@@ -500,7 +500,7 @@ def save_user_profile(phone_number: str, profile_data: dict) -> bool:
 
     creds = profile_data.get("credentials", {})
     applicant = profile_data.get("applicant_details", {})
-    address = profile_data.get("address_details", {})
+    address = profile_data.get("address_details", {}) or profile_data.get("tab2_residency", {})
     docs = profile_data.get("documents", {})
 
     tab1_credentials = {
@@ -511,8 +511,8 @@ def save_user_profile(phone_number: str, profile_data: dict) -> bool:
     }
 
     tab2_residency = {
-        "from_date": address.get("from_date", ""),
-        "to_date": address.get("to_date", ""),
+        "from_date": address.get("from_date", "") or profile_data.get("from_date", ""),
+        "to_date": address.get("to_date", "") or profile_data.get("to_date", ""),
         "building_no": address.get("building_no", ""),
         "street_name": address.get("street_name", ""),
         "village": address.get("village", ""),
@@ -530,12 +530,29 @@ def save_user_profile(phone_number: str, profile_data: dict) -> bool:
     }
 
     existing = USER_PROFILES.get(phone_clean, {})
+
+    # Strip empty values from new dicts so we NEVER overwrite existing non-empty fields with blanks
+    clean_t1 = {k: v for k, v in tab1_credentials.items() if v}
+    clean_t2 = {k: v for k, v in tab2_residency.items() if v}
+    clean_t3 = {k: v for k, v in tab3_documents.items() if v}
+
+    merged_t1 = {**(existing.get("tab1_credentials", {})), **clean_t1}
+    merged_t2 = {**(existing.get("tab2_residency", {})), **clean_t2}
+    merged_t3 = {**(existing.get("tab3_documents", {})), **clean_t3}
+
+    merged_address = {
+        **(existing.get("address_details", {})),
+        **(profile_data.get("address_details", {}) or {}),
+        **clean_t2
+    }
+
     merged_profile = {
         **existing,
         **profile_data,
-        "tab1_credentials": {**(existing.get("tab1_credentials", {})), **tab1_credentials},
-        "tab2_residency": {**(existing.get("tab2_residency", {})), **tab2_residency},
-        "tab3_documents": {**(existing.get("tab3_documents", {})), **tab3_documents},
+        "tab1_credentials": merged_t1,
+        "tab2_residency": merged_t2,
+        "tab3_documents": merged_t3,
+        "address_details": merged_address,
         "updated_at": time.time()
     }
     USER_PROFILES[phone_clean] = merged_profile
@@ -608,8 +625,16 @@ def fetch_user_profile(phone_number: str) -> dict:
             "can_number": creds.get("can_number") or app.get("can_number") or t1.get("can_number", "") or profile_result.get("can_number", ""),
             "aadhar_number": creds.get("aadhar_number") or creds.get("aadhaar_number") or app.get("aadhar_number") or app.get("aadhaar_number") or t1.get("aadhar_number", "") or profile_result.get("aadhar_number", "")
         }
-        if t2 and "address_details" not in profile_result:
-            profile_result["address_details"] = t2
+        if t2:
+            existing_addr = profile_result.get("address_details") or {}
+            profile_result["address_details"] = {
+                **t2,
+                **existing_addr,
+                "from_date": existing_addr.get("from_date") or t2.get("from_date") or "",
+                "to_date": existing_addr.get("to_date") or t2.get("to_date") or ""
+            }
+        elif "address_details" not in profile_result:
+            profile_result["address_details"] = {}
         if t3 and "supabase_urls" not in profile_result:
             profile_result["supabase_urls"] = t3
 

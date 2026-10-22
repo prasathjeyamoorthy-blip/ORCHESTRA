@@ -563,10 +563,22 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       aadhar_number: "",
     };
   });
-  const [addressDetails, setAddressDetails] = useState(() => ({
-    from_date: "",
-    to_date: getTodayFormatted(),
-  }));
+  const [addressDetails, setAddressDetails] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("tnega_draft_address") || localStorage.getItem("tnega_draft_address");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          from_date: parsed.from_date || localStorage.getItem("tnega_residing_from") || "",
+          to_date: getTodayFormatted(),
+        };
+      }
+    } catch (_) {}
+    return {
+      from_date: localStorage.getItem("tnega_residing_from") || "",
+      to_date: getTodayFormatted(),
+    };
+  });
   const [completedSteps, setCompletedSteps] = useState({ loggedIn: false, formFilled: false, docsUploaded: false, submitted: false });
 
   // ── Cleaner WebSocket event listener ──────────────────────────────────────────
@@ -648,8 +660,25 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
 
   // ── Restore existing user profile & documents from Supabase on mount ──────────────
   useEffect(() => {
-    const userPhone = sessionStorage.getItem("user_phone");
-    if (!userPhone) return;
+    let userPhone = sessionStorage.getItem("user_phone");
+    if (!userPhone) {
+      try {
+        const savedCreds = JSON.parse(sessionStorage.getItem("tnega_draft_credentials") || "{}");
+        userPhone = savedCreds.username || savedCreds.can_number || "";
+      } catch (_) {}
+    }
+
+    if (!userPhone) {
+      const localFromDate = localStorage.getItem("tnega_residing_from");
+      if (localFromDate) {
+        setAddressDetails(prev => ({
+          ...prev,
+          from_date: prev.from_date || localFromDate,
+          to_date: prev.to_date || getTodayFormatted(),
+        }));
+      }
+      return;
+    }
 
     fetch(`${import.meta.env.VITE_API_BASE}/user-profile?phone_number=${encodeURIComponent(userPhone)}`)
       .then(res => res.ok ? res.json() : null)
@@ -665,10 +694,12 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           const appObj   = profileData.applicant_details || {};
           const t1Obj    = profileData.tab1_credentials || {};
           const addrObj  = profileData.address_details || {};
+          const t2Obj    = profileData.tab2_residency || {};
 
-          // Find extracted aadhaar and can from documents (e.g. from Aadhaar card OCR)
+          // Find extracted aadhaar, can, and dob from documents (e.g. from Aadhaar card OCR)
           let docAadhaar = "";
           let docCan = "";
+          let docDob = "";
           Object.values(docsMap).forEach(doc => {
             if (Array.isArray(doc?.extracted_data)) {
               doc.extracted_data.forEach(item => {
@@ -676,6 +707,8 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
                 if (a && !docAadhaar) docAadhaar = String(a).replace(/\D/g, "").slice(0, 12);
                 const c = item?.can_number || item?.can;
                 if (c && !docCan) docCan = String(c).trim();
+                const d = item?.dob || item?.date_of_birth;
+                if (d && !docDob) docDob = String(d).trim();
               });
             }
           });
@@ -696,10 +729,28 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             return next;
           });
 
-          setAddressDetails(prev => ({
-            from_date: addrObj.from_date || prev.from_date,
-            to_date:   prev.to_date || getTodayFormatted(), // always keep today's date, never restore old to_date
-          }));
+          const restoredFromDate =
+            addrObj.from_date ||
+            t2Obj.from_date ||
+            profileData.from_date ||
+            localStorage.getItem("tnega_residing_from") ||
+            docDob ||
+            "";
+
+          setAddressDetails(prev => {
+            const next = {
+              from_date: restoredFromDate || prev.from_date,
+              to_date:   prev.to_date || getTodayFormatted(), // always keep today's date, never restore old to_date
+            };
+            if (next.from_date) {
+              try {
+                sessionStorage.setItem("tnega_draft_address", JSON.stringify(next));
+                localStorage.setItem("tnega_draft_address", JSON.stringify(next));
+                localStorage.setItem("tnega_residing_from", next.from_date);
+              } catch (_) {}
+            }
+            return next;
+          });
 
           // 2. Restore document checklist items & Supabase URLs
           const restoredFiles = {};
@@ -741,7 +792,43 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
       return next;
     });
   };
-  const handleAddrChange = (e) => setAddressDetails({ ...addressDetails, [e.target.name]: e.target.value });
+  const saveAddressToDatabase = useCallback((addr) => {
+    if (!addr) return;
+    const userPhone =
+      sessionStorage.getItem("user_phone") ||
+      credentials?.username ||
+      credentials?.can_number ||
+      "";
+    if (!userPhone) return;
+
+    fetch(`${import.meta.env.VITE_API_BASE}/user-profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone_number: userPhone,
+        address_details: addr,
+        tab2_residency: addr,
+        from_date: addr.from_date || "",
+        to_date: addr.to_date || "",
+      }),
+    }).catch(err => console.warn("[User Memory] Auto-save address details warning:", err));
+  }, [credentials?.username, credentials?.can_number]);
+
+  const handleAddrChange = (e) => {
+    const { name, value } = e.target;
+    setAddressDetails(prev => {
+      const next = { ...prev, [name]: value };
+      try {
+        sessionStorage.setItem("tnega_draft_address", JSON.stringify(next));
+        localStorage.setItem("tnega_draft_address", JSON.stringify(next));
+        if (name === "from_date" && value) {
+          localStorage.setItem("tnega_residing_from", value);
+        }
+      } catch (_) {}
+      saveAddressToDatabase(next);
+      return next;
+    });
+  };
 
   const handleRemoveFile = (id) => {
     setUploadedFiles(p => { const u = { ...p }; delete u[id]; return u; });
@@ -761,6 +848,11 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
     setSavedProfile({});
     setCredentials({ username: "", password: "", can_number: "", aadhar_number: "" });
     try { sessionStorage.removeItem("tnega_draft_credentials"); } catch (_) {}
+    try {
+      sessionStorage.removeItem("tnega_draft_address");
+      localStorage.removeItem("tnega_draft_address");
+      localStorage.removeItem("tnega_residing_from");
+    } catch (_) {}
     setAddressDetails({ from_date: "", to_date: getTodayFormatted() });
     fetch(`${import.meta.env.VITE_DOC_API_BASE}/clear-cache`, { method: "POST" }).catch(() => {});
   };
@@ -1503,7 +1595,10 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
         step={step}
         totalSteps={STEPS.length}
         onBack={() => setStep(s => Math.max(0, s - 1))}
-        onNext={() => setStep(s => Math.min(STEPS.length - 1, s + 1))}
+        onNext={() => {
+          saveAddressToDatabase(addressDetails);
+          setStep(s => Math.min(STEPS.length - 1, s + 1));
+        }}
         onSubmit={handleProceedClick}
         onExit={onExit}
         canNext={!!canNext}
