@@ -60,10 +60,14 @@ else:
         "http://127.0.0.1:8001",
     ]
 
+# Sanitize ALLOWED_ORIGINS so '*' doesn't break allow_credentials=True in Starlette
+is_wildcard = "*" in ALLOWED_ORIGINS or ALLOWED_ORIGINS == ["*"]
+clean_origins = [o for o in ALLOWED_ORIGINS if o != "*"] if (is_wildcard and len(ALLOWED_ORIGINS) > 1) else ALLOWED_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
-    allow_credentials=True if ALLOWED_ORIGINS != ["*"] else False,
+    allow_origins=clean_origins,
+    allow_credentials=True if clean_origins != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -363,6 +367,9 @@ class ConnectionManager:
         self._connections: list[WebSocket] = []
         self.latest_response: dict = None
         self._event_queue: deque = deque()
+        self._event_history: deque = deque(maxlen=200)
+        self._event_seq: int = 0
+        self._last_poll_time: float = 0.0
         self._main_loop = None
         self.latest_captcha_b64: str = ""
 
@@ -372,7 +379,20 @@ class ConnectionManager:
 
     @property
     def is_connected(self) -> bool:
-        return bool(self._connections)
+        # Client is considered connected if a WebSocket is active OR an HTTP polling client polled within the last 20 seconds
+        return bool(self._connections) or ((time.time() - self._last_poll_time) < 20.0)
+
+    def note_poll(self):
+        self._last_poll_time = time.time()
+
+    def get_events_since(self, since_seq: int = 0) -> list[dict]:
+        self.note_poll()
+        return [e for e in self._event_history if e.get("_seq", 0) > since_seq]
+
+    def record_client_response(self, data: dict):
+        self.note_poll()
+        print(f"[Automation Input Received] {data.get('type')}: {data.get('data') if 'data' in data else 'action'}", flush=True)
+        self.latest_response = data
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -383,48 +403,56 @@ class ConnectionManager:
         ]
         self._connections.append(websocket)
         self._main_loop = _asyncio.get_running_loop()
-        print(f"[WebSocket] Client connected — total: {len(self._connections)}")
+        print(f"[WebSocket] Client connected — total: {len(self._connections)}", flush=True)
         while self._event_queue:
             await self._send_to(websocket, self._event_queue.popleft())
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self._connections:
             self._connections.remove(websocket)
-        print(f"[WebSocket] Client disconnected — total: {len(self._connections)}")
+        print(f"[WebSocket] Client disconnected — total: {len(self._connections)}", flush=True)
 
     async def _send_to(self, websocket: WebSocket, event_data: dict):
         try:
             await websocket.send_json(event_data)
         except Exception as e:
-            print(f"[WebSocket ERROR] send failed: {e}")
+            print(f"[WebSocket ERROR] send failed: {e}", flush=True)
             if websocket in self._connections:
                 self._connections.remove(websocket)
 
+    def _prepare_event(self, event_data: dict) -> dict:
+        self._event_seq += 1
+        item = dict(event_data)
+        item["_seq"] = self._event_seq
+        item["_ts"] = time.time()
+        self._event_history.append(item)
+        if item.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and item.get("image"):
+            self.latest_captcha_b64 = item["image"]
+        return item
+
     async def send_event(self, event_data: dict):
-        if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):
-            self.latest_captcha_b64 = event_data["image"]
+        item = self._prepare_event(event_data)
         if not self._connections:
-            self._event_queue.append(event_data)
+            self._event_queue.append(item)
             return
-        self._event_queue.append(event_data)
+        self._event_queue.append(item)
         await self._flush_queue()
 
     def send_event_sync(self, event_data: dict, wait_timeout: float = 120.0):
-        if event_data.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and event_data.get("image"):
-            self.latest_captcha_b64 = event_data["image"]
-        self._event_queue.append(event_data)
-        print(f"[WebSocket] Event queued: {event_data.get('type')}", flush=True)
+        item = self._prepare_event(event_data)
+        self._event_queue.append(item)
+        print(f"[Automation Event Queued] seq={item['_seq']} type={item.get('type')}", flush=True)
 
-        is_interactive = event_data.get("type") in ("REQUEST_CAPTCHA", "REQUEST_OTP", "REQUEST_SIGNED_DECLARATION")
+        is_interactive = item.get("type") in ("REQUEST_CAPTCHA", "REQUEST_OTP", "REQUEST_SIGNED_DECLARATION")
         if is_interactive:
             deadline = time.time() + wait_timeout
-            while not self._connections:
+            while not self.is_connected:
                 if time.time() > deadline:
-                    print(f"[WebSocket ERROR] No client after {wait_timeout}s", flush=True)
+                    print(f"[Automation ERROR] No client connected after {wait_timeout}s for {item.get('type')}", flush=True)
                     return
                 time.sleep(1)
-        elif not self._connections:
-            # Non-interactive status updates shouldn't block the thread if client isn't connected yet
+        elif not self.is_connected:
+            # Non-interactive status updates shouldn't block the thread if no client is listening
             return
 
         loop = self._main_loop
@@ -434,7 +462,7 @@ class ConnectionManager:
         try:
             future.result(timeout=10)
         except Exception as e:
-            print(f"[WebSocket ERROR] {e}", flush=True)
+            print(f"[Automation ERROR] {e}", flush=True)
 
     async def _flush_queue(self):
         while self._event_queue:
@@ -461,7 +489,7 @@ async def websocket_automation(websocket: WebSocket):
             if data.get("type") == "PING":
                 continue
             print(f"[WebSocket] Received: {data}")
-            manager.latest_response = data
+            manager.record_client_response(data)
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -519,8 +547,34 @@ def run_delete_saved_app_agent(payload: dict):
 
 
 @app.get("/ws/status")
+@app.get("/api/ws-status")
 def ws_status():
-    return {"connected": manager.is_connected}
+    manager.note_poll()
+    return {
+        "connected": manager.is_connected,
+        "connections": len(manager._connections),
+        "latest_seq": manager._event_seq,
+        "is_polling": bool((time.time() - manager._last_poll_time) < 20.0),
+        "queue_size": len(manager._event_queue),
+    }
+
+
+@app.get("/ws/events")
+@app.get("/api/automation-events")
+def get_automation_events(since: int = 0):
+    events = manager.get_events_since(since)
+    return {
+        "events": events,
+        "latest_seq": manager._event_seq,
+        "connected": manager.is_connected,
+    }
+
+
+@app.post("/ws/action")
+@app.post("/api/automation-action")
+async def post_automation_action(payload: dict):
+    manager.record_client_response(payload)
+    return {"status": "ok", "type": payload.get("type")}
 
 
 @app.post("/submit-application")

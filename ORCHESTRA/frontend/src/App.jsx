@@ -593,7 +593,7 @@ Just type your question in plain language and I will assist you right away.`,
   };
 
   const handleChecklistExit = () => {
-    sendWS({ type: "USER_CLOSE" });
+    sendAutomationAction({ type: "USER_CLOSE" });
     setShowChecklist(false);
     setAutomationStatus("");
   };
@@ -637,10 +637,11 @@ Just type your question in plain language and I will assist you right away.`,
     }
   };
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
+  // ── WebSocket & Fallback Polling ──────────────────────────────────────────
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
+  const lastProcessedSeqRef = useRef(0);
   const [automationEvent, setAutomationEvent]       = useState(null);
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
@@ -657,23 +658,112 @@ Just type your question in plain language and I will assist you right away.`,
   });
   const hasCompletedProcess = processCompleted || messages.some(m => m.type === "receipt_download" || m.type === "cert_download");
 
-  const openAutomationSocket = useCallback(() => new Promise((resolve, reject) => {
+  const handleAutomationMessage = useCallback((data) => {
+    if (!data) return;
+    if (data._seq) {
+      if (data._seq <= lastProcessedSeqRef.current) return;
+      lastProcessedSeqRef.current = data._seq;
+    }
+    try {
+      if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
+      else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
+      else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
+      else if (data.type === "OPEN_PAYMENT_URL") {
+        if (data.url) { window.open(data.url, "_blank"); }
+      }
+      else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
+      else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
+      else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
+      else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
+      else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); setGettingReceipt(false); setIsGenerating(false); setAutomationEvent(null); setProcessCompleted(true); try { localStorage.setItem("tnega_process_completed", "true"); } catch (_) {} setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]); }
+      else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
+      else if (data.type === "CLEANER_ERROR")               {
+        window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+        setAutomationEvent(null);
+      }
+      else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
+        window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "Saved application deleted successfully!" }));
+        setAutomationEvent(null);
+      }
+      else if (data.type === "AUTOMATION_ERROR")            {
+        window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
+        setAutomationEvent(null);
+        alert(`Automation error: ${data.message}`);
+      }
+      else                                                   { setAutomationEvent(data); }
+    } catch (err) {
+      console.error("[Automation] Error handling event:", err);
+    }
+  }, []);
+
+  const sendAutomationAction = useCallback(async (payload) => {
+    let sentViaWs = false;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify(payload));
+        sentViaWs = true;
+      } catch (err) {
+        console.warn("[WebSocket] send failed, falling back to HTTP:", err);
+      }
+    }
+    if (!sentViaWs) {
+      const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+      try {
+        await fetch(`${apiBase}/ws/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error("[Automation] Fallback action POST failed:", err);
+      }
+    }
+  }, []);
+
+  // Proactive background polling fallback to guarantee event delivery
+  // even if WebSockets are blocked by browser shields/ad-blockers
+  useEffect(() => {
+    const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+    let isMounted = true;
+    let pollTimer = null;
+
+    const pollEvents = async () => {
+      try {
+        const res = await fetch(`${apiBase}/ws/events?since=${lastProcessedSeqRef.current}`);
+        if (res.ok && isMounted) {
+          const body = await res.json();
+          if (Array.isArray(body.events) && body.events.length > 0) {
+            body.events.forEach(ev => handleAutomationMessage(ev));
+          }
+        }
+      } catch (_) {}
+      if (isMounted) {
+        pollTimer = setTimeout(pollEvents, 1000);
+      }
+    };
+
+    pollEvents();
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [handleAutomationMessage]);
+
+  const openAutomationSocket = useCallback(() => new Promise((resolve) => {
     // If already connected, resolve immediately
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       resolve();
       return;
     }
-    // If currently connecting, await completion rather than creating competing sockets
+    // If currently connecting, wait briefly or resolve (polling is active)
     if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
       const start = Date.now();
       const check = setInterval(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN || Date.now() - start > 3000) {
           clearInterval(check);
           resolve();
-        } else if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || Date.now() - start > 8000) {
-          clearInterval(check);
-          if (wsRef.current?.readyState === WebSocket.OPEN) resolve();
-          else reject(new Error("WebSocket connection timeout"));
         }
       }, 150);
       return;
@@ -684,7 +774,6 @@ Just type your question in plain language and I will assist you right away.`,
       reconnectTimerRef.current = null;
     }
 
-    // Reset attempt counter on fresh intentional connect
     reconnectAttemptsRef.current = 0;
 
     let settled = false;
@@ -694,7 +783,8 @@ Just type your question in plain language and I will assist you right away.`,
       try {
         socket = new WebSocket(`${wsBase}/ws/automation`);
       } catch (err) {
-        if (!settled) { settled = true; reject(err); }
+        console.warn("[WebSocket] Direct initialization failed, using HTTP polling fallback:", err);
+        if (!settled) { settled = true; resolve(); }
         return;
       }
 
@@ -713,32 +803,7 @@ Just type your question in plain language and I will assist you right away.`,
       socket.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if      (data.type === "STATUS_UPDATE")               { setAutomationStatus(data.message); }
-          else if (data.type === "STATUS_MESSAGE")              { setAutomationStatus(data.message); }
-          else if (data.type === "CAPTCHA_REFRESHED")           { setAutomationEvent(prev => prev ? { ...prev, image: data.image } : prev); }
-          else if (data.type === "OPEN_PAYMENT_URL") {
-            if (data.url) { window.open(data.url, "_blank"); } /* chat message suppressed intentionally */
-          }
-          else if (data.type === "SELF_DECLARATION_DOWNLOADED") { setSelfDeclarationPath(data.file_path || data.download_path); setShowSelfDeclaration(true); }
-          else if (data.type === "REQUEST_SIGNED_DECLARATION")  { setSelfDeclarationPath(data.download_path); setShowSelfDeclaration(true); }
-          else if (data.type === "REQUEST_DOCUMENT_NUMBER")     { setShowDocumentNumber(true); }
-          else if (data.type === "PAYMENT_QR")                  { setPaymentQr({ qr_image: data.qr_image, payment_url: data.payment_url }); setPaymentSuccess(null); }
-          else if (data.type === "PAYMENT_SUCCESS")             { setPaymentSuccess({ screenshot: data.screenshot, url: data.url }); setPaymentQr(null); setGettingReceipt(false); setIsGenerating(false); setAutomationEvent(null); setProcessCompleted(true); try { localStorage.setItem("tnega_process_completed", "true"); } catch (_) {} setMessages(prev => [...prev, { sender: "agent", text: "", type: "receipt_download" }]); }
-          else if (data.type === "CLEANER_STATUS")              { window.dispatchEvent(new CustomEvent("cleaner_status", { detail: data.message })); }
-          else if (data.type === "CLEANER_ERROR")               {
-            window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
-            setAutomationEvent(null);
-          }
-          else if (data.type === "SAVED_APP_DELETED" || data.type === "CLEANER_DONE") {
-            window.dispatchEvent(new CustomEvent("cleaner_done", { detail: data.message || "Saved application deleted successfully!" }));
-            setAutomationEvent(null);
-          }
-          else if (data.type === "AUTOMATION_ERROR")            {
-            window.dispatchEvent(new CustomEvent("cleaner_error", { detail: data.message }));
-            setAutomationEvent(null);
-            alert(`Automation error: ${data.message}`);
-          }
-          else                                                   { setAutomationEvent(data); }
+          handleAutomationMessage(data);
         } catch (err) {
           console.error("[WebSocket] Parse error:", err);
         }
@@ -746,10 +811,9 @@ Just type your question in plain language and I will assist you right away.`,
 
       socket.onclose = () => {
         clearInterval(ping);
-        // Only reconnect if this socket is still the active one and attempts < 5
         if (wsRef.current === socket) {
-          if (reconnectAttemptsRef.current < 5) {
-            const delay = Math.min(1500 * Math.pow(1.5, reconnectAttemptsRef.current), 8000);
+          if (reconnectAttemptsRef.current < 2) {
+            const delay = 2000;
             reconnectAttemptsRef.current += 1;
             reconnectTimerRef.current = setTimeout(() => {
               if (wsRef.current === socket) {
@@ -757,39 +821,35 @@ Just type your question in plain language and I will assist you right away.`,
               }
             }, delay);
           } else {
-            console.warn("[WebSocket] Max reconnect attempts reached. Will reconnect on next activity.");
+            console.log("[WebSocket] Active via HTTP polling fallback mode.");
           }
         }
       };
 
       socket.onerror = () => {
         clearInterval(ping);
-        if (!settled) { settled = true; reject(new Error("WebSocket connection failed")); }
+        // Do not reject promise — fallback HTTP polling is active!
+        if (!settled) { settled = true; resolve(); }
       };
 
       wsRef.current = socket;
     };
 
     connect();
-  }), []);
+  }), [handleAutomationMessage]);
 
-  // Proactively connect automation WebSocket when checklist is opened
+  // Proactively connect automation socket / ping when checklist is opened
   useEffect(() => {
     if (showChecklist) {
-      openAutomationSocket().catch(err => console.warn("[WebSocket] Checklist open auto-connect:", err));
+      openAutomationSocket();
     }
   }, [showChecklist, openAutomationSocket]);
 
-  const sendWS = (payload) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-  };
-
-  const handleAutomationSubmit      = (v) => { sendWS({ type: "USER_ANSWER", data: v }); setAutomationEvent(null); };
-  const handleAutomationAction      = (v) => { sendWS(v); };
-  const handleSelfDeclarationSubmit = (p) => { sendWS({ type: "USER_ANSWER", data: p }); setShowSelfDeclaration(false); };
-  const handleSelfDeclarationExit   = ()  => { sendWS({ type: "USER_ANSWER", data: "exit" }); setShowSelfDeclaration(false); };
-  const handleDocumentNumberSubmit  = (n) => { sendWS({ type: "USER_ANSWER", data: n }); setShowDocumentNumber(false); };
+  const handleAutomationSubmit      = (v) => { sendAutomationAction({ type: "USER_ANSWER", data: v }); setAutomationEvent(null); };
+  const handleAutomationAction      = (v) => { sendAutomationAction(v); };
+  const handleSelfDeclarationSubmit = (p) => { sendAutomationAction({ type: "USER_ANSWER", data: p }); setShowSelfDeclaration(false); };
+  const handleSelfDeclarationExit   = ()  => { sendAutomationAction({ type: "USER_ANSWER", data: "exit" }); setShowSelfDeclaration(false); };
+  const handleDocumentNumberSubmit  = (n) => { sendAutomationAction({ type: "USER_ANSWER", data: n }); setShowDocumentNumber(false); };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -1046,7 +1106,7 @@ Just type your question in plain language and I will assist you right away.`,
                   </p>
                 )}
                 <button
-                  onClick={() => { sendWS({ type: "USER_ANSWER", data: "paid" }); setGettingReceipt(true); }}
+                  onClick={() => { sendAutomationAction({ type: "USER_ANSWER", data: "paid" }); setGettingReceipt(true); }}
                   style={{
                     width: "100%", padding: "0.75rem", borderRadius: "0.6rem",
                     background: "linear-gradient(135deg, #22c55e, #16a34a)",
