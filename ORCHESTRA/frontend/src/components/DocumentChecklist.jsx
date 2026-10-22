@@ -537,7 +537,7 @@ function NavButtons({ step, totalSteps, onBack, onNext, onSubmit, onExit, canNex
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function DocumentChecklist({ _onProceed, onExit, isProceeding, onOpenSocket, automationStatus, onResetAutomationStatus }) {
+export default function DocumentChecklist({ _onProceed, onExit, isProceeding, onOpenSocket, automationStatus, onResetAutomationStatus, transportMode = "connected" }) {
   const [step, setStep] = useState(0);
   const [checkedItems, setCheckedItems]   = useState({ aadharCard: false, rationCard: false, photo: false, drivingLicense: false });
   const [expandedItem, setExpandedItem]   = useState(null);
@@ -1188,9 +1188,20 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
             {isDone ? (isError ? <LuTriangleAlert size={16} /> : <LuCheck size={16} />) : <span className="cl-spin-ring" />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 className="cl-title" key={automationStatus} style={{ animation: "status-fade 0.35s ease both" }}>
-              {automationStatus || "Starting automation…"}
-            </h3>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+              <h3 className="cl-title" key={automationStatus} style={{ animation: "status-fade 0.35s ease both", margin: 0 }}>
+                {automationStatus || "Starting automation…"}
+              </h3>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "0.35rem",
+                fontSize: "0.72rem", padding: "0.2rem 0.6rem", borderRadius: "9999px",
+                background: "rgba(34, 197, 94, 0.12)", border: "1px solid rgba(34, 197, 94, 0.3)",
+                color: "#4ade80", fontWeight: 600, letterSpacing: "0.02em"
+              }}>
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#4ade80", boxShadow: "0 0 6px #4ade80" }} />
+                Real-Time: {transportMode.toUpperCase()}
+              </span>
+            </div>
             <p className="cl-sub" style={{ marginTop: "0.2rem" }}>
               {isDone
                 ? (isError ? "Please try again or contact support." : "Payment page opened in your browser — complete your payment there.")

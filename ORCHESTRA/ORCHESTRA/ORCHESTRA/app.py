@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Optional
@@ -6,6 +6,7 @@ import os
 import re
 import time
 import sys
+import uuid
 import traceback
 import threading as _threading
 import asyncio as _asyncio
@@ -367,10 +368,12 @@ class ConnectionManager:
         self._connections: list[WebSocket] = []
         self.latest_response: dict = None
         self._event_queue: deque = deque()
-        self._event_history: deque = deque(maxlen=200)
+        self._event_history: deque = deque(maxlen=300)
         self._event_seq: int = 0
+        self._current_run_id: str = ""
         self._last_poll_time: float = 0.0
         self._main_loop = None
+        self._sse_event: Optional[_asyncio.Event] = None
         self.latest_captcha_b64: str = ""
 
     @property
@@ -379,15 +382,40 @@ class ConnectionManager:
 
     @property
     def is_connected(self) -> bool:
-        # Client is considered connected if a WebSocket is active OR an HTTP polling client polled within the last 20 seconds
-        return bool(self._connections) or ((time.time() - self._last_poll_time) < 20.0)
+        # Client is considered connected if a WebSocket is active OR an HTTP polling/SSE client polled within the last 25 seconds
+        return bool(self._connections) or ((time.time() - self._last_poll_time) < 25.0)
 
     def note_poll(self):
         self._last_poll_time = time.time()
 
-    def get_events_since(self, since_seq: int = 0) -> list[dict]:
+    def start_new_run(self) -> str:
+        self._current_run_id = str(uuid.uuid4())[:8]
+        self.latest_response = None
+        self._last_poll_time = time.time()
+        print(f"[Automation Engine] New execution run started: run_id={self._current_run_id}", flush=True)
+        self.notify_sse()
+        return self._current_run_id
+
+    def notify_sse(self):
+        if self._sse_event is not None and self._main_loop and self._main_loop.is_running():
+            try:
+                self._main_loop.call_soon_threadsafe(self._sse_event.set)
+            except Exception:
+                pass
+
+    def get_events_since(self, since_seq: int = 0, run_id: Optional[str] = None) -> list[dict]:
         self.note_poll()
-        return [e for e in self._event_history if e.get("_seq", 0) > since_seq]
+        now = time.time()
+        results = []
+        for e in self._event_history:
+            # When requesting from beginning (0), ignore old events older than 10 minutes to prevent stale replays
+            if since_seq == 0 and (now - e.get("_ts", 0) > 600):
+                continue
+            if run_id and e.get("_run_id") and e.get("_run_id") != run_id:
+                continue
+            if e.get("_seq", 0) > since_seq:
+                results.append(e)
+        return results
 
     def record_client_response(self, data: dict):
         self.note_poll()
@@ -424,10 +452,12 @@ class ConnectionManager:
         self._event_seq += 1
         item = dict(event_data)
         item["_seq"] = self._event_seq
+        item["_run_id"] = self._current_run_id
         item["_ts"] = time.time()
         self._event_history.append(item)
         if item.get("type") in ("REQUEST_CAPTCHA", "CAPTCHA_REFRESHED") and item.get("image"):
             self.latest_captcha_b64 = item["image"]
+        self.notify_sse()
         return item
 
     async def send_event(self, event_data: dict):
@@ -441,7 +471,7 @@ class ConnectionManager:
     def send_event_sync(self, event_data: dict, wait_timeout: float = 120.0):
         item = self._prepare_event(event_data)
         self._event_queue.append(item)
-        print(f"[Automation Event Queued] seq={item['_seq']} type={item.get('type')}", flush=True)
+        print(f"[Automation Event Queued] seq={item['_seq']} run={item['_run_id']} type={item.get('type')}", flush=True)
 
         is_interactive = item.get("type") in ("REQUEST_CAPTCHA", "REQUEST_OTP", "REQUEST_SIGNED_DECLARATION")
         if is_interactive:
@@ -477,6 +507,7 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def on_startup():
     manager._main_loop = _asyncio.get_running_loop()
+    manager._sse_event = _asyncio.Event()
     print("[Server Startup] Event loop registered in ConnectionManager.", flush=True)
 
 
@@ -554,20 +585,62 @@ def ws_status():
         "connected": manager.is_connected,
         "connections": len(manager._connections),
         "latest_seq": manager._event_seq,
-        "is_polling": bool((time.time() - manager._last_poll_time) < 20.0),
+        "active_run_id": manager._current_run_id,
+        "is_polling": bool((time.time() - manager._last_poll_time) < 25.0),
         "queue_size": len(manager._event_queue),
     }
 
 
 @app.get("/ws/events")
 @app.get("/api/automation-events")
-def get_automation_events(since: int = 0):
-    events = manager.get_events_since(since)
+def get_automation_events(since: int = 0, run_id: Optional[str] = None):
+    events = manager.get_events_since(since, run_id=run_id)
     return {
         "events": events,
         "latest_seq": manager._event_seq,
+        "active_run_id": manager._current_run_id,
         "connected": manager.is_connected,
     }
+
+
+@app.get("/ws/events/stream")
+@app.get("/api/automation-stream")
+async def automation_stream(request: Request, since: int = 0, run_id: Optional[str] = None):
+    """Server-Sent Events (SSE) streaming endpoint: zero-latency push, 100% immune to WebSocket blocks."""
+    manager.note_poll()
+    if manager._sse_event is None:
+        manager._sse_event = _asyncio.Event()
+
+    async def event_generator():
+        last_seq = since
+        while True:
+            if await request.is_disconnected():
+                break
+
+            manager.note_poll()
+            events = manager.get_events_since(last_seq, run_id=run_id)
+            if events:
+                for ev in events:
+                    last_seq = max(last_seq, ev.get("_seq", 0))
+                    yield f"id: {ev.get('_seq', 0)}\nevent: message\ndata: {json.dumps(ev)}\n\n"
+
+            # Wait for next event notify or 3-second heartbeat
+            try:
+                manager._sse_event.clear()
+                await _asyncio.wait_for(manager._sse_event.wait(), timeout=3.0)
+            except _asyncio.TimeoutError:
+                # SSE comment heartbeat to keep intermediate proxies/NAT active
+                yield ": heartbeat\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 @app.post("/ws/action")
@@ -577,8 +650,25 @@ async def post_automation_action(payload: dict):
     return {"status": "ok", "type": payload.get("type")}
 
 
+@app.get("/ws/diagnostic")
+@app.get("/api/ws-diagnostic")
+def ws_diagnostic():
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "is_connected": manager.is_connected,
+        "websocket_clients": len(manager._connections),
+        "total_events_dispatched": manager._event_seq,
+        "history_buffer_size": len(manager._event_history),
+        "active_run_id": manager._current_run_id,
+        "seconds_since_last_activity": round(time.time() - manager._last_poll_time, 2),
+        "supported_transports": ["WebSocket", "Server-Sent Events (SSE)", "HTTP Polling", "REST Action POST"]
+    }
+
+
 @app.post("/submit-application")
 async def submit_application(payload: dict):
+    manager.start_new_run()
     try:
         from supabase_db import save_application_payload, save_user_profile
         save_application_payload(payload)
@@ -594,6 +684,7 @@ async def submit_application(payload: dict):
 @app.post("/delete-saved-application")
 async def delete_saved_application(payload: dict = None):
     """Developer endpoint: Run automation to delete pending Saved Applications on portal."""
+    manager.start_new_run()
     payload = payload or {}
     creds = payload.get("credentials")
     if not creds:

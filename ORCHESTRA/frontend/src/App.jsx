@@ -637,11 +637,13 @@ Just type your question in plain language and I will assist you right away.`,
     }
   };
 
-  // ── WebSocket & Fallback Polling ──────────────────────────────────────────
+  // ── Tri-Transport Real-Time Engine (WebSocket -> SSE -> Polling) ──────────
   const wsRef = useRef(null);
+  const sseRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
   const lastProcessedSeqRef = useRef(0);
+  const [transportMode, setTransportMode]           = useState("connecting");
   const [automationEvent, setAutomationEvent]       = useState(null);
   const [showSelfDeclaration, setShowSelfDeclaration] = useState(false);
   const [selfDeclarationPath, setSelfDeclarationPath] = useState("");
@@ -707,6 +709,7 @@ Just type your question in plain language and I will assist you right away.`,
         console.warn("[WebSocket] send failed, falling back to HTTP:", err);
       }
     }
+    // Always dispatch via REST fallback if WebSocket is not open
     if (!sentViaWs) {
       const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
       try {
@@ -716,13 +719,49 @@ Just type your question in plain language and I will assist you right away.`,
           body: JSON.stringify(payload)
         });
       } catch (err) {
-        console.error("[Automation] Fallback action POST failed:", err);
+        console.error("[Automation] Action POST failed:", err);
       }
     }
   }, []);
 
-  // Proactive background polling fallback to guarantee event delivery
-  // even if WebSockets are blocked by browser shields/ad-blockers
+  // Server-Sent Events (SSE) connector: Zero-latency streaming, immune to WebSocket adblock blocks
+  const startSSE = useCallback(() => {
+    if (sseRef.current) return;
+    const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
+    try {
+      const es = new EventSource(`${apiBase}/ws/events/stream?since=${lastProcessedSeqRef.current}`);
+      es.onopen = () => {
+        setTransportMode("sse");
+      };
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleAutomationMessage(data);
+        } catch (_) {}
+      };
+      es.onerror = () => {
+        // Switch to polling if SSE is ever closed or rejected
+        setTransportMode("polling");
+      };
+      sseRef.current = es;
+    } catch (_) {
+      setTransportMode("polling");
+    }
+  }, [handleAutomationMessage]);
+
+  // Clean up SSE on unmount
+  useEffect(() => {
+    return () => {
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+    };
+  }, []);
+
+  // Background polling safety net:
+  // - Runs every 5s during WebSocket / SSE mode to ensure zero lost events
+  // - Runs every 1s during polling mode for immediate response
   useEffect(() => {
     const apiBase = (import.meta.env.VITE_API_BASE || "http://localhost:8001").replace(/\/$/, "");
     let isMounted = true;
@@ -739,7 +778,8 @@ Just type your question in plain language and I will assist you right away.`,
         }
       } catch (_) {}
       if (isMounted) {
-        pollTimer = setTimeout(pollEvents, 1000);
+        const delay = (transportMode === "websocket" || transportMode === "sse") ? 5000 : 1000;
+        pollTimer = setTimeout(pollEvents, delay);
       }
     };
 
@@ -749,19 +789,29 @@ Just type your question in plain language and I will assist you right away.`,
       isMounted = false;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [handleAutomationMessage]);
+  }, [handleAutomationMessage, transportMode]);
 
   const openAutomationSocket = useCallback(() => new Promise((resolve) => {
     // If already connected, resolve immediately
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setTransportMode("websocket");
       resolve();
       return;
     }
-    // If currently connecting, wait briefly or resolve (polling is active)
+
+    // If WebSockets were flagged as blocked by client browser shields in this session,
+    // skip direct WebSocket attempt and immediately use SSE to prevent console errors
+    const isWsBlocked = sessionStorage.getItem("tnega_ws_blocked") === "true";
+    if (isWsBlocked) {
+      startSSE();
+      resolve();
+      return;
+    }
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
       const start = Date.now();
       const check = setInterval(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN || Date.now() - start > 3000) {
+        if (wsRef.current?.readyState === WebSocket.OPEN || Date.now() - start > 2500) {
           clearInterval(check);
           resolve();
         }
@@ -774,8 +824,6 @@ Just type your question in plain language and I will assist you right away.`,
       reconnectTimerRef.current = null;
     }
 
-    reconnectAttemptsRef.current = 0;
-
     let settled = false;
     const connect = () => {
       const wsBase = getWsBase();
@@ -783,14 +831,16 @@ Just type your question in plain language and I will assist you right away.`,
       try {
         socket = new WebSocket(`${wsBase}/ws/automation`);
       } catch (err) {
-        console.warn("[WebSocket] Direct initialization failed, using HTTP polling fallback:", err);
+        sessionStorage.setItem("tnega_ws_blocked", "true");
+        startSSE();
         if (!settled) { settled = true; resolve(); }
         return;
       }
 
       let ping;
       socket.onopen = () => {
-        console.log("[WebSocket] Automation socket connected to:", wsBase);
+        setTransportMode("websocket");
+        sessionStorage.setItem("tnega_ws_blocked", "false");
         reconnectAttemptsRef.current = 0;
         ping = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
@@ -812,23 +862,15 @@ Just type your question in plain language and I will assist you right away.`,
       socket.onclose = () => {
         clearInterval(ping);
         if (wsRef.current === socket) {
-          if (reconnectAttemptsRef.current < 2) {
-            const delay = 2000;
-            reconnectAttemptsRef.current += 1;
-            reconnectTimerRef.current = setTimeout(() => {
-              if (wsRef.current === socket) {
-                connect();
-              }
-            }, delay);
-          } else {
-            console.log("[WebSocket] Active via HTTP polling fallback mode.");
-          }
+          // If WebSocket was unexpectedly dropped, transition seamlessly to SSE
+          startSSE();
         }
       };
 
       socket.onerror = () => {
         clearInterval(ping);
-        // Do not reject promise — fallback HTTP polling is active!
+        sessionStorage.setItem("tnega_ws_blocked", "true");
+        startSSE();
         if (!settled) { settled = true; resolve(); }
       };
 
@@ -836,7 +878,7 @@ Just type your question in plain language and I will assist you right away.`,
     };
 
     connect();
-  }), [handleAutomationMessage]);
+  }), [handleAutomationMessage, startSSE]);
 
   // Proactively connect automation socket / ping when checklist is opened
   useEffect(() => {
@@ -995,6 +1037,7 @@ Just type your question in plain language and I will assist you right away.`,
                 isProceeding={isChecklistProceeding}
                 onOpenSocket={openAutomationSocket}
                 automationStatus={automationStatus}
+                transportMode={transportMode}
                 onResetAutomationStatus={() => setAutomationStatus("")}
               />
             )}
