@@ -350,6 +350,8 @@ def fetch_user_documents(phone_number: str) -> dict:
         return mem_docs
 
 
+_KNOWN_EXISTING_BUCKETS = set()
+
 def upload_to_supabase_storage(file_bytes: bytes, filename: str, content_type: str = "application/octet-stream", bucket_name: str = "document_uploads", phone_number: str = "") -> str:
     """
     Upload a document file to Supabase Storage bucket under a user-isolated path.
@@ -363,18 +365,26 @@ def upload_to_supabase_storage(file_bytes: bytes, filename: str, content_type: s
         return ""
 
     try:
-        # Ensure bucket exists
-        bucket_check_url = f"{url}/storage/v1/bucket/{bucket_name}"
-        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
-        check_resp = requests.get(bucket_check_url, headers=headers, timeout=5)
-        if check_resp.status_code != 200:
-            # Create bucket
-            requests.post(
-                f"{url}/storage/v1/bucket",
-                headers={**headers, "Content-Type": "application/json"},
-                json={"id": bucket_name, "name": bucket_name, "public": True},
-                timeout=5
-            )
+        # Ensure bucket exists (cached in-memory to prevent redundant HTTP roundtrips on every file)
+        if bucket_name not in _KNOWN_EXISTING_BUCKETS:
+            bucket_check_url = f"{url}/storage/v1/bucket/{bucket_name}"
+            headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+            try:
+                check_resp = requests.get(bucket_check_url, headers=headers, timeout=5)
+                if check_resp.status_code == 200:
+                    _KNOWN_EXISTING_BUCKETS.add(bucket_name)
+                else:
+                    # Create bucket
+                    requests.post(
+                        f"{url}/storage/v1/bucket",
+                        headers={**headers, "Content-Type": "application/json"},
+                        json={"id": bucket_name, "name": bucket_name, "public": True},
+                        timeout=5
+                    )
+                    _KNOWN_EXISTING_BUCKETS.add(bucket_name)
+            except Exception as be:
+                print(f"[Supabase Storage] Bucket check notice: {be}")
+                _KNOWN_EXISTING_BUCKETS.add(bucket_name)
 
         # User-isolated file path
         clean_filename = requests.utils.quote(os.path.basename(filename))

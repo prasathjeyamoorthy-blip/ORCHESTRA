@@ -979,51 +979,59 @@ export default function DocumentChecklist({ _onProceed, onExit, isProceeding, on
           }
         }
 
-        // ── Zero-Knowledge Client-Side Document Encryption ────────────────────
-        let encryptedUrl = "";
-        try {
-          const { encryptDocumentBytesZK } = await import("../utils/crypto");
-          const userPhone = sessionStorage.getItem("user_phone") || "default";
-          const fileBuffer = await file.arrayBuffer();
-          const encBuffer = await encryptDocumentBytesZK(fileBuffer, userPhone);
-          const encBlob = new Blob([encBuffer], { type: "application/octet-stream" });
-          const encForm = new FormData();
-          encForm.append("file", encBlob, `${file.name}.zkenc`);
-          encForm.append("phone_number", userPhone);
-
-          const encRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/upload-encrypted-doc`, {
-            method: "POST",
-            body: encForm,
-          });
-          if (encRes.ok) {
-            const encData = await encRes.json();
-            encryptedUrl = encData.supabase_url;
-            console.log(`[ZK Storage] Uploaded encrypted binary document -> ${encryptedUrl}`);
-
-            // Register document in user's personalized Supabase registry
-            if (userPhone && encryptedUrl) {
-              fetch(`${import.meta.env.VITE_API_BASE}/api/user-documents`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  phone_number: userPhone,
-                  doc_id: id,
-                  filename: file.name,
-                  supabase_url: encryptedUrl,
-                  extracted_data: data.extracted_data || []
-                })
-              }).catch(e => console.warn("[User Memory] Error persisting doc registry:", e));
-            }
-          }
-        } catch (encErr) {
-          console.warn("[ZK Storage] Zero-Knowledge document encryption warning:", encErr);
-        }
-
+        // Update UI state immediately so citizen has instant feedback
         setUploadedFiles(p => ({ ...p, [id]: file.name }));
         setRawFiles(p => ({ ...p, [id]: file }));
-        if (encryptedUrl) setSupabaseDocUrls(p => ({ ...p, [id]: encryptedUrl }));
+        if (data.supabase_url) {
+          setSupabaseDocUrls(p => ({ ...p, [id]: data.supabase_url }));
+        }
         setCheckedItems(p => ({ ...p, [id]: true }));
         setExpandedItem(null);
+        setIsUploading(p => ({ ...p, [id]: false }));
+
+        // ── Asynchronous Non-blocking Zero-Knowledge Document Encryption ──────
+        (async () => {
+          try {
+            const { encryptDocumentBytesZK } = await import("../utils/crypto");
+            const userPhone = sessionStorage.getItem("user_phone") || "default";
+            const fileBuffer = await file.arrayBuffer();
+            const encBuffer = await encryptDocumentBytesZK(fileBuffer, userPhone);
+            const encBlob = new Blob([encBuffer], { type: "application/octet-stream" });
+            const encForm = new FormData();
+            encForm.append("file", encBlob, `${file.name}.zkenc`);
+            encForm.append("phone_number", userPhone);
+
+            const encRes = await fetch(`${import.meta.env.VITE_DOC_API_BASE}/upload-encrypted-doc`, {
+              method: "POST",
+              body: encForm,
+            });
+            if (encRes.ok) {
+              const encData = await encRes.json();
+              const encryptedUrl = encData.supabase_url;
+              if (encryptedUrl) {
+                setSupabaseDocUrls(p => ({ ...p, [id]: encryptedUrl }));
+              }
+              console.log(`[ZK Storage] Uploaded encrypted binary document -> ${encryptedUrl}`);
+
+              // Register document in user's personalized Supabase registry
+              if (userPhone && encryptedUrl) {
+                fetch(`${import.meta.env.VITE_API_BASE}/api/user-documents`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    phone_number: userPhone,
+                    doc_id: id,
+                    filename: file.name,
+                    supabase_url: encryptedUrl,
+                    extracted_data: data.extracted_data || []
+                  })
+                }).catch(e => console.warn("[User Memory] Error persisting doc registry:", e));
+              }
+            }
+          } catch (encErr) {
+            console.warn("[ZK Storage] Zero-Knowledge document encryption warning:", encErr);
+          }
+        })();
       } else {
         let detail = "";
         try { const b = await res.json(); detail = b.detail || b.message || ""; } catch (_) {}

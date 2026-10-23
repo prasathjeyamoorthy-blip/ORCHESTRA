@@ -66,10 +66,10 @@ _session.mount("http://", _adapter)
 def pil_to_base64(img):
     buffer = BytesIO()
 
-    # Preserve sharp detail for OCR/VLM extraction by allowing up to 1920x1920 at high quality
+    # Optimized image downscaling for high-speed VLM token processing (1344x1344 fits optimal 3x3 vision tiles)
     img = img.convert("RGB")
-    img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
-    img.save(buffer, format="JPEG", quality=92)
+    img.thumbnail((1344, 1344), Image.Resampling.BILINEAR)
+    img.save(buffer, format="JPEG", quality=85)
 
     return base64.b64encode(buffer.getvalue()).decode()
 
@@ -895,16 +895,21 @@ Return ONLY the JSON object. No explanation.
             if "aadhaar" in cert_type.lower():
                 w, h = page.size
                 is_full_page = (h / w) >= 1.25 if w > 0 else False
+                needs_crops = not (data.get("name") and data.get("aadhaar_number") and data.get("address") and data.get("father_name"))
 
-                if is_full_page:
-                    print(f"[Aadhaar Crop Refinement] Full-page scan detected ({w}x{h}). Running focused crop extraction...")
+                if is_full_page and needs_crops:
+                    print(f"[Aadhaar Crop Refinement] Full-page scan detected ({w}x{h}) with missing fields. Running parallel crop extraction...")
                     try:
                         top_crop = page.crop((int(w * 0.04), int(h * 0.30), int(w * 0.55), int(h * 0.58)))
                         bottom_crop = page.crop((int(w * 0.02), int(h * 0.65), int(w * 0.98), int(h * 0.95)))
                         crop_prompt = "Read ALL text printed in this image exactly, word by word, line by line. Return the exact lines."
                         
-                        top_text = run_vlm(top_crop, crop_prompt)
-                        bottom_text = run_vlm(bottom_crop, crop_prompt)
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as crop_exec:
+                            fut_top = crop_exec.submit(run_vlm, top_crop, crop_prompt)
+                            fut_bottom = crop_exec.submit(run_vlm, bottom_crop, crop_prompt)
+                            top_text = fut_top.result()
+                            bottom_text = fut_bottom.result()
                         combined_crop_text = f"{top_text}\n{bottom_text}"
                         
                         crop_det = _extract_aadhaar_from_text(combined_crop_text)
@@ -1357,7 +1362,7 @@ def extract_from_pdf(pdf_input) -> list:
             from pdf2image import convert_from_bytes
             pages = convert_from_bytes(
                 pdf_bytes,
-                dpi=200,
+                dpi=150,
                 poppler_path=config.POPPLER_PATH
             )
         except Exception as exc:

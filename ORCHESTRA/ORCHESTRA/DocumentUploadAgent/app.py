@@ -120,15 +120,19 @@ async def extract_document(file: UploadFile = File(...)):
             detail="Only PDF documents are accepted: Uploaded file is neither a valid PDF nor a recognizable image."
         )
 
-    supabase_url = ""
-    if upload_to_supabase_storage:
-        c_type = "application/pdf" if is_pdf else (file.content_type or "image/jpeg")
-        supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
-
+    c_type = "application/pdf" if is_pdf else (file.content_type or "image/jpeg")
     print(f"\n[UploadAgent] File received: {file.filename} ({len(content_bytes)} bytes)")
-    print("[UploadAgent] Running extraction in-memory...")
+    print("[UploadAgent] Running extraction and Supabase upload in parallel...")
 
-    results = extract_from_pdf(content_bytes)
+    import asyncio
+    extract_task = asyncio.to_thread(extract_from_pdf, content_bytes)
+    upload_task = asyncio.to_thread(upload_to_supabase_storage, content_bytes, file.filename, c_type) if upload_to_supabase_storage else None
+
+    if upload_task:
+        results, supabase_url = await asyncio.gather(extract_task, upload_task)
+    else:
+        results = await extract_task
+        supabase_url = ""
 
     if file.filename:
         EXTRACTED_CACHE[file.filename] = results
@@ -155,14 +159,18 @@ async def extract_document(file: UploadFile = File(...)):
 @app.post("/verify/photo")
 async def verify_photo_document(file: UploadFile = File(...)):
     content_bytes = await file.read()
-    supabase_url = ""
-    if upload_to_supabase_storage:
-        c_type = file.content_type or "image/jpeg"
-        supabase_url = upload_to_supabase_storage(content_bytes, file.filename, content_type=c_type)
-
+    c_type = file.content_type or "image/jpeg"
     print(f"\n[UploadAgent] Checking image face validation: {file.filename}")
     
-    is_human = verify_human_photograph_local(content_bytes)
+    import asyncio
+    verify_task = asyncio.to_thread(verify_human_photograph_local, content_bytes)
+    upload_task = asyncio.to_thread(upload_to_supabase_storage, content_bytes, file.filename, c_type) if upload_to_supabase_storage else None
+
+    if upload_task:
+        is_human, supabase_url = await asyncio.gather(verify_task, upload_task)
+    else:
+        is_human = await verify_task
+        supabase_url = ""
     
     return {
         "is_human_photo": is_human,

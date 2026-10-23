@@ -825,7 +825,23 @@ Just type your question in plain language and I will assist you right away.`,
     }
 
     let settled = false;
-    const connect = () => {
+    const connect = async () => {
+      // Proactively detect privacy-focused browsers like Brave that block cross-origin WebSockets by default
+      let isBrave = false;
+      try {
+        if (window.navigator?.brave && typeof window.navigator.brave.isBrave === "function") {
+          isBrave = await window.navigator.brave.isBrave();
+        }
+      } catch (_) {}
+
+      if (isBrave) {
+        console.log("[Network] Privacy shield detected (Brave Browser) — using SSE real-time stream directly.");
+        sessionStorage.setItem("tnega_ws_blocked", "true");
+        startSSE();
+        if (!settled) { settled = true; resolve(); }
+        return;
+      }
+
       const wsBase = getWsBase();
       let socket;
       try {
