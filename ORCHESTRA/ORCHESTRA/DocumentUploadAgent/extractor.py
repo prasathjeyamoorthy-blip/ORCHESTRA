@@ -113,7 +113,7 @@ def get_nvidia_keys():
 def run_vlm(image, text_prompt):
     image_b64 = pil_to_base64(image)
 
-    # NVIDIA NIM API with multi-key failover
+    # 1. NVIDIA NIM API with multi-key failover
     nvidia_keys = get_nvidia_keys()
     if nvidia_keys:
         invoke_url = config.NVIDIA_API_URL
@@ -142,7 +142,7 @@ def run_vlm(image, text_prompt):
                 ]
             }
             try:
-                res = requests.post(invoke_url, headers=headers, json=payload, timeout=60)
+                res = requests.post(invoke_url, headers=headers, json=payload, timeout=25)
                 if res.status_code == 200:
                     content = res.json()["choices"][0]["message"]["content"]
                     if content and content.strip():
@@ -152,6 +152,46 @@ def run_vlm(image, text_prompt):
                     print(f"[run_vlm] NVIDIA NIM Key #{idx+1} returned status {res.status_code}: {res.text[:150]}")
             except Exception as ne:
                 print(f"[run_vlm] NVIDIA NIM Key #{idx+1} call exception: {ne}")
+                continue
+
+    # 2. Groq Vision API failover (if Groq keys are present in environment)
+    groq_keys = get_groq_keys()
+    if groq_keys:
+        for idx, key in enumerate(groq_keys):
+            headers = {
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "llama-3.2-11b-vision-preview",
+                "temperature": 0,
+                "max_tokens": 1024,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": text_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_b64}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+            try:
+                res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=20)
+                if res.status_code == 200:
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        print(f"[run_vlm] Groq Vision VLM extraction success with Key #{idx+1}!")
+                        return content
+                else:
+                    print(f"[run_vlm] Groq Vision Key #{idx+1} status {res.status_code}: {res.text[:150]}")
+            except Exception as ge:
+                print(f"[run_vlm] Groq Vision Key #{idx+1} call exception: {ge}")
                 continue
 
     raise RuntimeError("All Groq and NVIDIA NIM VLM API keys exhausted or failed.")
@@ -1338,6 +1378,16 @@ def extract_from_pdf(pdf_input) -> list:
                 import pypdf
 
             reader = pypdf.PdfReader(BytesIO(pdf_bytes))
+            if getattr(reader, "is_encrypted", False):
+                try:
+                    reader.decrypt("")
+                except Exception:
+                    pass
+            if getattr(reader, "is_encrypted", False):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This PDF document is password-protected. Please upload an unlocked/decrypted copy."
+                )
             extracted_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             if len(extracted_text.strip()) > 50:
                 print(f"[extractor] Digital PDF text detected ({len(extracted_text)} chars). Using deterministic/text extraction.")

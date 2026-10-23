@@ -799,9 +799,9 @@ Just type your question in plain language and I will assist you right away.`,
       return;
     }
 
-    // If WebSockets were flagged as blocked by client browser shields in this session,
+    // If WebSockets were flagged as blocked by client browser shields in this session or storage,
     // skip direct WebSocket attempt and immediately use SSE to prevent console errors
-    const isWsBlocked = sessionStorage.getItem("tnega_ws_blocked") === "true";
+    const isWsBlocked = localStorage.getItem("tnega_ws_blocked") === "true" || sessionStorage.getItem("tnega_ws_blocked") === "true";
     if (isWsBlocked) {
       startSSE();
       resolve();
@@ -826,16 +826,24 @@ Just type your question in plain language and I will assist you right away.`,
 
     let settled = false;
     const connect = async () => {
-      // Proactively detect privacy-focused browsers like Brave that block cross-origin WebSockets by default
-      let isBrave = false;
+      // Proactively detect privacy-focused browsers or shields that block cross-origin WebSockets by default
+      let isShieldedBrowser = false;
       try {
         if (window.navigator?.brave && typeof window.navigator.brave.isBrave === "function") {
-          isBrave = await window.navigator.brave.isBrave();
+          isShieldedBrowser = await window.navigator.brave.isBrave();
         }
       } catch (_) {}
 
-      if (isBrave) {
-        console.log("[Network] Privacy shield detected (Brave Browser) — using SSE real-time stream directly.");
+      if (!isShieldedBrowser) {
+        const ua = navigator.userAgent || "";
+        if (ua.includes("Vivaldi") || ua.includes("TorBrowser")) {
+          isShieldedBrowser = true;
+        }
+      }
+
+      if (isShieldedBrowser) {
+        console.log("[Network] Shielded privacy browser detected — using robust SSE real-time stream directly.");
+        localStorage.setItem("tnega_ws_blocked", "true");
         sessionStorage.setItem("tnega_ws_blocked", "true");
         startSSE();
         if (!settled) { settled = true; resolve(); }
@@ -847,6 +855,7 @@ Just type your question in plain language and I will assist you right away.`,
       try {
         socket = new WebSocket(`${wsBase}/ws/automation`);
       } catch (_err) {
+        localStorage.setItem("tnega_ws_blocked", "true");
         sessionStorage.setItem("tnega_ws_blocked", "true");
         startSSE();
         if (!settled) { settled = true; resolve(); }
@@ -856,6 +865,7 @@ Just type your question in plain language and I will assist you right away.`,
       let ping;
       socket.onopen = () => {
         setTransportMode("websocket");
+        localStorage.setItem("tnega_ws_blocked", "false");
         sessionStorage.setItem("tnega_ws_blocked", "false");
         reconnectAttemptsRef.current = 0;
         ping = setInterval(() => {
@@ -885,6 +895,7 @@ Just type your question in plain language and I will assist you right away.`,
 
       socket.onerror = () => {
         clearInterval(ping);
+        localStorage.setItem("tnega_ws_blocked", "true");
         sessionStorage.setItem("tnega_ws_blocked", "true");
         startSSE();
         if (!settled) { settled = true; resolve(); }
